@@ -92,6 +92,11 @@ func upstreamConfig(z *store.ForgeDNSZone) upstream.ZoneConfig {
 		ARecordDelivery: z.ARecordDelivery,
 		QueryTypes:      upstream.NormalizeQueryTypes(strings.Split(z.QueryTypes, ",")),
 		EncryptKey:      z.EncryptKey,
+		// The advanced-override layer travels with the zone so the supervised
+		// process, the client bundle and the config editor all see the same
+		// merged result (see internal/api/forgedns_config.go).
+		OverrideTOML:       z.OverrideTOML,
+		ClientOverrideTOML: z.ClientOverrideTOML,
 	}
 }
 

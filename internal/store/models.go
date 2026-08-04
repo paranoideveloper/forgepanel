@@ -223,4 +223,17 @@ type ForgeDNSZone struct {
 	// after the first successful install so a restart can never silently pull a
 	// newer build — upgrading means clearing or changing this field (§4a).
 	PinnedTag string `json:"pinned_tag"`
+
+	// OverrideTOML / ClientOverrideTOML hold the operator's advanced-override
+	// layer as raw TOML text, stored SEPARATELY from the managed columns above
+	// so the two can be merged deterministically and so an upstream key this
+	// panel has never heard of survives an import untouched
+	// (internal/forgedns/upstream/layers.go).
+	//
+	// json:"-" because an operator can paste anything in here, including key
+	// material: these documents are returned only by the zone-config endpoint,
+	// and only with secret values masked. AutoMigrate adds them as nullable
+	// text columns, so an existing database picks them up empty.
+	OverrideTOML       string `gorm:"type:text" json:"-"`
+	ClientOverrideTOML string `gorm:"type:text" json:"-"`
 }
