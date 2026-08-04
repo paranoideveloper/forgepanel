@@ -138,6 +138,9 @@ func transportFields() map[string][]Field {
 		"grpc": {
 			{Key: "transport.service_name", Label: "Service name", Type: "text", Ph: "grpcsvc"},
 			{Key: "transport.multi_mode", Label: "Multi mode", Type: "bool"},
+			{Key: "transport.idle_timeout", Label: "Idle timeout (s)", Type: "number", Help: "gRPC health/idle timeout"},
+			{Key: "transport.initial_windows", Label: "Initial windows size", Type: "number"},
+			{Key: "transport.permit_without_stream", Label: "Permit without stream", Type: "bool"},
 		},
 		"xhttp": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},

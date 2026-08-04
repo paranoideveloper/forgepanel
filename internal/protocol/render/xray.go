@@ -217,6 +217,15 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 		ss["httpupgradeSettings"] = hu
 	case model.NetGRPC:
 		g := jobj{"serviceName": t.ServiceName, "multiMode": t.MultiMode}
+		if t.IdleTimeout > 0 {
+			g["idle_timeout"] = t.IdleTimeout
+		}
+		if t.InitialWindows > 0 {
+			g["initial_windows_size"] = t.InitialWindows
+		}
+		if t.PermitWithout {
+			g["permit_without_stream"] = true
+		}
 		ss["grpcSettings"] = g
 	case model.NetXHTTP:
 		xh := jobj{"path": firstNonEmpty(t.Path, "/"), "mode": firstNonEmpty(t.XHTTPMode, "auto")}
