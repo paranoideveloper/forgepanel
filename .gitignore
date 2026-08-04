@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/third_party/
+node_modules/
+web/dist/
+*.db
+.env

@@ -1,0 +1,190 @@
+package engine
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
+)
+
+// ClientCred is one user's credential materialised onto a shared inbound. Email
+// is the stats key (Xray reports user>>>email>>>traffic>>>up/downlink), so the
+// poller can attribute traffic per user (spec §11).
+type ClientCred struct {
+	Email    string
+	UUID     string
+	Password string
+	Flow     string
+}
+
+// InboundSpec is an inbound template plus every user permitted on it. This is
+// the correct multi-user materialisation: unlike a subscription (which stamps
+// one user's identity), the SERVED inbound must contain a client per user or
+// those users cannot authenticate.
+type InboundSpec struct {
+	Node    *model.Node
+	Clients []ClientCred
+}
+
+// BuildMulti aggregates inbound specs into engine configs, expanding each xray
+// inbound to carry one client per user and enabling per-user stats. sing-box
+// inbounds get a users array likewise. Falls back to the template's own
+// credential when an inbound has no bound users (so a bare inbound still works).
+func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) (*Bundle, error) {
+	b := &Bundle{}
+	var xin, sin, sep []any
+	statsUsed := false
+	for _, sp := range specs {
+		n := sp.Node
+		injectCert(n, certPath, keyPath)
+		if n.Tag == "" {
+			n.Tag = fmt.Sprintf("in-%d", n.Port) // ports are unique -> tags are unique
+		}
+		switch render.EngineFor(n.Protocol) {
+		case "xray":
+			in, err := render.XrayInbound(n)
+			if err != nil {
+				b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, err.Error()})
+				continue
+			}
+			if len(sp.Clients) > 0 {
+				applyXrayClients(in, n, sp.Clients)
+				statsUsed = true
+			}
+			xin = append(xin, in)
+			b.XrayN++
+		case "sing-box":
+			if render.IsSingboxEndpoint(n) { // WireGuard -> endpoints[]
+				ep, err := render.SingboxEndpoint(n)
+				if err != nil {
+					b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, err.Error()})
+					continue
+				}
+				sep = append(sep, ep)
+				b.SingboxN++
+				continue
+			}
+			ins, err := render.SingboxInbounds(n)
+			if err != nil {
+				b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, err.Error()})
+				continue
+			}
+			if len(sp.Clients) > 0 {
+				applySingboxUsers(ins[0], n, sp.Clients)
+			}
+			for _, in := range ins {
+				sin = append(sin, in)
+			}
+			b.SingboxN++
+		default:
+			b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "no supervised engine"})
+		}
+	}
+
+	xrayCfg := jobj{
+		"log":      jobj{"loglevel": "warning"},
+		"api":      jobj{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
+		"stats":    jobj{},
+		"policy":   jobj{"levels": jobj{"0": jobj{"statsUserUplink": statsUsed, "statsUserDownlink": statsUsed}}, "system": jobj{"statsInboundUplink": true, "statsInboundDownlink": true}},
+		"inbounds": append([]any{jobj{"tag": "api", "listen": "127.0.0.1", "port": xrayAPIPort, "protocol": "dokodemo-door", "settings": jobj{"address": "127.0.0.1"}}}, xin...),
+		"outbounds": []any{
+			jobj{"tag": "direct", "protocol": "freedom"},
+			jobj{"tag": "block", "protocol": "blackhole"},
+		},
+		"routing": jobj{"rules": []any{jobj{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"}}},
+	}
+	raw, err := json.MarshalIndent(xrayCfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	b.Xray = raw
+
+	singboxCfg := jobj{"log": jobj{"level": "warn"}, "inbounds": orEmpty(sin), "outbounds": []any{jobj{"type": "direct", "tag": "direct"}}}
+	if len(sep) > 0 {
+		singboxCfg["endpoints"] = sep
+	}
+	sraw, err := json.MarshalIndent(singboxCfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	b.Singbox = sraw
+	return b, nil
+}
+
+// applyXrayClients rewrites an xray inbound's settings.clients to one entry per
+// user, keyed by email for per-user stats.
+func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
+	settings, _ := in["settings"].(jobj)
+	if settings == nil {
+		return
+	}
+	var arr []any
+	for _, cl := range clients {
+		switch n.Protocol {
+		case model.ProtoVLESS:
+			e := jobj{"id": cl.UUID, "email": cl.Email}
+			if cl.Flow != "" {
+				e["flow"] = cl.Flow
+			} else if n.Flow != "" {
+				e["flow"] = n.Flow
+			}
+			arr = append(arr, e)
+		case model.ProtoVMess:
+			arr = append(arr, jobj{"id": cl.UUID, "email": cl.Email, "alterId": 0})
+		case model.ProtoTrojan:
+			arr = append(arr, jobj{"password": cl.Password, "email": cl.Email})
+		default:
+			// SS/SOCKS/HTTP are single-credential in this build; keep template.
+			return
+		}
+	}
+	if len(arr) > 0 {
+		settings["clients"] = arr
+	}
+}
+
+// applySingboxUsers rewrites a sing-box inbound's users array per user.
+func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
+	var arr []any
+	for _, cl := range clients {
+		switch n.Protocol {
+		case model.ProtoVLESS:
+			e := jobj{"uuid": cl.UUID, "name": cl.Email}
+			if cl.Flow != "" {
+				e["flow"] = cl.Flow
+			} else if n.Flow != "" {
+				e["flow"] = n.Flow
+			}
+			arr = append(arr, e)
+		case model.ProtoVMess:
+			arr = append(arr, jobj{"uuid": cl.UUID, "name": cl.Email, "alterId": 0})
+		case model.ProtoTrojan:
+			arr = append(arr, jobj{"password": cl.Password, "name": cl.Email})
+		case model.ProtoHysteria2, model.ProtoTUIC:
+			e := jobj{"password": cl.Password}
+			if cl.UUID != "" {
+				e["uuid"] = cl.UUID
+			}
+			arr = append(arr, e)
+		default:
+			return
+		}
+	}
+	if len(arr) > 0 {
+		in["users"] = arr
+	}
+}
+
+// injectCert gives a TLS/QUIC/AnyTLS inbound a server certificate if it lacks one,
+// so the inbound actually serves TLS. Imported certs (already set) are respected.
+func injectCert(n *model.Node, certPath, keyPath string) {
+	if certPath == "" {
+		return
+	}
+	needs := n.Security.Type == model.SecTLS || n.Protocol.IsQUICBased() || n.Protocol == model.ProtoAnyTLS
+	if needs && n.Security.CertificateFile == "" {
+		n.Security.CertificateFile = certPath
+		n.Security.KeyFile = keyPath
+	}
+}

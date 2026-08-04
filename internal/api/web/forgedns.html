@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ForgePanel — DNS Tunnels</title>
+<style>
+  :root{--bg:#0B0F16;--panel:#141A24;--line:rgba(255,255,255,.08);--text:rgba(255,255,255,.92);--muted:rgba(255,255,255,.70);--accent:#FF7A1A;--ok:#27D17C;--bad:#FF4D4D}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  header{padding:18px 24px;background:linear-gradient(90deg,#111a2b,#0b0f17);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  header h1{font-size:18px;margin:0;font-weight:650}header .dot{width:9px;height:9px;border-radius:50%;background:var(--bad)}header .dot.on{background:var(--ok)}
+  main{max-width:980px;margin:0 auto;padding:24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:20px}
+  h2{font-size:15px;margin:0 0 14px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  input,select,button{font:inherit;border-radius:9px;border:1px solid var(--line);background:#0e1420;color:var(--text);padding:9px 12px}
+  button{background:var(--accent);border:0;color:#1a1204;cursor:pointer;font-weight:700}button.ghost{background:#1A2230;color:var(--text)}
+  button:hover{filter:brightness(1.08)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);font-size:14px}
+  th{color:var(--muted);font-weight:600}code{background:#0e1420;padding:2px 6px;border-radius:6px;font-size:13px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}
+  .pill.on{background:rgba(51,196,129,.16);color:var(--ok)}.pill.off{background:rgba(255,92,108,.16);color:var(--bad)}
+  .muted{color:var(--muted)}.err{color:var(--bad);font-size:13px;margin-top:8px}
+  #login{max-width:360px;margin:8vh auto}
+</style>
+</head>
+<body>
+<header><span class="dot" id="listenDot"></span><h1>⚡ ForgePanel — DNS Tunnels</h1><span class="muted" id="listenTxt" style="margin-left:auto;font-size:13px"></span></header>
+<main>
+  <div class="card" id="login">
+    <h2>Sign in</h2>
+    <div class="row"><input id="u" placeholder="username" value="admin"><input id="p" type="password" placeholder="password"></div>
+    <div class="row" style="margin-top:12px"><button onclick="login()">Sign in</button></div>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <h2>Create a DNS tunnel — no terminal needed</h2>
+      <div class="row">
+        <input id="zone" placeholder="tunnel domain, e.g. t.example.com" style="flex:1;min-width:220px">
+        <select id="adapter"></select>
+        <button onclick="createZone()">Create &amp; activate</button>
+      </div>
+      <div class="muted" style="margin-top:8px;font-size:13px">Pick a wire format, enter your delegated domain, and click. The panel starts the authoritative DNS listener for you.</div>
+      <div class="err" id="createErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Tunnel zones</h2>
+      <table><thead><tr><th>Zone</th><th>Adapter</th><th>Status</th><th>Sessions</th><th></th></tr></thead>
+      <tbody id="zones"></tbody></table>
+    </div>
+
+    <div class="card" id="detail" style="display:none">
+      <h2>Setup — <span id="dZone"></span></h2>
+      <p class="muted" style="font-size:13px">Add these DNS records at your registrar to delegate the zone to this server, then import the client URI.</p>
+      <table><tbody id="nsRecs"></tbody></table>
+      <p style="margin-top:14px">Client URI: <code id="dUri"></code> <button class="ghost" onclick="copyUri()">Copy</button></p>
+    </div>
+  </div>
+</main>
+<script>
+let TOK="";
+const $=s=>document.querySelector(s);
+async function api(path,opts={}){opts.headers=Object.assign({"Authorization":"Bearer "+TOK,"Content-Type":"application/json"},opts.headers||{});const r=await fetch("/api/admin"+path,opts);if(!r.ok)throw new Error((await r.json()).error||r.status);return r.json();}
+async function login(){
+  try{
+    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("#u").value,password:$("#p").value})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error||"login failed");
+    TOK=d.access_token; $("#login").style.display="none"; $("#app").style.display="";
+    await loadAdapters(); await refresh(); setInterval(refresh,4000);
+  }catch(e){$("#loginErr").textContent=e.message;}
+}
+async function loadAdapters(){const a=await api("/forgedns/adapters");$("#adapter").innerHTML=a.map(x=>`<option>${x}</option>`).join("");}
+async function createZone(){
+  try{ $("#createErr").textContent="";
+    await api("/forgedns/zones",{method:"POST",body:JSON.stringify({zone:$("#zone").value.trim(),adapter:$("#adapter").value})});
+    $("#zone").value=""; await refresh();
+  }catch(e){$("#createErr").textContent=e.message;}
+}
+async function refresh(){
+  try{
+    const st=await api("/forgedns/status");
+    $("#listenDot").className="dot"+(st.listening?" on":""); $("#listenTxt").textContent=st.listening?("listening on "+st.addr+" · "+(st.zones||[]).length+" zone(s)"):"listener idle";
+    const zs=await api("/forgedns/zones");
+    $("#zones").innerHTML=zs.map(z=>{
+      return `<tr><td><code>${z.zone}</code></td><td>${z.adapter}</td>
+        <td><span class="pill ${z.enabled?'on':'off'}">${z.enabled?'active':'disabled'}</span></td>
+        <td id="sess-${z.id}" class="muted">—</td>
+        <td class="row" style="justify-content:flex-end">
+          <button class="ghost" onclick="detail(${z.id},'${z.zone}','${z.adapter}')">Setup</button>
+          <button class="ghost" onclick="toggle(${z.id})">${z.enabled?'Disable':'Enable'}</button>
+          <button class="ghost" onclick="del(${z.id})">Delete</button></td></tr>`;
+    }).join("")|| '<tr><td colspan=5 class="muted">No tunnels yet — create one above.</td></tr>';
+    for(const z of zs){ if(z.enabled){ try{const m=await api(`/forgedns/zones/${z.id}/sessions`); const el=$(`#sess-${z.id}`); if(el)el.textContent=(m||[]).length;}catch{} } }
+  }catch(e){/* token expiry etc */}
+}
+async function toggle(id){await api(`/forgedns/zones/${id}/toggle`,{method:"POST"});refresh();}
+async function del(id){if(confirm("Delete this tunnel zone?")){await api(`/forgedns/zones/${id}`,{method:"DELETE"});refresh();$("#detail").style.display="none";}}
+let curUri="";
+async function detail(id,zone){
+  const ip=location.hostname; const d=await api(`/forgedns/zones/${id}/client?ip=${ip}`);
+  $("#detail").style.display=""; $("#dZone").textContent=zone; curUri=d.uri; $("#dUri").textContent=d.uri;
+  $("#nsRecs").innerHTML=(d.ns_records||[]).map(r=>`<tr><td><span class="pill on">${r.type}</span></td><td><code>${r.name}</code></td><td><code>${r.value}</code></td><td class="muted">${r.note||''}</td></tr>`).join("");
+}
+function copyUri(){navigator.clipboard.writeText(curUri);}
+</script>
+</body>
+</html>
