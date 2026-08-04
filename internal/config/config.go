@@ -15,17 +15,17 @@ import (
 
 // Config is the resolved runtime configuration.
 type Config struct {
-	DataDir    string `json:"data_dir"`
-	PanelPort  int    `json:"panel_port"`
-	SubPort    int    `json:"sub_port"`
-	APIPort    int    `json:"api_port"`
-	DNSPort    int    `json:"dns_port"`
-	AdminPath  string `json:"admin_path"`  // randomized secret path, printed once
-	AdminUser  string `json:"admin_user"`
-	MasterKey  string `json:"master_key"`  // AES key material for at-rest secret encryption
-	TelegramToken string `json:"-"`
+	DataDir        string `json:"data_dir"`
+	PanelPort      int    `json:"panel_port"`
+	SubPort        int    `json:"sub_port"`
+	APIPort        int    `json:"api_port"`
+	DNSPort        int    `json:"dns_port"`
+	AdminPath      string `json:"admin_path"` // randomized secret path, printed once
+	AdminUser      string `json:"admin_user"`
+	MasterKey      string `json:"master_key"` // AES key material for at-rest secret encryption
+	TelegramToken  string `json:"-"`
 	TelegramAdmins string `json:"-"`
-	firstBoot  bool
+	firstBoot      bool
 }
 
 // envInt reads an int from the environment with a default.
@@ -55,13 +55,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	cfg := &Config{
-		DataDir:   dataDir,
-		PanelPort: envInt("FORGEPANEL_PANEL_PORT", 2053),
-		SubPort:   envInt("FORGEPANEL_SUB_PORT", 2096),
-		APIPort:   envInt("FORGEPANEL_API_PORT", 2054),
-		DNSPort:   envInt("FORGEPANEL_DNS_PORT", 53),
-		AdminUser: envStr("FORGEPANEL_ADMIN_USER", "admin"),
-		TelegramToken: envStr("FORGEPANEL_TELEGRAM_TOKEN", ""),
+		DataDir:        dataDir,
+		PanelPort:      envInt("FORGEPANEL_PANEL_PORT", 2053),
+		SubPort:        envInt("FORGEPANEL_SUB_PORT", 2096),
+		APIPort:        envInt("FORGEPANEL_API_PORT", 2054),
+		DNSPort:        envInt("FORGEPANEL_DNS_PORT", 53),
+		AdminUser:      envStr("FORGEPANEL_ADMIN_USER", "admin"),
+		TelegramToken:  envStr("FORGEPANEL_TELEGRAM_TOKEN", ""),
 		TelegramAdmins: envStr("FORGEPANEL_TELEGRAM_ADMINS", ""),
 	}
 	statePath := filepath.Join(dataDir, "secrets.json")

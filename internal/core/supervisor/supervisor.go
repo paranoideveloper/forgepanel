@@ -21,10 +21,10 @@ import (
 type State string
 
 const (
-	StateStopped  State = "stopped"
-	StateRunning  State = "running"
-	StateCrashed  State = "crashed"
-	StateInvalid  State = "invalid_config"
+	StateStopped State = "stopped"
+	StateRunning State = "running"
+	StateCrashed State = "crashed"
+	StateInvalid State = "invalid_config"
 )
 
 // EngineSpec describes how to validate and run one core.

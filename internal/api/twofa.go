@@ -27,7 +27,9 @@ func (s *Server) handle2FASetup(c *gin.Context) {
 // returning single-use recovery codes.
 func (s *Server) handle2FAEnable(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
-	var req struct{ Code string `json:"code"` }
+	var req struct {
+		Code string `json:"code"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -57,7 +59,9 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 // handle2FADisable turns off 2FA after verifying a current code.
 func (s *Server) handle2FADisable(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
-	var req struct{ Code string `json:"code"` }
+	var req struct {
+		Code string `json:"code"`
+	}
 	_ = c.ShouldBindJSON(&req)
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {

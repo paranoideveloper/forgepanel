@@ -39,8 +39,8 @@ type Store struct {
 // issuance is limited to domains approved by allow (the domain registry).
 func NewStore(cacheDir string, staging bool, allow func(domain string) bool) *Store {
 	m := &autocert.Manager{
-		Prompt:     autocert.AcceptTOS,
-		Cache:      autocert.DirCache(cacheDir),
+		Prompt: autocert.AcceptTOS,
+		Cache:  autocert.DirCache(cacheDir),
 		HostPolicy: func(_ context.Context, host string) error {
 			if allow == nil || allow(host) {
 				return nil

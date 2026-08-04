@@ -115,8 +115,8 @@ func probeInbound(t *testing.T, dir, xrayBin, sbBin string, srv *model.Node, ori
 	socks := freePort2(t)
 	client := srv.Clone()
 	client.Address = "127.0.0.1"
-	client.Security.AllowInsecure = true      // sing-box client: insecure=true
-	if pin != "" {                            // xray26 client: pin the self-signed cert
+	client.Security.AllowInsecure = true // sing-box client: insecure=true
+	if pin != "" {                       // xray26 client: pin the self-signed cert
 		client.Security.PinSHA256 = []string{pin}
 	}
 	client.Tag = "proxy"
@@ -168,8 +168,8 @@ func clientXray(n *model.Node, socks int) ([]byte, error) {
 		return nil, err
 	}
 	cfg := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
-		"inbounds": []any{map[string]any{"tag": "s", "listen": "127.0.0.1", "port": socks, "protocol": "socks", "settings": map[string]any{"udp": true}}},
+		"log":       map[string]any{"loglevel": "warning"},
+		"inbounds":  []any{map[string]any{"tag": "s", "listen": "127.0.0.1", "port": socks, "protocol": "socks", "settings": map[string]any{"udp": true}}},
 		"outbounds": []any{out},
 	}
 	return json.MarshalIndent(cfg, "", " ")

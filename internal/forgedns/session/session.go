@@ -16,8 +16,8 @@ import (
 // AIMD holds an additive-increase / multiplicative-decrease congestion window,
 // mirroring the StormDNS client's pacing in spirit (spec §5.3).
 type AIMD struct {
-	Window    int
-	Min, Max  int
+	Window   int
+	Min, Max int
 }
 
 // OnACK grows the window additively.
@@ -41,9 +41,9 @@ type Session struct {
 	created  time.Time
 	lastSeen time.Time
 
-	nextSeqIn  uint16 // next upstream seq expected (reassembly)
-	reorder    map[uint16][]byte
-	inbound    []byte // reassembled upstream bytes ready for egress
+	nextSeqIn uint16 // next upstream seq expected (reassembly)
+	reorder   map[uint16][]byte
+	inbound   []byte // reassembled upstream bytes ready for egress
 
 	outbound []byte // downstream bytes waiting to be sent to the client
 	seqOut   uint16

@@ -20,11 +20,11 @@ import (
 
 // Capabilities describes an adapter's wire limits (spec §5.2).
 type Capabilities struct {
-	Name            string
-	MaxUpstreamBytes int  // raw payload bytes carried per query
+	Name               string
+	MaxUpstreamBytes   int // raw payload bytes carried per query
 	MaxDownstreamBytes int // raw payload bytes carried per answer
-	RRTypes         []uint16
-	NeedsHandshake  bool
+	RRTypes            []uint16
+	NeedsHandshake     bool
 }
 
 // Adapter is the wire-format contract. Match decides ownership; Decode turns a

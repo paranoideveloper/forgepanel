@@ -98,14 +98,14 @@ func AllSecurityTypes() []SecurityType { return []SecurityType{SecNone, SecTLS, 
 // Shadowsocks methods. The 2022-blake3-* family requires a base64 PSK whose
 // decoded length must equal the cipher key size; see KeySizeForMethod.
 const (
-	SS2022AES128     = "2022-blake3-aes-128-gcm"
-	SS2022AES256     = "2022-blake3-aes-256-gcm"
-	SS2022ChaCha20   = "2022-blake3-chacha20-poly1305"
-	SSAES256GCM      = "aes-256-gcm"
-	SSAES128GCM      = "aes-128-gcm"
-	SSChaCha20Poly   = "chacha20-ietf-poly1305"
-	SSXChaCha20Poly  = "xchacha20-ietf-poly1305"
-	SSNone           = "none"
+	SS2022AES128    = "2022-blake3-aes-128-gcm"
+	SS2022AES256    = "2022-blake3-aes-256-gcm"
+	SS2022ChaCha20  = "2022-blake3-chacha20-poly1305"
+	SSAES256GCM     = "aes-256-gcm"
+	SSAES128GCM     = "aes-128-gcm"
+	SSChaCha20Poly  = "chacha20-ietf-poly1305"
+	SSXChaCha20Poly = "xchacha20-ietf-poly1305"
+	SSNone          = "none"
 )
 
 // AllShadowsocksMethods lists every method required by spec §3.1.
@@ -159,12 +159,12 @@ type Transport struct {
 	EDHeader  string            `json:"ed_header,omitempty"`  // early data header name
 
 	// grpc
-	ServiceName     string `json:"service_name,omitempty"`
-	MultiMode       bool   `json:"multi_mode,omitempty"`
-	IdleTimeout     int    `json:"idle_timeout,omitempty"`
-	HealthCheck     bool   `json:"health_check,omitempty"`
-	InitialWindows  int    `json:"initial_windows,omitempty"`
-	PermitWithout   bool   `json:"permit_without_stream,omitempty"`
+	ServiceName    string `json:"service_name,omitempty"`
+	MultiMode      bool   `json:"multi_mode,omitempty"`
+	IdleTimeout    int    `json:"idle_timeout,omitempty"`
+	HealthCheck    bool   `json:"health_check,omitempty"`
+	InitialWindows int    `json:"initial_windows,omitempty"`
+	PermitWithout  bool   `json:"permit_without_stream,omitempty"`
 
 	// xhttp / splithttp
 	XHTTPMode string `json:"xhttp_mode,omitempty"` // auto, packet-up, stream-up, stream-one
@@ -194,12 +194,12 @@ type Transport struct {
 
 // XMux holds xhttp multiplexing parameters.
 type XMux struct {
-	MaxConcurrency  string `json:"max_concurrency,omitempty"`
-	MaxConnections  string `json:"max_connections,omitempty"`
-	CMaxReuseTimes  string `json:"c_max_reuse_times,omitempty"`
-	CMaxLifetimeMs  string `json:"c_max_lifetime_ms,omitempty"`
-	HMaxRequestTime string `json:"h_max_request_times,omitempty"`
-	HKeepAlivePeriod int   `json:"h_keep_alive_period,omitempty"`
+	MaxConcurrency   string `json:"max_concurrency,omitempty"`
+	MaxConnections   string `json:"max_connections,omitempty"`
+	CMaxReuseTimes   string `json:"c_max_reuse_times,omitempty"`
+	CMaxLifetimeMs   string `json:"c_max_lifetime_ms,omitempty"`
+	HMaxRequestTime  string `json:"h_max_request_times,omitempty"`
+	HKeepAlivePeriod int    `json:"h_keep_alive_period,omitempty"`
 }
 
 // ECH carries Encrypted Client Hello settings. The config list is the base64
@@ -231,16 +231,16 @@ type Reality struct {
 type Security struct {
 	Type SecurityType `json:"type"`
 
-	ServerName  string   `json:"server_name,omitempty"`
-	ALPN        []string `json:"alpn,omitempty"`
-	Fingerprint string   `json:"fingerprint,omitempty"` // uTLS: chrome, firefox, safari…
-	AllowInsecure bool   `json:"allow_insecure,omitempty"`
-	MinVersion  string   `json:"min_version,omitempty"`
-	MaxVersion  string   `json:"max_version,omitempty"`
-	CipherSuites string  `json:"cipher_suites,omitempty"`
-	CertificateFile string `json:"certificate_file,omitempty"`
-	KeyFile         string `json:"key_file,omitempty"`
-	PinSHA256   []string `json:"pin_sha256,omitempty"`
+	ServerName      string   `json:"server_name,omitempty"`
+	ALPN            []string `json:"alpn,omitempty"`
+	Fingerprint     string   `json:"fingerprint,omitempty"` // uTLS: chrome, firefox, safari…
+	AllowInsecure   bool     `json:"allow_insecure,omitempty"`
+	MinVersion      string   `json:"min_version,omitempty"`
+	MaxVersion      string   `json:"max_version,omitempty"`
+	CipherSuites    string   `json:"cipher_suites,omitempty"`
+	CertificateFile string   `json:"certificate_file,omitempty"`
+	KeyFile         string   `json:"key_file,omitempty"`
+	PinSHA256       []string `json:"pin_sha256,omitempty"`
 
 	Reality *Reality `json:"reality,omitempty"`
 	ECH     *ECH     `json:"ech,omitempty"`
@@ -253,13 +253,13 @@ func ValidFingerprints() []string {
 
 // Multiplex covers both mux.cool (xray) and sing-box mux.
 type Multiplex struct {
-	Enabled     bool   `json:"enabled,omitempty"`
-	Protocol    string `json:"protocol,omitempty"` // smux, yamux, h2mux (sing-box)
-	MaxConns    int    `json:"max_connections,omitempty"`
-	MinStreams  int    `json:"min_streams,omitempty"`
-	MaxStreams  int    `json:"max_streams,omitempty"`
-	Padding     bool   `json:"padding,omitempty"`
-	Concurrency int    `json:"concurrency,omitempty"` // mux.cool
+	Enabled     bool    `json:"enabled,omitempty"`
+	Protocol    string  `json:"protocol,omitempty"` // smux, yamux, h2mux (sing-box)
+	MaxConns    int     `json:"max_connections,omitempty"`
+	MinStreams  int     `json:"min_streams,omitempty"`
+	MaxStreams  int     `json:"max_streams,omitempty"`
+	Padding     bool    `json:"padding,omitempty"`
+	Concurrency int     `json:"concurrency,omitempty"` // mux.cool
 	Brutal      *Brutal `json:"brutal,omitempty"`
 }
 
@@ -280,8 +280,8 @@ type Hysteria2Options struct {
 
 	// PortHopping is a range spec such as "20000-50000"; PortHopInterval is in
 	// seconds. Both are client-side hints encoded into the link.
-	PortHopping    string `json:"port_hopping,omitempty"`
-	PortHopInterval int   `json:"port_hop_interval,omitempty"`
+	PortHopping     string `json:"port_hopping,omitempty"`
+	PortHopInterval int    `json:"port_hop_interval,omitempty"`
 
 	IgnoreClientBandwidth bool `json:"ignore_client_bandwidth,omitempty"`
 
@@ -324,10 +324,10 @@ type TUICOptions struct {
 
 // AnyTLSOptions holds AnyTLS parameters.
 type AnyTLSOptions struct {
-	PaddingScheme          []string `json:"padding_scheme,omitempty"`
-	IdleSessionCheckInterval int    `json:"idle_session_check_interval,omitempty"`
-	IdleSessionTimeout       int    `json:"idle_session_timeout,omitempty"`
-	MinIdleSessions          int    `json:"min_idle_sessions,omitempty"`
+	PaddingScheme            []string `json:"padding_scheme,omitempty"`
+	IdleSessionCheckInterval int      `json:"idle_session_check_interval,omitempty"`
+	IdleSessionTimeout       int      `json:"idle_session_timeout,omitempty"`
+	MinIdleSessions          int      `json:"min_idle_sessions,omitempty"`
 }
 
 // WireGuardOptions holds a WireGuard SERVER inbound and the single client peer
@@ -400,14 +400,14 @@ type BrookOptions struct {
 // ForgeDNSOptions holds DNS-tunnel parameters (spec §5). Adapter selects the
 // wire format; Zone is the delegated tunnel domain.
 type ForgeDNSOptions struct {
-	Adapter     string `json:"adapter,omitempty"` // stormdns, masterdns, cottendns
-	Zone        string `json:"zone,omitempty"`
-	NSHost      string `json:"ns_host,omitempty"`
-	Key         string `json:"key,omitempty"`
-	RRType      string `json:"rrtype,omitempty"` // TXT, NULL, CNAME, A, AAAA, MX
-	MaxUpstream int    `json:"max_upstream,omitempty"`
-	MaxDownstream int  `json:"max_downstream,omitempty"`
-	EDNSBuffer  int    `json:"edns_buffer,omitempty"`
+	Adapter       string `json:"adapter,omitempty"` // stormdns, masterdns, cottendns
+	Zone          string `json:"zone,omitempty"`
+	NSHost        string `json:"ns_host,omitempty"`
+	Key           string `json:"key,omitempty"`
+	RRType        string `json:"rrtype,omitempty"` // TXT, NULL, CNAME, A, AAAA, MX
+	MaxUpstream   int    `json:"max_upstream,omitempty"`
+	MaxDownstream int    `json:"max_downstream,omitempty"`
+	EDNSBuffer    int    `json:"edns_buffer,omitempty"`
 }
 
 // SSPluginOptions holds a Shadowsocks plugin (SIP003).

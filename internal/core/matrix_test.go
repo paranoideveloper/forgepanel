@@ -8,10 +8,10 @@ import (
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
+	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
-	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 )
 
 // fullMatrix returns one node per distinct panel-creatable config variant.
@@ -31,12 +31,24 @@ func fullMatrix(t *testing.T) []*model.Node {
 	port := 20000
 	np := func() int { port++; return port }
 	tcp := model.Transport{Network: model.NetTCP}
-	ws := func() model.Transport { return model.Transport{Network: model.NetWS, Path: "/ws", Host: "forgepanel.local"} }
+	ws := func() model.Transport {
+		return model.Transport{Network: model.NetWS, Path: "/ws", Host: "forgepanel.local"}
+	}
 	grpc := func() model.Transport { return model.Transport{Network: model.NetGRPC, ServiceName: "grpcsvc"} }
-	xhttp := func() model.Transport { return model.Transport{Network: model.NetXHTTP, Path: "/xh", XHTTPMode: "auto"} }
-	hu := func() model.Transport { return model.Transport{Network: model.NetHTTPUpgrade, Path: "/hu", Host: "forgepanel.local"} }
+	xhttp := func() model.Transport {
+		return model.Transport{Network: model.NetXHTTP, Path: "/xh", XHTTPMode: "auto"}
+	}
+	hu := func() model.Transport {
+		return model.Transport{Network: model.NetHTTPUpgrade, Path: "/hu", Host: "forgepanel.local"}
+	}
 
-	mk := func(remark string, n *model.Node) *model.Node { n.Remark = remark; n.Address = "0.0.0.0"; n.Port = np(); n.Normalize(); return n }
+	mk := func(remark string, n *model.Node) *model.Node {
+		n.Remark = remark
+		n.Address = "0.0.0.0"
+		n.Port = np()
+		n.Normalize()
+		return n
+	}
 
 	return []*model.Node{
 		// VLESS
@@ -68,9 +80,9 @@ func fullMatrix(t *testing.T) []*model.Node {
 		// sing-box family
 		mk("hysteria2", &model.Node{Protocol: model.ProtoHysteria2, Password: "hy2pw",
 			Hysteria2: &model.Hysteria2Options{ObfsType: "salamander", ObfsPassword: "obfspw", UpMbps: 100, DownMbps: 100},
-			Security: model.Security{Type: model.SecTLS, ServerName: "forgepanel.local", ALPN: []string{"h3"}}}),
+			Security:  model.Security{Type: model.SecTLS, ServerName: "forgepanel.local", ALPN: []string{"h3"}}}),
 		mk("tuic-v5", &model.Node{Protocol: model.ProtoTUIC, UUID: uuid, Password: "tuicpw",
-			TUIC: &model.TUICOptions{CongestionControl: "bbr", UDPRelayMode: "native"},
+			TUIC:     &model.TUICOptions{CongestionControl: "bbr", UDPRelayMode: "native"},
 			Security: model.Security{Type: model.SecTLS, ServerName: "forgepanel.local", ALPN: []string{"h3"}}}),
 		mk("anytls", &model.Node{Protocol: model.ProtoAnyTLS, Password: "anytlspw", Security: model.Security{Type: model.SecTLS, ServerName: "forgepanel.local"}}),
 	}

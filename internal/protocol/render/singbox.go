@@ -641,7 +641,12 @@ func SingboxInbound(n *model.Node) (jobj, error) {
 }
 
 // firstInt returns v if non-zero, else def.
-func firstInt(v, def int) int { if v != 0 { return v }; return def }
+func firstInt(v, def int) int {
+	if v != 0 {
+		return v
+	}
+	return def
+}
 
 // hy2Masquerade builds the sing-box hysteria2 masquerade object (verified against
 // the pinned sing-box: proxy/file/string types). Returns nil when unset.

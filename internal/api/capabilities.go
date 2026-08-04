@@ -13,7 +13,7 @@ type TransportCap struct {
 	Name      string `json:"name"`
 	Engine    string `json:"engine"`
 	Supported bool   `json:"supported"`
-	CDN       bool   `json:"cdn"`             // frontable through a normal HTTP CDN
+	CDN       bool   `json:"cdn"`              // frontable through a normal HTTP CDN
 	Reason    string `json:"reason,omitempty"` // set when Supported=false
 }
 

@@ -70,8 +70,8 @@ func Build(nodes []*model.Node, xrayAPIPort int) (*Bundle, error) {
 	}
 
 	xrayCfg := jobj{
-		"log": jobj{"loglevel": "warning"},
-		"api": jobj{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
+		"log":   jobj{"loglevel": "warning"},
+		"api":   jobj{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
 		"stats": jobj{},
 		"inbounds": append([]any{
 			// local gRPC API listener for hot add/remove + stats (spec §6).

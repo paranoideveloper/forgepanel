@@ -16,11 +16,11 @@ import (
 type Role string
 
 const (
-	RolePanel       Role = "panel"
-	RoleSub         Role = "sub"
-	RoleInboundSNI  Role = "inbound-sni"
+	RolePanel        Role = "panel"
+	RoleSub          Role = "sub"
+	RoleInboundSNI   Role = "inbound-sni"
 	RoleForgeDNSZone Role = "forgedns-zone"
-	RoleCDNFront    Role = "cdn-front"
+	RoleCDNFront     Role = "cdn-front"
 )
 
 // Resolver is the subset of *net.Resolver the registry needs. Tests substitute

@@ -18,8 +18,8 @@ import (
 
 // ImportedInbound is one migrated inbound template plus its users.
 type ImportedInbound struct {
-	Node  *model.Node        `json:"node"`
-	Users []ImportedUser     `json:"users"`
+	Node  *model.Node    `json:"node"`
+	Users []ImportedUser `json:"users"`
 }
 
 // ImportedUser is a client lifted out of a foreign inbound.

@@ -53,12 +53,12 @@ func sampleNodes() []*model.Node {
 		{Protocol: model.ProtoHTTP, Address: "3.3.3.3", Port: 8080, Username: "u", Password: "p", Remark: "http"},
 		// Hysteria2
 		{Protocol: model.ProtoHysteria2, Address: "4.4.4.4", Port: 443, Password: "hy2pass",
-			Security: model.Security{Type: model.SecTLS, ServerName: "hy.example.com", ALPN: []string{"h3"}},
+			Security:  model.Security{Type: model.SecTLS, ServerName: "hy.example.com", ALPN: []string{"h3"}},
 			Hysteria2: &model.Hysteria2Options{ObfsType: "salamander", ObfsPassword: "obfspw", UpMbps: 100, DownMbps: 200, PortHopping: "20000-50000"}, Remark: "hy2"},
 		// TUIC
 		{Protocol: model.ProtoTUIC, Address: "6.6.6.6", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Password: "tuicpw",
 			Security: model.Security{Type: model.SecTLS, ServerName: "tuic.example.com", ALPN: []string{"h3"}},
-			TUIC: &model.TUICOptions{CongestionControl: "bbr", UDPRelayMode: "native"}, Remark: "tuic"},
+			TUIC:     &model.TUICOptions{CongestionControl: "bbr", UDPRelayMode: "native"}, Remark: "tuic"},
 		// AnyTLS
 		{Protocol: model.ProtoAnyTLS, Address: "7.7.7.7", Port: 443, Password: "anytlspw", Security: tls("any.example.com"), Remark: "anytls"},
 		// WireGuard

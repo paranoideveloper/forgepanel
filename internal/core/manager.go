@@ -27,13 +27,13 @@ type Controller struct {
 	xrayAPIPort int
 	bins        *binmgr.Manager
 
-	mu      sync.Mutex
-	xray    *supervisor.Process
-	singbox *supervisor.Process
-	brook   *BrookManager
-	porthop *porthop.Manager
+	mu             sync.Mutex
+	xray           *supervisor.Process
+	singbox        *supervisor.Process
+	brook          *BrookManager
+	porthop        *porthop.Manager
 	lastPortHopErr string
-	lastBundle *engine.Bundle
+	lastBundle     *engine.Bundle
 }
 
 // NewController builds a controller rooted at dataDir. Binaries are resolved
@@ -193,7 +193,9 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]string) {
 	cp, kp, _ := cert.EnsureSelfSigned(filepath.Join(c.dataDir, "certs"))
 	specs := make([]engine.InboundSpec, 0, len(nodes))
-	for _, n := range nodes { specs = append(specs, engine.InboundSpec{Node: n}) }
+	for _, n := range nodes {
+		specs = append(specs, engine.InboundSpec{Node: n})
+	}
 	bundle, err := engine.BuildMulti(specs, c.xrayAPIPort, cp, kp)
 	results := map[string]string{}
 	if err != nil {
@@ -243,11 +245,11 @@ func (c *Controller) PortHopStatus(listen int, spec string) map[string]any {
 	lastErr := c.lastPortHopErr
 	c.mu.Unlock()
 	out := map[string]any{
-		"backend":       string(c.porthop.Backend()),
-		"can_manage":    porthop.HasNetAdmin() && c.porthop.Backend() != porthop.BackendNone,
-		"net_admin":     porthop.HasNetAdmin(),
-		"rules":         c.porthop.Rules(),
-		"last_error":    lastErr,
+		"backend":    string(c.porthop.Backend()),
+		"can_manage": porthop.HasNetAdmin() && c.porthop.Backend() != porthop.BackendNone,
+		"net_admin":  porthop.HasNetAdmin(),
+		"rules":      c.porthop.Rules(),
+		"last_error": lastErr,
 	}
 	if !porthop.HasNetAdmin() && listen > 0 && spec != "" {
 		out["manual_commands"] = porthop.ManualCommands(c.porthop.Backend(), listen, spec)

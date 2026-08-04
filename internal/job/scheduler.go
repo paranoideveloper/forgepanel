@@ -30,7 +30,7 @@ type Scheduler struct {
 	db          *store.Store
 	pollEvery   time.Duration
 	sweepEvery  time.Duration
-	reloadHook  func()                                  // called after a mutation to reapply engine configs
+	reloadHook  func()                                     // called after a mutation to reapply engine configs
 	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
 	cancel      context.CancelFunc
 }

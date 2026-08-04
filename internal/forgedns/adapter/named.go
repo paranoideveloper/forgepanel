@@ -40,7 +40,7 @@ type variant struct {
 	down DownstreamRR
 }
 
-func (v variant) Name() string                 { return v.name }
+func (v variant) Name() string                       { return v.name }
 func (v variant) Match(zone string, m *dns.Msg) bool { return Forge{}.Match(zone, m) }
 func (v variant) Decode(zone string, m *dns.Msg) (codec.Frame, error) {
 	return Forge{}.Decode(zone, m)
