@@ -36,13 +36,17 @@ func (s *Server) handleLogin(c *gin.Context) {
 	}
 	admin, err := s.db.AdminByUsername(req.Username)
 	if err != nil || admin.Disabled {
-		if s.login != nil { s.login.Fail(ip) }
+		if s.login != nil {
+			s.login.Fail(ip)
+		}
 		c.JSON(401, gin.H{"error": "invalid credentials"})
 		return
 	}
 	ok, _ := auth.VerifyPassword(req.Password, admin.PasswordHash)
 	if !ok {
-		if s.login != nil { s.login.Fail(ip) }
+		if s.login != nil {
+			s.login.Fail(ip)
+		}
 		c.JSON(401, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -52,12 +56,16 @@ func (s *Server) handleLogin(c *gin.Context) {
 			return
 		}
 		if !auth.VerifyTOTP(admin.TOTPSecret, req.TOTP, time.Now()) {
-			if s.login != nil { s.login.Fail(ip) }
+			if s.login != nil {
+				s.login.Fail(ip)
+			}
 			c.JSON(401, gin.H{"error": "invalid 2fa code", "totp_required": true})
 			return
 		}
 	}
-	if s.login != nil { s.login.Success(ip) }
+	if s.login != nil {
+		s.login.Success(ip)
+	}
 	access, refresh, err := s.signer.Issue(admin.ID, admin.Username, string(admin.Role))
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})

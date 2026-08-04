@@ -156,6 +156,7 @@ func (s *Server) routes() {
 		// Public (studio) endpoints — stateless config generation.
 		api.GET("/protocols", s.handleProtocols)
 		api.GET("/protocols/schema", s.handleSchema)
+		api.GET("/protocols/presets", s.handlePresets)
 		api.POST("/studio/preview", s.handlePreview)
 		api.POST("/keygen", s.handleKeygen)
 		api.POST("/import", s.handleImport)

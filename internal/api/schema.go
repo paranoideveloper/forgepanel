@@ -10,22 +10,22 @@ import (
 // (e.g. "uuid", "security.reality.dest", "hysteria2.obfs_type") so the frontend
 // can render every option a protocol supports and build the node generically.
 type Field struct {
-	Key      string   `json:"key"`
-	Label    string   `json:"label"`
-	Type     string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int)
-	Options  []string `json:"options,omitempty"` // for select
-	Default  any      `json:"default,omitempty"`
-	Keygen   string   `json:"keygen,omitempty"`   // reality|uuid|shortid|ss2022|wireguard|password
-	Ph       string   `json:"placeholder,omitempty"`
-	Help     string   `json:"help,omitempty"`
+	Key     string   `json:"key"`
+	Label   string   `json:"label"`
+	Type    string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int)
+	Options []string `json:"options,omitempty"` // for select
+	Default any      `json:"default,omitempty"`
+	Keygen  string   `json:"keygen,omitempty"` // reality|uuid|shortid|ss2022|wireguard|password
+	Ph      string   `json:"placeholder,omitempty"`
+	Help    string   `json:"help,omitempty"`
 }
 
 // ProtoSchema is the complete form schema for one protocol.
 type ProtoSchema struct {
-	Proto      string  `json:"proto"`
-	Label      string  `json:"label"`
-	Engine     string  `json:"engine"`
-	Fields     []Field `json:"fields"`      // credentials + protocol options
+	Proto      string   `json:"proto"`
+	Label      string   `json:"label"`
+	Engine     string   `json:"engine"`
+	Fields     []Field  `json:"fields"`     // credentials + protocol options
 	Transports []string `json:"transports"` // empty => no transport layer
 	Securities []string `json:"securities"`
 }
@@ -41,9 +41,9 @@ func (s *Server) handleSchema(c *gin.Context) {
 	securities := []string{"none", "tls", "reality"}
 
 	c.JSON(200, gin.H{
-		"protocols":  protocolSchemas(transports, securities),
-		"transports": transportFields(),
-		"securities": securityFields(fps),
+		"protocols":    protocolSchemas(transports, securities),
+		"transports":   transportFields(),
+		"securities":   securityFields(fps),
 		"fingerprints": fps,
 	})
 }
