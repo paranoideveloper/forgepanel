@@ -157,6 +157,7 @@ func (s *Server) routes() {
 		api.GET("/protocols", s.handleProtocols)
 		api.GET("/protocols/schema", s.handleSchema)
 		api.GET("/protocols/presets", s.handlePresets)
+		api.GET("/capabilities", s.handleCapabilities)
 		api.POST("/studio/preview", s.handlePreview)
 		api.POST("/keygen", s.handleKeygen)
 		api.POST("/import", s.handleImport)
