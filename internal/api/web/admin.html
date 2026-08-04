@@ -203,6 +203,11 @@ table.tbl tbody tr:hover{background:var(--panel-2)}
 /* ---- misc ---- */
 .subhead{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);margin:22px 0 10px}
 .subhead:first-child{margin-top:0}
+.stack{display:flex;flex-direction:column}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:12.5px;font-weight:600;cursor:pointer;transition:all .12s}
+.chip:hover{border-color:var(--accent);color:var(--text)}
+.chip.hot{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border-soft);font-size:13px}
 .kv:last-child{border:none}
 .kv b{color:var(--text-dim);font-weight:600}
@@ -431,6 +436,7 @@ function fallbackCopy(txt){ try{ const ta=h('textarea',{style:{position:'fixed',
 
 /* Inline SVG icon set (no external icon font/CDN allowed). */
 const IC={
+  swap:'<path d="M7 4L3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8"/>',
   dashboard:'<path d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/>',
   inbounds:'<path d="M4 4h16v6H4zM4 14h16v6H4z"/><circle cx="8" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="1.2" fill="currentColor" stroke="none"/>',
   users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -438,6 +444,10 @@ const IC={
   nodes:'<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1" fill="currentColor" stroke="none"/>',
   certs:'<path d="M12 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M8.6 13.4 6 22l6-3 6 3-2.6-8.6"/>',
   forgedns:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>',
+  engines:'<path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3.2"/>',
+  deploy:'<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+  bolt:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  download:'<path d="M12 3v12M7 11l5 4 5-4M5 21h14"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 11 4.6h.09A2 2 0 0 1 13 4.5v.09A1.65 1.65 0 0 0 15.4 6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 11v.09"/>',
   engine:'<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   reload:'<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
@@ -464,10 +474,10 @@ function icon(name,cls){ return '<svg viewBox="0 0 24 24" fill="none" stroke="cu
 
 /* Tiny EN/FA label table for the main nav + primary buttons (RTL-ready). */
 const I18N={
-  en:{dashboard:'Dashboard',inbounds:'Inbounds',users:'Users',groups:'Groups',nodes:'Nodes',certs:'Certificates',forgedns:'ForgeDNS',settings:'Settings',
+  en:{dashboard:'Dashboard',inbounds:'Inbounds',users:'Users',groups:'Groups',nodes:'Nodes',certs:'Certificates',forgedns:'ForgeDNS',engines:'Engines',deploy:'Deploy',settings:'Settings',
     logout:'Log out',signin:'Sign in',create:'Create',cancel:'Cancel',save:'Save',del:'Delete',generate:'Generate',copy:'Copy',copied:'Copied',
     newInbound:'New inbound',newUser:'New user',newGroup:'New group',enrollNode:'Enroll node',reload:'Reload engines',import:'Import'},
-  fa:{dashboard:'داشبورد',inbounds:'ورودی‌ها',users:'کاربران',groups:'گروه‌ها',nodes:'نودها',certs:'گواهی‌ها',forgedns:'فورج‌دی‌ان‌اس',settings:'تنظیمات',
+  fa:{dashboard:'داشبورد',inbounds:'ورودی‌ها',users:'کاربران',groups:'گروه‌ها',nodes:'نودها',certs:'گواهی‌ها',forgedns:'فورج‌دی‌ان‌اس',engines:'موتورها',deploy:'استقرار',settings:'تنظیمات',
     logout:'خروج',signin:'ورود',create:'ایجاد',cancel:'انصراف',save:'ذخیره',del:'حذف',generate:'تولید',copy:'کپی',copied:'کپی شد',
     newInbound:'ورودی جدید',newUser:'کاربر جدید',newGroup:'گروه جدید',enrollNode:'افزودن نود',reload:'بارگذاری موتورها',import:'وارد کردن'}
 };
@@ -576,7 +586,7 @@ function showQR(title,value,extra){ const box=h('div');
    --------------------------------------------------------------------------- */
 const NAV=[
   ['dashboard','dashboard'],['inbounds','inbounds'],['users','users'],['groups','groups'],
-  ['nodes','nodes'],['certs','certs'],['forgedns','forgedns'],['settings','settings']];
+  ['nodes','nodes'],['certs','certs'],['forgedns','forgedns'],['engines','engines'],['deploy','deploy'],['settings','settings']];
 const VIEWS={}; // filled by each view module: VIEWS[name] = async (content)=>{}
 
 function applyTheme(){ document.documentElement.setAttribute('data-theme',state.theme); }
@@ -793,6 +803,7 @@ VIEWS.inbounds=async function(content){
   if(!state.schema){ try{ state.schema=await api('/api/protocols/schema'); }catch(e){ state.schema=null; } }
   const head=h('div',{class:'section-head'},[h('h3',{text:t('inbounds')}),h('div',{class:'spacer'}),
     h('button',{class:'btn',html:icon('copy')+'<span>'+esc(t('import'))+'</span>',onClick:openImport}),
+    h('button',{class:'btn',html:icon('bolt')+'<span>From preset</span>',onClick:()=>openPresetPicker(load)}),
     h('button',{class:'btn primary',html:icon('plus')+'<span>'+esc(t('newInbound'))+'</span>',onClick:()=>openInboundModal(load)})]);
   const tableWrap=h('div',{class:'table-wrap'});
   content.appendChild(head); content.appendChild(tableWrap);
@@ -813,6 +824,7 @@ VIEWS.inbounds=async function(content){
       const act=h('td');
       act.appendChild(h('div',{class:'t-actions'},[
         h('button',{class:'btn sm ghost',html:icon('qr'),title:'Client preview',onClick:()=>previewInbound(r)}),
+        h('button',{class:'btn sm ghost',html:icon('swap'),title:'Switch protocol',onClick:()=>switchProtocolModal(r,load)}),
         h('button',{class:'btn sm danger',html:icon('trash'),onClick:async()=>{ if(await confirmDialog('Delete inbound "'+(r.remark||r.id)+'"? Active users on it will stop connecting.')){
           try{ await api('/api/admin/inbounds/'+r.id,{method:'DELETE'}); toast('Inbound deleted','success'); load(); }catch(e){ toast(e.message,'error'); } } }})]));
       tr.appendChild(act); tb.appendChild(tr);
@@ -859,6 +871,64 @@ function findingsEl(errors){ const wrap=h('div',{class:'findings'});
    path into the node JSON we POST, and it survives protocol/transport switches
    so nothing typed is lost while exploring. A `seed` node prefills the form
    (edit / clone); create passes none. */
+// Protocol-switch: preview what converting an existing inbound to another
+// protocol keeps / resets / regenerates, then (if the result validates) seed a
+// new-inbound form with it. The original inbound is never mutated — the backend
+// has no in-place edit, and a silent delete+recreate would drop live users.
+const SWITCH_ENGINE={vless:'xray',vmess:'xray',trojan:'xray',shadowsocks:'xray',socks:'xray',http:'xray',
+  hysteria2:'sing-box',tuic:'sing-box',anytls:'sing-box',shadowtls:'sing-box',wireguard:'sing-box',ssh:'sing-box',brook:'brook'};
+async function switchProtocolModal(r,onSaved){
+  const node=r.node||{}; const cur=(r.protocol||node.protocol||'').toLowerCase();
+  const protos=['vless','vmess','trojan','shadowsocks','socks','http','hysteria2','tuic','anytls','shadowtls','wireguard','brook'];
+  const opts=protos.filter(p=>p!==cur).map(p=>[p,p.toUpperCase()]);
+  const targetSel=sel('sw-target',opts,opts[0]&&opts[0][0]);
+  const out=h('div',{style:{marginTop:'12px'}});
+  let previewNode=null, ok=false;
+  function fieldList(title,arr,color){
+    if(!arr||!arr.length) return null;
+    return h('div',{style:{marginTop:'10px'}},[h('div',{class:'subhead',style:{margin:'0 0 6px'},html:esc(title)+' '+pill(color,String(arr.length))}),
+      h('div',{class:'stack'},arr.map(fc=>h('div',{class:'kv'},[h('span',{class:'t-mono',text:fc.field}),h('span',{class:'hint',text:fc.why||fc.value||''})])))]);
+  }
+  function renderSummary(el,resp){
+    clear(el); const s=resp.summary||{};
+    el.appendChild(h('div',{class:'hint',html:pill('blue',(s.from_protocol||cur).toUpperCase())+' → '+pill('blue',(s.to_protocol||'').toUpperCase())
+      +' &nbsp; '+(s.engine_changed?pill('amber','engine '+esc(s.from_engine)+' → '+esc(s.to_engine)):pill('grey','same engine · '+esc(s.to_engine||'')))
+      +' &nbsp; '+(resp.valid?pill('green','valid'):pill('red','invalid'))}));
+    if(!resp.valid&&resp.error) el.appendChild(h('div',{class:'hint',style:{color:'var(--danger,#e5484d)'},text:resp.error}));
+    (s.warnings||[]).forEach(w=>el.appendChild(h('div',{class:'hint',html:pill('amber','warning')+' '+esc(w)})));
+    [fieldList('Retained',s.retained,'green'),fieldList('Reset (cleared)',s.reset,'grey'),fieldList('Regenerated',s.regenerated,'blue')].forEach(x=>{ if(x) el.appendChild(x); });
+    if((s.required_ports||[]).length) el.appendChild(h('div',{style:{marginTop:'10px'}},[h('div',{class:'subhead',style:{margin:'0 0 6px'},text:'Required ports'}),
+      h('div',{class:'stack'},s.required_ports.map(p=>h('div',{class:'kv'},[h('span',{class:'t-mono',text:(p.proto||'').toUpperCase()+' '+(p.range||p.port||'')}),h('span',{class:'hint',text:p.note||''})])))]));
+  }
+  async function doPreview(){
+    clear(out); out.appendChild(loadingEl('Previewing switch…')); ok=false; previewNode=null;
+    try{ const resp=await api('/api/protocols/switch/preview',{method:'POST',body:{node:node,target_protocol:targetSel.value}});
+      renderSummary(out,resp); previewNode=resp.node; ok=!!resp.valid;
+    }catch(e){ clear(out); out.appendChild(h('div',{class:'hint',text:e.message})); }
+  }
+  targetSel.addEventListener('change',doPreview);
+  const body=h('div',{},[
+    h('div',{class:'hint',html:'Current: '+pill('blue',cur.toUpperCase())+' · engine '+esc(SWITCH_ENGINE[cur]||'?')
+      +'. Applying opens a new-inbound form seeded with the converted node — the original stays until you delete it.'}),
+    field('Switch to',targetSel), out]);
+  const m=modal({title:'Switch protocol · '+(r.remark||cur),wide:true,body,okText:'Create switched inbound',onOk:()=>{
+    if(!ok||!previewNode){ toast('Pick a target that produces a valid config','error'); return false; }
+    m.close(); openInboundModal(onSaved,previewNode); return false;
+  }});
+  doPreview();
+}
+async function openPresetPicker(onSaved){
+  let presets=[];
+  try{ presets=((await api('/api/protocols/presets'))||{}).presets||[]; }catch(e){ toast(e.message,'error'); return; }
+  const body=h('div');
+  presets.forEach(p=>{
+    body.appendChild(h('div',{class:'card pad',style:{marginBottom:'8px',cursor:'pointer'},onClick:()=>{ m.close(); openInboundModal(onSaved,p.node); }},[
+      h('div',{class:'section-head',style:{marginBottom:'4px'}},[h('b',{text:p.name}),h('div',{class:'spacer'}),
+        h('div',{html:pill('blue',p.engine)+(p.cdn?' '+pill('green','CDN'):'')})]),
+      h('div',{class:'hint',text:p.description})]));
+  });
+  const m=modal({title:'Start from a preset',wide:true,body,hideFooter:true});
+}
 function openInboundModal(onSaved,seed){
   const schema=state.schema||{};
   const protos=schema.protocols||[];
@@ -1284,6 +1354,7 @@ VIEWS.forgedns=async function(content){
           +' <span class="badge-count" title="live sessions">'+(counts[z.id]||0)+' sessions</span>'}),
         h('div',{class:'spacer'}),
         h('button',{class:'btn sm',text:z.enabled?'Deactivate':'Activate',onClick:async()=>{ try{ await api('/api/admin/forgedns/zones/'+z.id+'/toggle',{method:'POST'}); refresh(); }catch(e){ toast(e.message,'error'); } }}),
+        (z.adapter&&z.adapter!=='forge')?h('button',{class:'btn sm',html:icon('settings')+'<span>Advanced</span>',onClick:()=>openForgeDNSConfig(z.id,z.zone,z.adapter)}):null,
         h('button',{class:'btn sm danger',html:icon('trash'),onClick:async()=>{ if(await confirmDialog('Delete zone "'+z.zone+'"?')){ try{ await api('/api/admin/forgedns/zones/'+z.id,{method:'DELETE'}); toast('Zone deleted','success'); refresh(); }catch(e){ toast(e.message,'error'); } } }})]);
       row.appendChild(headRow);
       // setup expander (lazy-loads client config + NS records)
@@ -1310,6 +1381,116 @@ VIEWS.forgedns=async function(content){
   await refresh();
   poll(refresh,5000);
 };
+
+/* ForgeDNS advanced-TOML editor: shows the effective (merged, secrets-masked)
+   server/client config, lets the operator save an advanced override, and import
+   an existing TOML — unknown keys are preserved by the backend. */
+async function openForgeDNSConfig(id,zone,adapter){
+  let cfg={};
+  try{ cfg=await api('/api/admin/forgedns/zones/'+id+'/config'); }catch(e){ toast(e.message,'error'); return; }
+  const srv=cfg.server||{}, cli=cfg.client||{};
+  const unk=(srv.unknown_keys||[]).length;
+  const body=h('div');
+  body.appendChild(h('div',{class:'hint',style:{marginBottom:'10px'},html:'Zone <b>'+esc(zone)+'</b> · adapter '+pill('blue',adapter||cfg.adapter||'')
+    +' · CONFIG_VERSION '+esc(String(cfg.config_version||''))
+    +(unk?' · '+pill('amber',unk+' unknown key'+(unk>1?'s':'')+' preserved'):'')
+    +'. Secrets are masked ('+esc(cfg.masked_value||'********')+') — leave them masked to keep the stored value.'}));
+  const effServer=h('textarea',{class:'input mono',rows:8,readonly:true}); effServer.value=srv.toml||'';
+  const effClient=h('textarea',{class:'input mono',rows:6,readonly:true}); effClient.value=cli.toml||'';
+  const override=h('textarea',{class:'input mono',rows:6,placeholder:'# advanced override — TOML keys to add/replace on top of the managed config\n# unknown keys are preserved'});
+  override.value=srv.override_toml||'';
+  const importBox=h('textarea',{class:'input mono',rows:5,placeholder:'# paste an existing server_config.toml to import (unknown keys preserved)'});
+  body.appendChild(h('div',{class:'subhead',text:'Effective server config (read-only)'})); body.appendChild(effServer);
+  body.appendChild(h('div',{class:'subhead',text:'Effective client config (read-only)'})); body.appendChild(effClient);
+  body.appendChild(h('div',{class:'subhead',text:'Advanced server override (editable)'})); body.appendChild(override);
+  body.appendChild(h('div',{style:{display:'flex',gap:'8px',marginTop:'8px'}},[
+    h('button',{class:'btn primary',html:icon('check')+'<span>Save override</span>',onClick:save})]));
+  body.appendChild(h('div',{class:'subhead',style:{marginTop:'14px'},text:'Import a server TOML'})); body.appendChild(importBox);
+  body.appendChild(h('div',{style:{marginTop:'8px'}},[h('button',{class:'btn',html:icon('copy')+'<span>Import (preserve unknown keys)</span>',onClick:doImport})]));
+  const m=modal({title:'ForgeDNS advanced config',wide:true,body,hideFooter:true});
+  async function save(){
+    try{ await api('/api/admin/forgedns/zones/'+id+'/config',{method:'PUT',body:{scope:'server',toml:override.value}});
+      toast('Override saved & validated','success'); m.close(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+  async function doImport(){
+    if(!importBox.value.trim()){ toast('Paste a TOML first','error'); return; }
+    try{ const r=await api('/api/admin/forgedns/zones/'+id+'/config/import',{method:'POST',body:{scope:'server',toml:importBox.value,apply:true}});
+      toast('Imported — unknown keys preserved','success'); override.value=(r&&r.override_toml)||override.value; }
+    catch(e){ toast(e.message,'error'); }
+  }
+}
+
+/* ===== Engines ===== */
+VIEWS.engines=async function(content){
+  clear(content);
+  content.appendChild(h('div',{class:'section-head'},[h('h3',{text:'Proxy engines'}),h('div',{class:'spacer'}),
+    h('button',{class:'btn',html:icon('reload')+'<span>Reload engines</span>',onClick:async()=>{ try{ await api('/api/admin/engines/reload',{method:'POST'}); toast('Engines reloaded','success'); VIEWS.engines(content); }catch(e){ toast(e.message,'error'); } }})]));
+  const grid=h('div',{class:'tiles'}); content.appendChild(grid);
+  const capBox=h('div',{class:'card pad',style:{marginTop:'8px'}}); content.appendChild(capBox);
+  let caps={engines:{},transports:[],quic:{}}, states=[];
+  try{ [caps,states]=await Promise.all([api('/api/capabilities'),api('/api/admin/engines').catch(()=>[])]); }catch(e){ if(e.status===401) return; }
+  const stMap={}; (states||[]).forEach(s=>stMap[s.engine]=s);
+  const engs=[['xray','xray','VLESS · VMess · Trojan · Shadowsocks · SOCKS · HTTP'],
+    ['sing-box','sing-box','Hysteria2 · TUIC · AnyTLS · ShadowTLS · WireGuard'],
+    ['brook','brook','Brook (all modes)']];
+  engs.forEach(([key,label,protos])=>{
+    const st=stMap[key]; const running=st&&st.state==='running';
+    grid.appendChild(h('div',{class:'tile'},[
+      h('div',{class:'ic',html:icon('engines')}),
+      h('div',{class:'lbl',text:label}),
+      h('div',{class:'val',style:{fontSize:'19px'},html:(running?pill('green','running'):pill('grey',st?st.state:'stopped'))}),
+      h('div',{class:'sub',text:'pinned '+(caps.engines[key]||'?')}),
+      h('div',{class:'sub',style:{marginTop:'4px'},text:protos})
+    ]));
+  });
+  // transport capability matrix
+  clear(capBox);
+  capBox.appendChild(h('div',{class:'subhead',text:'Transport support (pinned Xray '+(caps.engines.xray||'')+')'}));
+  const tbl=h('table',{class:'tbl'}); tbl.appendChild(h('thead',{html:'<tr><th>Transport</th><th>Status</th><th>CDN</th><th>Note</th></tr>'}));
+  const tb=h('tbody'); (caps.transports||[]).forEach(tr=>{
+    tb.appendChild(h('tr',{html:'<td class="proto">'+esc(tr.name)+'</td><td>'+(tr.supported?pill('green','supported'):pill('red','removed'))
+      +'</td><td>'+(tr.cdn?pill('blue','CDN-ok'):'<span class="hint">—</span>')+'</td><td class="hint">'+esc(tr.reason||'')+'</td>'}));
+  });
+  tbl.appendChild(tb); capBox.appendChild(h('div',{class:'table-wrap'},[tbl]));
+  // QUIC
+  const q=caps.quic||{}; const native=(q.native||[]).map(x=>x.protocol).join(', ');
+  capBox.appendChild(h('div',{class:'subhead',style:{marginTop:'14px'},text:'QUIC'}));
+  capBox.appendChild(h('div',{class:'hint',html:'Native QUIC via <b>'+esc(native)+'</b>. Legacy Xray QUIC transport: '
+    +pill('red','removed')+' '+esc((q.legacy_xray_transport||{}).reason||'')}));
+};
+
+/* ===== Deploy (Docker Compose generator) ===== */
+VIEWS.deploy=async function(content){
+  clear(content);
+  content.appendChild(h('div',{class:'section-head'},[h('h3',{text:'Docker Compose generator'}),h('div',{class:'spacer'})]));
+  content.appendChild(h('div',{class:'card pad',style:{marginBottom:'14px'}},[
+    h('div',{class:'hint',text:'Optional. Generate a compose file for the engine profiles you want. No privileged mode, no docker socket — NET_ADMIN is granted only to the Hysteria2 port-hopping profile.'})]));
+  const profiles=['xray','singbox','brook','stormdns','masterdns','cottendns','hysteria-porthop'];
+  const chosen=new Set(['xray','singbox']);
+  const chips=h('div',{class:'chips'});
+  profiles.forEach(p=>{ const b=h('button',{class:'chip'+(chosen.has(p)?' hot':''),text:p,onClick:()=>{ chosen.has(p)?chosen.delete(p):chosen.add(p); b.className='chip'+(chosen.has(p)?' hot':''); }}); chips.appendChild(b); });
+  const out=h('div',{class:'code',style:{whiteSpace:'pre',maxHeight:'420px',overflow:'auto',marginTop:'12px'},text:'# choose profiles and click Generate'});
+  const genBtn=h('button',{class:'btn primary',html:icon('bolt')+'<span>Generate</span>',onClick:gen});
+  content.appendChild(h('div',{class:'card pad'},[
+    h('div',{class:'subhead',text:'Engine profiles'}),chips,
+    h('div',{style:{display:'flex',gap:'8px',marginTop:'12px'}},[genBtn]),
+    out]));
+  async function gen(){
+    if(!chosen.size){ toast('Pick at least one profile','error'); return; }
+    genBtn.disabled=true;
+    try{ const r=await api('/api/deploy/compose?profiles='+[...chosen].join(','));
+      const yaml=(typeof r==='string')?r:(r.compose||r.yaml||JSON.stringify(r,null,2));
+      out.textContent=yaml;
+      const bar=h('div',{style:{display:'flex',gap:'8px',marginTop:'10px'}},[copyBtn(yaml),
+        h('button',{class:'btn sm',html:icon('download')+'<span>Download</span>',onClick:()=>download('docker-compose.yml',yaml)})]);
+      if(out.nextSibling) out.parentNode.removeChild(out.nextSibling);
+      out.parentNode.appendChild(bar);
+    }catch(e){ toast(e.message,'error'); }
+    finally{ genBtn.disabled=false; }
+  }
+};
+function download(name,text){ const a=document.createElement('a'); a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(text); a.download=name; a.click(); }
 
 /* ===== Settings ===== */
 VIEWS.settings=async function(content){
