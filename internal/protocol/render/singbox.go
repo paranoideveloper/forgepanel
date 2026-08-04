@@ -570,6 +570,13 @@ func SingboxInbound(n *model.Node) (jobj, error) {
 			if h.ObfsType != "" {
 				in["obfs"] = jobj{"type": h.ObfsType, "password": h.ObfsPassword}
 			}
+			if h.IgnoreClientBandwidth {
+				in["ignore_client_bandwidth"] = true
+			}
+			if m := hy2Masquerade(h); m != nil {
+				in["masquerade"] = m
+			}
+			// NB: brutal_cc is NOT a sing-box field and is never emitted.
 		}
 	case model.ProtoTUIC:
 		in["type"] = "tuic"
@@ -635,6 +642,34 @@ func SingboxInbound(n *model.Node) (jobj, error) {
 
 // firstInt returns v if non-zero, else def.
 func firstInt(v, def int) int { if v != 0 { return v }; return def }
+
+// hy2Masquerade builds the sing-box hysteria2 masquerade object (verified against
+// the pinned sing-box: proxy/file/string types). Returns nil when unset.
+func hy2Masquerade(h *model.Hysteria2Options) jobj {
+	m := h.Masquerade
+	if m == nil || m.Type == "" {
+		return nil
+	}
+	out := jobj{"type": m.Type}
+	switch m.Type {
+	case "proxy":
+		out["url"] = m.URL
+		if m.RewriteHost {
+			out["rewrite_host"] = true
+		}
+	case "file":
+		out["directory"] = m.Directory
+	case "string":
+		if m.StatusCode > 0 {
+			out["status_code"] = m.StatusCode
+		}
+		if len(m.Headers) > 0 {
+			out["headers"] = m.Headers
+		}
+		out["content"] = m.Content
+	}
+	return out
+}
 
 // stlsInnerTag / stlsInnerPort name the loopback Shadowsocks inbound that a
 // ShadowTLS inbound detours to. The inner port is loopback-only, so it just has

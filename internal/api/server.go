@@ -171,6 +171,7 @@ func (s *Server) routes() {
 			admin.GET("/inbounds", s.handleListInbounds)
 			admin.POST("/inbounds", s.handleCreateInbound)
 			admin.GET("/inbounds/:id/config", s.handleInboundConfig)
+			admin.GET("/inbounds/:id/porthop", s.handlePortHop)
 			admin.DELETE("/inbounds/:id", s.handleDeleteInbound)
 			admin.GET("/groups", s.handleListGroups)
 			admin.POST("/groups", s.handleCreateGroup)

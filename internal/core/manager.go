@@ -16,6 +16,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
+	"github.com/forgepanel/forgepanel/internal/core/porthop"
 	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -30,6 +31,8 @@ type Controller struct {
 	xray    *supervisor.Process
 	singbox *supervisor.Process
 	brook   *BrookManager
+	porthop *porthop.Manager
+	lastPortHopErr string
 	lastBundle *engine.Bundle
 }
 
@@ -42,7 +45,7 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	// bind ("address already in use"). Safe at startup — none of our engines are
 	// running yet, so anything under our bin dir is a stray.
 	reapStrayEngines(bins.BinDir)
-	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins)}
+	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins), porthop: porthop.New()}
 }
 
 // reapStrayEngines SIGKILLs any process whose executable lives under binDir.
@@ -167,6 +170,21 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 	if err := c.brook.Sync(brookNodes, cp, kp); err != nil {
 		return bundle, err
 	}
+
+	// Hysteria2 port-hopping: install/refresh the UDP-range firewall redirects for
+	// every hy2 inbound that requested one, and tear down rules for those removed.
+	// Best-effort — a missing CAP_NET_ADMIN surfaces via PortHopStatus, not a reload
+	// failure (the inbound still serves on its base port).
+	want := map[int]string{}
+	for _, sp := range specs {
+		if sp.Node.Protocol == model.ProtoHysteria2 && sp.Node.Hysteria2 != nil && sp.Node.Hysteria2.PortHopping != "" {
+			want[sp.Node.Port] = sp.Node.Hysteria2.PortHopping
+		}
+	}
+	c.lastPortHopErr = ""
+	if err := c.porthop.Sync(want); err != nil {
+		c.lastPortHopErr = err.Error()
+	}
 	return bundle, nil
 }
 
@@ -213,6 +231,27 @@ func (c *Controller) Status() []supervisor.Status {
 		out = append(out, c.singbox.Status())
 	}
 	_ = c.brook // brook status is a separate shape; surfaced via BrookStatus()
+	return out
+}
+
+// PortHopStatus reports the port-hopping firewall backend, whether the panel can
+// manage rules, the effective rules, the last sync error, and (when it lacks
+// permission) the manual commands for the given listener/spec — for the UI and
+// Config Doctor. A zero listen/empty spec omits the manual commands.
+func (c *Controller) PortHopStatus(listen int, spec string) map[string]any {
+	c.mu.Lock()
+	lastErr := c.lastPortHopErr
+	c.mu.Unlock()
+	out := map[string]any{
+		"backend":       string(c.porthop.Backend()),
+		"can_manage":    porthop.HasNetAdmin() && c.porthop.Backend() != porthop.BackendNone,
+		"net_admin":     porthop.HasNetAdmin(),
+		"rules":         c.porthop.Rules(),
+		"last_error":    lastErr,
+	}
+	if !porthop.HasNetAdmin() && listen > 0 && spec != "" {
+		out["manual_commands"] = porthop.ManualCommands(c.porthop.Backend(), listen, spec)
+	}
 	return out
 }
 

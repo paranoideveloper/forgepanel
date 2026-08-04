@@ -143,6 +143,39 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 // handleInboundConfig returns the ready-to-use CLIENT config for one inbound with
 // the public address substituted: a wg-quick .conf for WireGuard, otherwise the
 // share URI. This is what the UI hands the user to connect.
+// handlePortHop reports the Hysteria2 port-hopping firewall status for one
+// inbound: the backend (nftables/iptables/none), whether the panel can manage
+// rules, the effective rules, and — when it lacks CAP_NET_ADMIN — the copyable
+// manual commands the operator can run themselves.
+func (s *Server) handlePortHop(c *gin.Context) {
+	if s.engine == nil {
+		c.JSON(501, gin.H{"error": "engine not available"})
+		return
+	}
+	id := parseID(c)
+	ins, err := s.db.ListInbounds()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	var n *model.Node
+	for i := range ins {
+		if ins[i].ID == id {
+			n, _ = ins[i].Node()
+			break
+		}
+	}
+	if n == nil {
+		c.JSON(404, gin.H{"error": "inbound not found"})
+		return
+	}
+	spec := ""
+	if n.Protocol == model.ProtoHysteria2 && n.Hysteria2 != nil {
+		spec = n.Hysteria2.PortHopping
+	}
+	c.JSON(200, s.engine.PortHopStatus(n.Port, spec))
+}
+
 func (s *Server) handleInboundConfig(c *gin.Context) {
 	id := parseID(c)
 	ins, err := s.db.ListInbounds()

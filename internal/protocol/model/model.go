@@ -285,10 +285,32 @@ type Hysteria2Options struct {
 
 	IgnoreClientBandwidth bool `json:"ignore_client_bandwidth,omitempty"`
 
-	MasqueradeType string `json:"masquerade_type,omitempty"` // proxy, file, string
-	MasqueradeURL  string `json:"masquerade_url,omitempty"`
+	// Structured masquerade (sing-box hysteria2 inbound). Legacy MasqueradeType +
+	// MasqueradeURL are migrated into Masquerade by Normalize for back-compat.
+	Masquerade     *Hy2Masquerade `json:"masquerade,omitempty"`
+	MasqueradeType string         `json:"masquerade_type,omitempty"` // legacy: proxy, file, string
+	MasqueradeURL  string         `json:"masquerade_url,omitempty"`  // legacy
 
+	// HopIntervalMax, when > PortHopInterval, enables a randomized hop interval.
+	HopIntervalMax int `json:"hop_interval_max,omitempty"`
+
+	// BrutalCC is a PANEL preset flag only — sing-box has no brutal_cc field, so it
+	// is NEVER rendered. When set, applyCreateDefaults selects a matching bandwidth
+	// profile instead. Kept for backwards-compatible persistence.
 	BrutalCC bool `json:"brutal_cc,omitempty"`
+}
+
+// Hy2Masquerade is the sing-box hysteria2 masquerade object. Type selects which
+// fields apply: proxy (URL, RewriteHost), file (Directory), string (StatusCode,
+// Headers, Content). Verified against the pinned sing-box.
+type Hy2Masquerade struct {
+	Type        string            `json:"type,omitempty"` // proxy, file, string
+	URL         string            `json:"url,omitempty"`
+	RewriteHost bool              `json:"rewrite_host,omitempty"`
+	Directory   string            `json:"directory,omitempty"`
+	StatusCode  int               `json:"status_code,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Content     string            `json:"content,omitempty"`
 }
 
 // TUICOptions holds TUIC v5 parameters.
@@ -698,6 +720,13 @@ func (n *Node) Normalize() {
 		if len(n.Security.ALPN) == 0 {
 			n.Security.ALPN = []string{"h3"}
 		}
+		// Migrate the legacy flat masquerade fields into the structured object so
+		// old configs and links keep working after the schema change.
+		h := n.Hysteria2
+		if h.Masquerade == nil && h.MasqueradeType != "" {
+			h.Masquerade = &Hy2Masquerade{Type: h.MasqueradeType, URL: h.MasqueradeURL}
+		}
+		h.MasqueradeType, h.MasqueradeURL = "", ""
 	case ProtoTUIC:
 		if n.TUIC == nil {
 			n.TUIC = &TUICOptions{}
