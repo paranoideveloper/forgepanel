@@ -130,6 +130,8 @@ func transportFields() map[string][]Field {
 		"ws": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/", Ph: "/ws"},
 			{Key: "transport.host", Label: "Host", Type: "text"},
+			{Key: "transport.early_data", Label: "Max early data", Type: "number", Help: "0 = off; enables 0-RTT early data"},
+			{Key: "transport.ed_header", Label: "Early-data header", Type: "text", Ph: "Sec-WebSocket-Protocol"},
 		},
 		"httpupgrade": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
@@ -146,6 +148,7 @@ func transportFields() map[string][]Field {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
 			{Key: "transport.host", Label: "Host", Type: "text"},
 			{Key: "transport.xhttp_mode", Label: "Mode", Type: "select", Options: []string{"auto", "packet-up", "stream-up", "stream-one"}, Default: "auto"},
+			{Key: "transport.x_padding_bytes", Label: "Padding bytes", Type: "text", Ph: "100-1000"},
 		},
 		"h2": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
@@ -166,6 +169,9 @@ func securityFields(fps []string) map[string][]Field {
 			{Key: "security.server_name", Label: "SNI", Type: "text"},
 			{Key: "security.fingerprint", Label: "uTLS fingerprint", Type: "select", Options: fps, Default: "chrome"},
 			{Key: "security.alpn", Label: "ALPN (comma-sep)", Type: "csv", Ph: "h2,http/1.1"},
+			{Key: "security.min_version", Label: "Min TLS version", Type: "select", Options: []string{"", "1.2", "1.3"}},
+			{Key: "security.max_version", Label: "Max TLS version", Type: "select", Options: []string{"", "1.2", "1.3"}},
+			{Key: "security.cipher_suites", Label: "Cipher suites", Type: "text", Ph: "TLS_AES_128_GCM_SHA256:..."},
 			{Key: "security.allow_insecure", Label: "Allow insecure (auto for self-signed)", Type: "bool"},
 		},
 		"reality": {
@@ -175,6 +181,7 @@ func securityFields(fps []string) map[string][]Field {
 			{Key: "security.reality.private_key", Label: "Private key", Type: "text", Keygen: "reality", Help: "auto-generated if empty"},
 			{Key: "security.reality.public_key", Label: "Public key", Type: "text"},
 			{Key: "security.reality.short_id", Label: "Short ID", Type: "text", Keygen: "shortid"},
+			{Key: "security.reality.xver", Label: "Proxy protocol (xver)", Type: "iselect", Options: []string{"0", "1", "2"}, Default: 0},
 		},
 	}
 }

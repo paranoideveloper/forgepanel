@@ -205,6 +205,12 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 			wsHeaders["Host"] = t.Host
 		}
 		ws := jobj{"path": firstNonEmpty(t.Path, "/")}
+		if t.EarlyData > 0 {
+			ws["maxEarlyData"] = t.EarlyData
+		}
+		if t.EDHeader != "" {
+			ws["earlyDataHeaderName"] = t.EDHeader
+		}
 		if len(wsHeaders) > 0 {
 			ws["headers"] = wsHeaders
 		}
@@ -231,6 +237,33 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 		xh := jobj{"path": firstNonEmpty(t.Path, "/"), "mode": firstNonEmpty(t.XHTTPMode, "auto")}
 		if t.Host != "" {
 			xh["host"] = t.Host
+		}
+		if t.XPaddingB != "" {
+			xh["xPaddingBytes"] = t.XPaddingB
+		}
+		if x := t.XMux; x != nil {
+			xm := jobj{}
+			if x.MaxConcurrency != "" {
+				xm["maxConcurrency"] = x.MaxConcurrency
+			}
+			if x.MaxConnections != "" {
+				xm["maxConnections"] = x.MaxConnections
+			}
+			if x.CMaxReuseTimes != "" {
+				xm["cMaxReuseTimes"] = x.CMaxReuseTimes
+			}
+			if x.CMaxLifetimeMs != "" {
+				xm["cMaxLifetimeMs"] = x.CMaxLifetimeMs
+			}
+			if x.HMaxRequestTime != "" {
+				xm["hMaxRequestTimes"] = x.HMaxRequestTime
+			}
+			if x.HKeepAlivePeriod > 0 {
+				xm["hKeepAlivePeriod"] = x.HKeepAlivePeriod
+			}
+			if len(xm) > 0 {
+				xh["xmux"] = xm
+			}
 		}
 		ss["xhttpSettings"] = xh
 	case model.NetH2:
@@ -261,6 +294,15 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 		}
 		if n.Security.Fingerprint != "" {
 			tls["fingerprint"] = n.Security.Fingerprint
+		}
+		if n.Security.MinVersion != "" {
+			tls["minVersion"] = n.Security.MinVersion
+		}
+		if n.Security.MaxVersion != "" {
+			tls["maxVersion"] = n.Security.MaxVersion
+		}
+		if n.Security.CipherSuites != "" {
+			tls["cipherSuites"] = n.Security.CipherSuites
 		}
 		// Xray 26 removed "allowInsecure"; skip-verify is now pinnedPeerCertSha256.
 		if len(n.Security.PinSHA256) > 0 {
@@ -314,6 +356,9 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 					}
 				}
 				rs["shortIds"] = shortIds
+				if r.Xver > 0 {
+					rs["xver"] = r.Xver
+				}
 			}
 
 			if r.SpiderX != "" {
