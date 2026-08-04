@@ -8,8 +8,8 @@ package api
 import (
 	"context"
 	"embed"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path/filepath"
@@ -18,8 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/auth"
-	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/cert"
+	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core"
 	"github.com/forgepanel/forgepanel/internal/domain"
 	"github.com/forgepanel/forgepanel/internal/job"
@@ -35,17 +35,17 @@ var webFS embed.FS
 
 // Server wraps the gin engine, configuration, persistence and auth.
 type Server struct {
-	cfg    *config.Config
-	router *gin.Engine
-	db     *store.Store     // GORM-backed persistence (spec §4); nil in the light constructor
-	signer *auth.Signer     // JWT signer (spec §2)
-	mem    *NodeStore       // in-memory fallback store for stateless previews/tests
-	engine *core.Controller // proxy-core supervisor (spec §6); nil in the light constructor
-	sched  *job.Scheduler    // cron scheduler (spec §11); nil in the light constructor
-	login  *loginLimiter     // per-IP login rate limiter (spec §12)
+	cfg     *config.Config
+	router  *gin.Engine
+	db      *store.Store             // GORM-backed persistence (spec §4); nil in the light constructor
+	signer  *auth.Signer             // JWT signer (spec §2)
+	mem     *NodeStore               // in-memory fallback store for stateless previews/tests
+	engine  *core.Controller         // proxy-core supervisor (spec §6); nil in the light constructor
+	sched   *job.Scheduler           // cron scheduler (spec §11); nil in the light constructor
+	login   *loginLimiter            // per-IP login rate limiter (spec §12)
 	fdns    *core.ForgeDNSController // DNS-tunnel manager (spec §5)
-	domains *domain.Registry  // domain registry + DNS health (spec §7)
-	certs   *cert.Store        // cert store + ACME (spec §7)
+	domains *domain.Registry         // domain registry + DNS health (spec §7)
+	certs   *cert.Store              // cert store + ACME (spec §7)
 
 	// FirstAdminPassword is set on the very first boot (fresh DB) so the caller
 	// can print the generated owner credentials exactly once.
@@ -73,9 +73,9 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg, router: gin.New(), db: db, mem: NewNodeStore(),
-		signer: auth.NewSigner([]byte(deriveSecret(cfg))),
-		engine: core.NewController(cfg.DataDir, cfg.APIPort+1),
-		fdns:   core.NewForgeDNSController(fmt.Sprintf(":%d", cfg.DNSPort), cfg.DataDir),
+		signer:  auth.NewSigner([]byte(deriveSecret(cfg))),
+		engine:  core.NewController(cfg.DataDir, cfg.APIPort+1),
+		fdns:    core.NewForgeDNSController(fmt.Sprintf(":%d", cfg.DNSPort), cfg.DataDir),
 		domains: domain.New(nil),
 		certs:   cert.NewStore(filepath.Join(cfg.DataDir, "acme"), false, nil),
 		login:   newLoginLimiter(),
@@ -158,6 +158,8 @@ func (s *Server) routes() {
 		api.GET("/protocols/schema", s.handleSchema)
 		api.GET("/protocols/presets", s.handlePresets)
 		api.GET("/capabilities", s.handleCapabilities)
+		api.POST("/protocols/switch/preview", s.handleProtocolSwitchPreview)
+		api.GET("/deploy/compose", s.handleDeployCompose)
 		api.POST("/studio/preview", s.handlePreview)
 		api.POST("/keygen", s.handleKeygen)
 		api.POST("/import", s.handleImport)
@@ -192,6 +194,10 @@ func (s *Server) routes() {
 			admin.DELETE("/nodes/:id", s.handleDeleteNode)
 			admin.GET("/forgedns/adapters", s.handleForgeDNSAdapters)
 			admin.GET("/forgedns/upstream/adapters", s.handleForgeDNSUpstreamAdapters)
+			admin.GET("/forgedns/upstream/adapters/:adapter/options", s.handleForgeDNSAdapterOptions)
+			admin.GET("/forgedns/zones/:id/config", s.handleForgeDNSZoneConfig)
+			admin.PUT("/forgedns/zones/:id/config", s.handleForgeDNSZoneOverride)
+			admin.POST("/forgedns/zones/:id/config/import", s.handleForgeDNSZoneImport)
 			admin.GET("/forgedns/zones", s.handleForgeDNSList)
 			admin.POST("/forgedns/zones", s.handleForgeDNSCreate)
 			admin.PUT("/forgedns/zones/:id", s.handleForgeDNSUpdate)
