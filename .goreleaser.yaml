@@ -1,26 +1,136 @@
-# ForgePanel release matrix (spec §2/§14).
+# ForgePanel release pipeline.
+#
+# Assets are published as RAW binaries named `<binary>-<os>-<arch>` — install.sh
+# downloads `forgepanel-linux-amd64` / `forgepanel-linux-arm64` by that exact
+# name, so do not switch the archive format without updating the installer.
+#
+#   goreleaser release --snapshot --clean   # local dry run
+#   goreleaser release --clean              # tagged release (needs GITHUB_TOKEN)
 version: 2
+
+project_name: forgepanel
+
+before:
+  hooks:
+    - go mod download
+
 builds:
   - id: forgepanel
     main: ./cmd/forgepanel
     binary: forgepanel
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64, arm]
-    goarm: ["7"]
-    ignore:
-      - {goos: darwin, goarch: arm}
-    ldflags: ["-s -w -X main.version={{.Version}}"]
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
   - id: forgectl
     main: ./cmd/forgectl
     binary: forgectl
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
     goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # forgectl is the only command with a `version` var to stamp
+    # (cmd/forgectl/version.go); `forgectl version` prints it.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+  - id: forgenode
+    main: ./cmd/forgenode
+    binary: forgenode
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
 archives:
-  - formats: [tar.gz]
-    files: [README.md, LICENSE*, docs/*, deploy/install.sh]
+  # Raw, uncompressed binaries: forgepanel-linux-amd64, forgectl-linux-arm64, …
+  - id: binaries
+    formats: [binary]
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+
+nfpms:
+  - id: packages
+    package_name: forgepanel
+    ids: [forgepanel, forgectl, forgenode]
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: ForgePanel
+    homepage: https://github.com/paranoideveloper/forgepanel
+    maintainer: ForgePanel maintainers <noreply@users.noreply.github.com>
+    description: Self-hosted proxy management panel with a config studio, subscriptions and remote nodes.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: packaging/systemd/forgepanel.service
+        dst: /etc/systemd/system/forgepanel.service
+        file_info:
+          mode: 0644
+
+      # Data directory — holds the SQLite database, secrets and certificates.
+      - dst: /var/lib/forgepanel
+        type: dir
+        file_info:
+          mode: 0700
+
+      - dst: /etc/forgepanel
+        type: dir
+        file_info:
+          mode: 0750
+
+      # Optional overrides sourced by the unit (EnvironmentFile=-...). Shipped
+      # fully commented out, so it documents the knobs without changing
+      # behaviour. noreplace keeps operator edits across upgrades, and stops the
+      # package from clobbering a file install.sh may already have written.
+      - src: packaging/forgepanel.env.example
+        dst: /etc/forgepanel/forgepanel.env
+        type: config|noreplace
+        file_info:
+          mode: 0640
+
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+      postremove: packaging/scripts/postremove.sh
+
 checksum:
   name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
 release:
-  draft: true
+  github:
+    owner: paranoideveloper
+    name: forgepanel
+  draft: false
+  prerelease: auto
+  extra_files:
+    - glob: ./install.sh
+  footer: |
+    ## Install
+
+    ```
+    curl -fsSL https://raw.githubusercontent.com/paranoideveloper/forgepanel/main/install.sh | sudo bash
+    ```

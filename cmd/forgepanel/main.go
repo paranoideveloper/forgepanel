@@ -1,15 +1,20 @@
-// Command forgepanel is the ForgePanel server binary (spec §1). On first boot it
-// generates secrets and a randomized admin path, prints them once, then serves
-// the Config Studio + API.
+// Command forgepanel is the ForgePanel server binary (spec §1). It resolves its
+// panel-address/ACME configuration, serves the panel over HTTP (IP-based) or
+// HTTPS (when a domain + automatic TLS are configured), and — on a fresh
+// install — prints a one-time setup token instead of a random admin password.
+// A failed bind after a settings change is rolled back automatically so the
+// administrator can never be locked out.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -18,29 +23,46 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, srv, ln, err := start()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "forgepanel: config:", err)
-		os.Exit(1)
+		// A bind failure after a settings change: restore the last-known-good
+		// panel.json and try once more so a bad port/domain can't lock us out.
+		if cfg != nil && config.RestoreRollback(cfg.DataDir) {
+			fmt.Fprintln(os.Stderr, "forgepanel: new settings failed to bind — rolled back to previous configuration")
+			cfg, srv, ln, err = start()
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "forgepanel:", err)
+			os.Exit(1)
+		}
 	}
+	// Bound successfully — drop any stale rollback snapshot.
+	config.ClearRollback(cfg.DataDir)
 
-	srv, err := api.NewWithStore(cfg)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "forgepanel: store:", err)
-		os.Exit(1)
-	}
-	addr := fmt.Sprintf(":%d", cfg.PanelPort)
+	banner(cfg, srv)
+
+	p := cfg.Panel()
 	httpSrv := &http.Server{
-		Addr:              addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	banner(cfg, srv.FirstAdminPassword)
-
 	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintln(os.Stderr, "forgepanel: listen:", err)
+		var serveErr error
+		if p.HTTPSEnabled && p.Domain != "" {
+			httpSrv.TLSConfig = srv.CertTLSConfig()
+			// :80 helper answers ACME HTTP-01 challenges and redirects to HTTPS.
+			go func() {
+				h := &http.Server{Addr: ":80", Handler: srv.ACMEHTTPHandler(), ReadHeaderTimeout: 10 * time.Second}
+				if e := h.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {
+					fmt.Fprintln(os.Stderr, "forgepanel: :80 ACME helper:", e)
+				}
+			}()
+			serveErr = httpSrv.ServeTLS(ln, "", "")
+		} else {
+			serveErr = httpSrv.Serve(ln)
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			fmt.Fprintln(os.Stderr, "forgepanel: serve:", serveErr)
 			os.Exit(1)
 		}
 	}()
@@ -54,17 +76,52 @@ func main() {
 	_ = httpSrv.Shutdown(ctx)
 }
 
-func banner(cfg *config.Config, firstAdminPw string) {
+// start loads config, builds the server, and opens the panel listener. Splitting
+// this out lets main retry once after a rollback.
+func start() (*config.Config, *api.Server, net.Listener, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("config: %w", err)
+	}
+	srv, err := api.NewWithStore(cfg)
+	if err != nil {
+		return cfg, nil, nil, fmt.Errorf("store: %w", err)
+	}
+	p := cfg.Panel()
+	bind := p.BindAddress
+	if bind == "0.0.0.0" {
+		bind = ""
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(p.Port)))
+	if err != nil {
+		return cfg, srv, nil, fmt.Errorf("listen on %s:%d: %w", p.BindAddress, p.Port, err)
+	}
+	return cfg, srv, ln, nil
+}
+
+func banner(cfg *config.Config, srv *api.Server) {
+	p := cfg.Panel()
+	scheme := "http"
+	if p.HTTPSEnabled && p.Domain != "" {
+		scheme = "https"
+	}
 	fmt.Println("┌─────────────────────────────────────────────┐")
 	fmt.Println("│  ⚡ ForgePanel                               │")
 	fmt.Println("└─────────────────────────────────────────────┘")
-	fmt.Printf("  Panel:  http://127.0.0.1:%d%s\n", cfg.PanelPort, cfg.AdminPath)
-	fmt.Printf("  Data:   %s\n", cfg.DataDir)
-	if firstAdminPw != "" {
-		fmt.Println("  ── FIRST BOOT — save these, shown once ──")
-		fmt.Printf("  Admin user:      %s\n", cfg.AdminUser)
-		fmt.Printf("  Admin password:  %s\n", firstAdminPw)
-		fmt.Printf("  Admin path:      %s\n", cfg.AdminPath)
+	fmt.Printf("  Panel:  %s\n", srv.PublicURL())
+	fmt.Printf("  Listen: %s://%s:%d  (data: %s)\n", scheme, orAll(p.BindAddress), p.Port, cfg.DataDir)
+	if srv.SetupToken != "" {
+		fmt.Println("  ── FIRST RUN — create your administrator account ──")
+		fmt.Println("  Open the panel URL above and complete setup with this one-time token:")
+		fmt.Printf("  Setup token:  %s\n", srv.SetupToken)
+		fmt.Println("  (No admin password is generated — you choose it during setup.)")
 	}
 	fmt.Println()
+}
+
+func orAll(bind string) string {
+	if bind == "" || bind == "0.0.0.0" {
+		return "0.0.0.0"
+	}
+	return bind
 }

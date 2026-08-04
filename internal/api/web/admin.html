@@ -204,6 +204,9 @@ table.tbl tbody tr:hover{background:var(--panel-2)}
 .subhead{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);margin:22px 0 10px}
 .subhead:first-child{margin-top:0}
 .stack{display:flex;flex-direction:column}
+.pw-meter{height:6px;border-radius:4px;background:var(--border);margin-top:8px;overflow:hidden}
+.pw-meter>span{display:block;height:100%;width:0;border-radius:4px;background:var(--danger,#e5484d);transition:width .18s,background .18s}
+.pw-meter.s2>span{background:#e0a800}.pw-meter.s3>span{background:#3fb950}.pw-meter.s4>span{background:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:12.5px;font-weight:600;cursor:pointer;transition:all .12s}
 .chip:hover{border-color:var(--accent);color:var(--text)}
@@ -437,6 +440,7 @@ function fallbackCopy(txt){ try{ const ta=h('textarea',{style:{position:'fixed',
 /* Inline SVG icon set (no external icon font/CDN allowed). */
 const IC={
   swap:'<path d="M7 4L3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
   dashboard:'<path d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/>',
   inbounds:'<path d="M4 4h16v6H4zM4 14h16v6H4z"/><circle cx="8" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="17" r="1.2" fill="currentColor" stroke="none"/>',
   users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -643,6 +647,67 @@ function renderLogin(){ stopPoll();
   }
   function showErr(m){ errBox.textContent=m; errBox.classList.remove('hide'); }
   setTimeout(()=>uInput.focus(),50);
+}
+
+/* ---- First-run setup screen ------------------------------------------------
+   Shown when no administrator exists yet. The operator creates the owner
+   account, protected by the one-time setup token printed by the installer /
+   server log. No password is ever generated for them. */
+function pwStrength(pw){
+  if(!pw) return {score:0,label:'Use ≥10 chars with a mix of letters, digits and symbols.'};
+  let score=0; if(pw.length>=10) score++; if(pw.length>=14) score++;
+  let classes=0; if(/[a-zA-Z]/.test(pw)) classes++; if(/[0-9]/.test(pw)) classes++; if(/[^a-zA-Z0-9]/.test(pw)) classes++;
+  if(classes>=2) score++; if(classes>=3) score++;
+  score=Math.max(1,Math.min(score,4));
+  return {score,label:['','Too weak','Fair','Good','Strong'][score]};
+}
+function renderSetup(){ stopPoll(); applyTheme(); applyLang();
+  const root=clear($('#root'));
+  const errBox=h('div',{class:'login-err hide'});
+  const uInput=h('input',{class:'input',id:'s-user',placeholder:'admin',value:'admin',autocomplete:'username'});
+  const pInput=h('input',{class:'input',id:'s-pass',type:'password',placeholder:'choose a strong password',autocomplete:'new-password'});
+  const p2Input=h('input',{class:'input',id:'s-pass2',type:'password',placeholder:'repeat password',autocomplete:'new-password'});
+  const tInput=h('input',{class:'input mono',id:'s-token',placeholder:'setup token from the installer / server log',autocomplete:'off'});
+  const meter=h('div',{class:'pw-meter'},[h('span')]);
+  const meterLbl=h('div',{class:'hint',style:{marginTop:'4px'},text:pwStrength('').label});
+  pInput.addEventListener('input',()=>{ const s=pwStrength(pInput.value); meter.className='pw-meter s'+s.score; meter.firstChild.style.width=(s.score*25)+'%'; meterLbl.textContent=s.label; });
+  const btn=h('button',{class:'btn primary',style:{width:'100%',justifyContent:'center',padding:'11px'},text:'Create administrator'});
+  const form=h('form',{onSubmit:submit},[errBox,
+    h('div',{class:'field'},[h('label',{text:'Admin username'}),uInput]),
+    h('div',{class:'field'},[h('label',{text:'Password'}),pInput,meter,meterLbl]),
+    h('div',{class:'field'},[h('label',{text:'Repeat password'}),p2Input]),
+    h('div',{class:'field'},[h('label',{text:'Setup token'}),tInput]),
+    btn]);
+  const card=h('div',{class:'login-card'},[
+    h('div',{class:'login-brand',html:brandLogo(40)+'<h1 class="wordmark"><span class="fg">Forge</span>Panel</h1>'}),
+    h('div',{class:'login-sub',text:'First-run setup — create your administrator account'}),
+    form,
+    h('div',{style:{textAlign:'center',marginTop:'18px'}},[themeMini(),langMini()])]);
+  root.appendChild(h('div',{class:'login-wrap'},[card]));
+  async function submit(e){ e.preventDefault();
+    const username=uInput.value.trim(), password=pInput.value, confirm=p2Input.value, token=tInput.value.trim();
+    if(!username||!password){ showErr('Enter a username and password'); return; }
+    if(password!==confirm){ showErr('Passwords do not match'); return; }
+    if(password.length<10){ showErr('Password must be at least 10 characters'); return; }
+    if(!token){ showErr('Enter the setup token'); return; }
+    btn.disabled=true; const old=btn.textContent; btn.innerHTML='<span class="spin"></span>';
+    try{
+      const res=await fetch('/api/setup/init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,username,password,password_confirm:confirm})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok){ showErr((data&&data.error)||'Setup failed'); return; }
+      renderLogin(); const u=$('#l-user'); if(u) u.value=username;
+      toast('Administrator created — please sign in','success');
+    }catch(err){ showErr('Cannot reach server'); }
+    finally{ btn.disabled=false; btn.textContent=old; }
+  }
+  function showErr(m){ errBox.textContent=m; errBox.classList.remove('hide'); }
+  setTimeout(()=>uInput.focus(),50);
+}
+
+/* renderAuth decides between the first-run setup screen and the login screen. */
+async function renderAuth(){
+  try{ const st=await fetch('/api/setup/status').then(r=>r.json()); if(st&&st.setup_required){ renderSetup(); return; } }catch(e){}
+  renderLogin();
 }
 function themeMini(){ return h('button',{class:'btn ghost sm',html:icon(state.theme==='dark'?'sun':'moon'),onClick:toggleTheme,title:'Theme'}); }
 function langMini(){ return h('button',{class:'btn ghost sm',text:state.lang==='fa'?'EN':'فا',onClick:toggleLang,title:'Language'}); }
@@ -1493,6 +1558,76 @@ VIEWS.deploy=async function(content){
 function download(name,text){ const a=document.createElement('a'); a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(text); a.download=name; a.click(); }
 
 /* ===== Settings ===== */
+// renderPanelAddress fills a card with the panel's current address + cert status
+// and the controls to change domain/port/HTTPS, test DNS/port, and renew the cert.
+async function renderPanelAddress(card){
+  clear(card); card.appendChild(loadingEl('Loading panel address…'));
+  let pa; try{ pa=await api('/api/admin/panel-address'); }
+  catch(e){ clear(card); card.appendChild(h('div',{class:'subhead',text:'Panel address'})); card.appendChild(h('div',{class:'hint',text:e.message})); return; }
+  clear(card);
+  const cert=pa.cert||{}, acme=cert.acme||{};
+  card.appendChild(h('div',{class:'subhead',text:'Panel address'}));
+  const urlRow=h('div',{class:'kv'},[h('b',{text:'Public URL'}),h('span',{class:'row',style:{gap:'8px'}},[h('span',{class:'t-mono',text:pa.public_url}),copyBtn(pa.public_url)])]);
+  card.appendChild(urlRow);
+  card.appendChild(h('div',{class:'kv',html:'<b>HTTPS</b>'+(pa.https_enabled?pill('green','on'):pill('grey','off — HTTP'))}));
+  card.appendChild(h('div',{class:'kv',html:'<b>Server IPv4</b><span class="t-mono">'+esc(pa.server_ipv4||'—')+'</span>'}));
+  if(pa.server_ipv6) card.appendChild(h('div',{class:'kv',html:'<b>Server IPv6</b><span class="t-mono">'+esc(pa.server_ipv6)+'</span>'}));
+  if(cert.available){
+    card.appendChild(h('div',{class:'kv',html:'<b>Certificate</b><span>'+esc(cert.issuer||'issued')+' · expires '+esc((cert.not_after||'').slice(0,10))
+      +' '+pill(cert.days_remaining>15?'green':'amber',(cert.days_remaining|0)+'d left')+'</span>'}));
+  } else if(pa.https_enabled){
+    card.appendChild(h('div',{class:'kv',html:'<b>Certificate</b>'+pill('amber','not issued yet')}));
+  }
+
+  // editable controls
+  const domainI=inp('pa-domain',{placeholder:'panel.example.com',value:pa.domain||''});
+  const portI=inp('pa-port',{type:'number',min:'1',max:'65535',value:String(pa.port||2053)});
+  const httpsChk=h('input',{type:'checkbox',id:'pa-https'}); if(pa.https_enabled) httpsChk.checked=true;
+  const emailI=inp('pa-email',{type:'email',placeholder:'you@example.com',value:acme.email||''});
+  const dnsBtn=h('button',{class:'btn sm',type:'button',html:icon('search')+'<span>Test DNS</span>',onClick:testDNS});
+  const portBtn=h('button',{class:'btn sm',type:'button',html:icon('search')+'<span>Test port</span>',onClick:testPort});
+  card.appendChild(h('div',{class:'subhead',style:{marginTop:'16px'},text:'Change address'}));
+  card.appendChild(h('div',{class:'form-grid'},[
+    field('Domain (blank = IP-based HTTP)',h('div',{class:'row',style:{gap:'8px'}},[domainI,dnsBtn])),
+    field('Port',h('div',{class:'row',style:{gap:'8px'}},[portI,portBtn])),
+    field('ACME email (for Let’s Encrypt)',emailI),
+    field('Automatic HTTPS',h('label',{class:'row',style:{gap:'8px',alignItems:'center'}},[httpsChk,h('span',{class:'hint',text:'Requires a domain that points here'})]))]));
+  card.appendChild(h('div',{class:'row',style:{marginTop:'10px',gap:'8px'}},[
+    h('button',{class:'btn primary',type:'button',html:icon('check')+'<span>Save changes</span>',onClick:save}),
+    (pa.https_enabled&&pa.domain)?h('button',{class:'btn',type:'button',html:icon('reload')+'<span>Renew certificate</span>',onClick:renewCert}):null]));
+
+  async function testDNS(){
+    const d=domainI.value.trim(); if(!d){ toast('Enter a domain first','error'); return; }
+    try{ const r=await api('/api/admin/panel-address/dns-check?domain='+encodeURIComponent(d));
+      if(!r.resolves){ toast('Domain does not resolve','error'); return; }
+      toast(r.points_here?('✓ '+d+' points to this server'):('⚠ '+d+' resolves to '+(r.a||[]).join(', ')+' — not this server ('+r.server_ipv4+')'), r.points_here?'success':'info');
+    }catch(e){ toast(e.message,'error'); }
+  }
+  async function testPort(){
+    const p=parseInt(portI.value,10); if(!p){ toast('Enter a port','error'); return; }
+    try{ const r=await api('/api/admin/panel-address/port-check?port='+p);
+      toast(r.available?('✓ port '+p+(r.current?' (current panel port)':' is free')):('⚠ port '+p+' is in use'), r.available?'success':'error');
+    }catch(e){ toast(e.message,'error'); }
+  }
+  async function renewCert(e){ const b=e.currentTarget; b.disabled=true;
+    try{ await api('/api/admin/panel-address/cert/renew',{method:'POST'}); toast('Certificate renewed','success'); await renderPanelAddress(card); }
+    catch(err){ toast(err.message,'error'); } finally{ b.disabled=false; }
+  }
+  async function save(e){
+    const body={domain:domainI.value.trim(),port:parseInt(portI.value,10),https_enabled:httpsChk.checked,acme_email:emailI.value.trim(),verify_dns:false};
+    if(body.https_enabled&&!body.domain){ toast('A domain is required for HTTPS','error'); return; }
+    const scheme=body.https_enabled?'https':'http';
+    const host=body.domain||pa.server_ipv4;
+    const newURL=scheme+'://'+host+(([80,443].includes(body.port))?'':(':'+body.port))+(pa.admin_path||'');
+    if(!await confirmDialog('Apply new panel address?\n\nOld: '+pa.public_url+'\nNew: '+newURL+'\n\nA port or HTTPS change needs a restart to take effect.')) return;
+    const b=e.currentTarget; b.disabled=true;
+    try{ const r=await api('/api/admin/panel-address',{method:'POST',body});
+      toast('Panel address updated'+(r.restart_required?' — restart the service to apply':''), r.restart_required?'info':'success');
+      await renderPanelAddress(card);
+    }catch(err){ toast(err.message,'error'); } finally{ b.disabled=false; }
+  }
+}
+
 VIEWS.settings=async function(content){
   clear(content);
   let me={}; try{ me=await api('/api/admin/me'); }catch(e){}
@@ -1503,6 +1638,11 @@ VIEWS.settings=async function(content){
     h('div',{class:'subhead',text:'Account'}),
     h('div',{class:'kv',html:'<b>Username</b><span>'+esc(me.username||'—')+'</span>'}),
     h('div',{class:'kv',html:'<b>Role</b>'+pill('blue',me.role||state.role||'—')}) ]));
+
+  // panel-address card — how the panel is reached (domain / port / HTTPS / cert)
+  const paCard=h('div',{class:'card pad',style:{marginBottom:'16px'}});
+  content.appendChild(paCard);
+  await renderPanelAddress(paCard);
 
   // 2FA card — endpoints may not exist; degrade gracefully.
   const twoFA=h('div',{class:'card pad',style:{marginBottom:'16px'}});
@@ -1572,7 +1712,7 @@ VIEWS.settings=async function(content){
    --------------------------------------------------------------------------- */
 applyTheme(); applyLang();
 if(state.token){ if(!location.hash||location.hash==='#') location.hash='#/dashboard'; renderApp(); }
-else renderLogin();
+else renderAuth();
 
 </script>
 </body>

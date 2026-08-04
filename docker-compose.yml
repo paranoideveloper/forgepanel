@@ -1,23 +1,63 @@
-# ForgePanel — SQLite by default; `--profile postgres` for Postgres (spec §14).
+# ForgePanel — single-service deployment backed by the embedded (pure-Go) SQLite
+# store. State lives in the named volume, so `docker compose down` keeps your
+# users, inbounds and certificates; only `down -v` discards them.
+#
+#   docker compose up -d
+#   docker compose logs -f forgepanel     # first boot prints the admin URL
 services:
   forgepanel:
     build: .
     image: forgepanel:latest
+    container_name: forgepanel
     restart: unless-stopped
+
     ports:
-      - "2053:2053"   # panel (HTTPS)
-      - "2096:2096"   # subscription
-      - "53:53/udp"   # ForgeDNS
+      - "2053:2053"     # panel UI
+      - "2054:2054"     # REST API
+      - "2096:2096"     # subscription endpoint
+      - "80:80"         # ACME HTTP-01 challenge
+      - "443:443"       # HTTPS once a domain is configured
+      # - "53:53/udp"   # ForgeDNS — uncomment only if you run the DNS feature
+                        # and nothing else on the host owns port 53.
+
+    environment:
+      FORGEPANEL_DATA: /var/lib/forgepanel
+      FORGEPANEL_PANEL_PORT: "2053"
+      FORGEPANEL_API_PORT: "2054"
+      FORGEPANEL_SUB_PORT: "2096"
+      # Set a domain to serve the panel over HTTPS with an automatically issued
+      # Let's Encrypt certificate. Leave unset for plain HTTP on the panel port.
+      # FORGEPANEL_DOMAIN: panel.example.com
+      # FORGEPANEL_HTTPS: "true"
+      # FORGEPANEL_ACME_EMAIL: admin@example.com
+      # FORGEPANEL_DNS_PORT: "53"
+
     volumes:
-      - forgepanel-data:/data
+      - forgepanel-data:/var/lib/forgepanel
+
+    # Probes HTTPS then HTTP on the configured port, so it survives switching
+    # the panel to a domain + Let's Encrypt certificate.
     healthcheck:
-      test: ["CMD", "/usr/local/bin/forgectl", "keygen", "uuid"]
+      test: ["CMD", "/usr/local/bin/forgectl", "healthcheck"]
       interval: 30s
-      timeout: 5s
+      timeout: 12s
+      start_period: 10s
       retries: 3
+
+    # NET_ADMIN is only needed by features that reprogram host networking —
+    # hysteria2 port-hopping (nftables redirect rules) and ForgeDNS. Delete this
+    # block if you use neither; the panel itself runs fine without it.
     cap_add:
-      - NET_BIND_SERVICE
+      - NET_ADMIN
+
     security_opt:
       - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   forgepanel-data:

@@ -7,13 +7,16 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -47,9 +50,15 @@ type Server struct {
 	domains *domain.Registry         // domain registry + DNS health (spec §7)
 	certs   *cert.Store              // cert store + ACME (spec §7)
 
-	// FirstAdminPassword is set on the very first boot (fresh DB) so the caller
-	// can print the generated owner credentials exactly once.
+	// FirstAdminPassword is retained for API compatibility but is no longer used:
+	// fresh installs create the owner via the token-protected first-run setup flow
+	// instead of a printed random password. It stays empty.
 	FirstAdminPassword string
+
+	// SetupToken is the one-time first-run setup token when administrator setup is
+	// still pending (no admin exists); empty once setup is complete. The caller
+	// prints it once and the installer surfaces it to the operator.
+	SetupToken string
 }
 
 // New constructs a stateless API server (no DB) — used by unit tests and the
@@ -71,16 +80,27 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ACME issuance is restricted to the configured panel domain (read live, so a
+	// later domain change is honored without reconstructing the manager). A nil
+	// policy would let any SNI trigger a Let's Encrypt order.
+	staging := false
+	if p := cfg.Panel(); p != nil {
+		staging = p.ACME.Staging
+	}
+	allowPanelHost := func(host string) bool {
+		p := cfg.Panel()
+		return p != nil && p.Domain != "" && strings.EqualFold(host, p.Domain)
+	}
 	s := &Server{
 		cfg: cfg, router: gin.New(), db: db, mem: NewNodeStore(),
 		signer:  auth.NewSigner([]byte(deriveSecret(cfg))),
 		engine:  core.NewController(cfg.DataDir, cfg.APIPort+1),
 		fdns:    core.NewForgeDNSController(fmt.Sprintf(":%d", cfg.DNSPort), cfg.DataDir),
 		domains: domain.New(nil),
-		certs:   cert.NewStore(filepath.Join(cfg.DataDir, "acme"), false, nil),
+		certs:   cert.NewStore(filepath.Join(cfg.DataDir, "acme"), staging, allowPanelHost),
 		login:   newLoginLimiter(),
 	}
-	if err := s.seedOwner(); err != nil {
+	if err := s.reconcileSetup(); err != nil {
 		return nil, err
 	}
 	s.router.Use(gin.Recovery(), securityHeaders())
@@ -118,34 +138,94 @@ func deriveSecret(cfg *config.Config) string {
 	return "forgepanel-jwt:ephemeral"
 }
 
-// seedOwner creates the owner admin with a generated password on first boot.
-func (s *Server) seedOwner() error {
+// reconcileSetup aligns the persisted first-run state with the admin table
+// (spec: first-run setup + upgrade compatibility). No random administrator
+// password is ever generated or printed.
+//
+//   - Admins already exist  → mark setup complete, clear any setup token
+//     (an existing install upgrading keeps its credentials untouched).
+//   - No admins yet         → setup is pending: mint (or reuse a still-valid)
+//     one-time setup token, persist it, and drop setup-token.txt for the
+//     installer. The owner account is created later via /api/setup/init.
+//
+// Either way it (re)writes panel-url.txt with the current public URL so the
+// installer can display the exact address.
+func (s *Server) reconcileSetup() error {
+	p := s.cfg.Panel()
 	n, err := s.db.CountAdmins()
 	if err != nil {
 		return err
 	}
 	if n > 0 {
+		if !p.SetupCompleted || p.SetupToken != "" {
+			p.SetupCompleted = true
+			p.SetupToken, p.SetupExpires = "", ""
+			if err := s.cfg.SavePanel(); err != nil {
+				return err
+			}
+		}
+		_ = os.Remove(filepath.Join(s.cfg.DataDir, "setup-token.txt"))
+		s.writePublicURLFile()
 		return nil
 	}
-	pw, err := keygen.Password(12)
-	if err != nil {
-		return err
+
+	// Setup pending: ensure a valid one-time token exists.
+	p.SetupCompleted = false
+	needToken := p.SetupToken == ""
+	if !needToken {
+		if exp, perr := time.Parse(time.RFC3339, p.SetupExpires); perr != nil || time.Now().After(exp) {
+			needToken = true
+		}
 	}
-	hash, err := auth.HashPassword(pw)
-	if err != nil {
-		return err
+	if needToken {
+		p.SetupToken = randHex(24)
+		p.SetupExpires = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+		if err := s.cfg.SavePanel(); err != nil {
+			return err
+		}
 	}
-	if err := s.db.CreateAdmin(&store.Admin{
-		Username: s.cfg.AdminUser, PasswordHash: hash, Role: store.RoleOwner,
-	}); err != nil {
-		return err
-	}
-	s.FirstAdminPassword = pw
+	s.SetupToken = p.SetupToken
+	// setup-token.txt (0600) is read by the installer to show the operator.
+	_ = os.WriteFile(filepath.Join(s.cfg.DataDir, "setup-token.txt"), []byte(p.SetupToken+"\n"), 0o600)
+	s.writePublicURLFile()
 	return nil
+}
+
+// writePublicURLFile drops panel-url.txt (0600) with the full public panel URL
+// so the installer can print the exact address the operator should open.
+func (s *Server) writePublicURLFile() {
+	_ = os.WriteFile(filepath.Join(s.cfg.DataDir, "panel-url.txt"), []byte(s.PublicURL()+"\n"), 0o600)
+}
+
+// PublicURL computes the panel's externally-reachable URL from the persisted
+// panel settings, falling back to the detected server IP when no domain is set.
+func (s *Server) PublicURL() string {
+	p := s.cfg.Panel()
+	scheme, defPort := "http", 80
+	if p.HTTPSEnabled && p.Domain != "" {
+		scheme, defPort = "https", 443
+	}
+	host := p.Domain
+	if host == "" {
+		host = detectServerIP()
+	}
+	url := scheme + "://" + host
+	if p.Port != defPort {
+		url += fmt.Sprintf(":%d", p.Port)
+	}
+	return url + p.AdminPath
 }
 
 // Handler exposes the underlying http.Handler (for tests and embedding).
 func (s *Server) Handler() http.Handler { return s.router }
+
+// CertTLSConfig returns the panel's TLS config (imported certs + ACME fallback),
+// used by main to serve the panel over HTTPS.
+func (s *Server) CertTLSConfig() *tls.Config { return s.certs.TLSConfig() }
+
+// ACMEHTTPHandler returns the handler for the :80 helper: it answers ACME
+// HTTP-01 challenges and redirects everything else to HTTPS.
+func (s *Server) ACMEHTTPHandler() http.Handler { return s.certs.ACMEManager().HTTPHandler(nil) }
 
 func (s *Server) routes() {
 	r := s.router
@@ -165,6 +245,8 @@ func (s *Server) routes() {
 		api.POST("/import", s.handleImport)
 		api.POST("/login", s.handleLogin)
 		api.POST("/refresh", s.handleRefresh)
+		api.GET("/setup/status", s.handleSetupStatus)
+		api.POST("/setup/init", s.handleSetupInit)
 
 		// Authenticated admin endpoints — only when a DB is attached.
 		if s.db != nil {
@@ -212,6 +294,11 @@ func (s *Server) routes() {
 			admin.POST("/2fa/enable", s.handle2FAEnable)
 			admin.POST("/2fa/disable", s.handle2FADisable)
 			admin.POST("/change-password", s.handleChangePassword)
+			admin.GET("/panel-address", s.handlePanelAddress)
+			admin.POST("/panel-address", s.handlePanelAddressUpdate)
+			admin.GET("/panel-address/dns-check", s.handlePanelDNSCheck)
+			admin.GET("/panel-address/port-check", s.handlePanelPortCheck)
+			admin.POST("/panel-address/cert/renew", s.handlePanelCertRenew)
 		}
 	}
 

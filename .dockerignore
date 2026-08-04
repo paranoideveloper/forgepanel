@@ -1,0 +1,59 @@
+# Keep the build context to source + go.mod/go.sum. Everything below either
+# bloats the context or would be rebuilt inside the image anyway.
+
+# VCS
+.git
+.gitignore
+.github
+
+# Build output. The binary names are root-anchored so they cannot shadow the
+# cmd/forgepanel, cmd/forgectl and cmd/forgenode source directories.
+bin/
+dist/
+build/
+out/
+*.exe
+*.test
+*.out
+/forgepanel
+/forgectl
+/forgenode
+
+# Packaging / CI descriptors (not needed to compile)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+.goreleaser.yaml
+.goreleaser.yml
+Makefile
+packaging/
+deploy/
+
+# Docs — README is kept out of the image; docs/ is published with releases.
+docs/
+*.md
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+data/
+var/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# JS tooling (the web assets are plain static files, nothing to install)
+node_modules/
+web/dist/

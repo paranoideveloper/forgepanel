@@ -41,6 +41,10 @@ func main() {
 		err = cmdRestore(os.Args[2:])
 	case "migrate":
 		err = cmdMigrate(os.Args[2:])
+	case "healthcheck":
+		err = cmdHealth(os.Args[2:])
+	case "version", "--version", "-v":
+		err = cmdVersion(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -61,6 +65,8 @@ Usage:
   forgectl keygen <reality|uuid|shortid|ss2022|wireguard|ssh|password|mldsa65> [method]
   forgectl convert <link> <uri|xray|singbox|clash>
   forgectl render <link> <xray|singbox>
+  forgectl healthcheck [port|url]   probe the running panel (container HEALTHCHECK)
+  forgectl version
 
 Examples:
   forgectl keygen reality

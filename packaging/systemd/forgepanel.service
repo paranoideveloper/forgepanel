@@ -1,0 +1,49 @@
+[Unit]
+Description=ForgePanel — proxy management panel
+Documentation=https://github.com/paranoideveloper/forgepanel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/forgepanel
+WorkingDirectory=/var/lib/forgepanel
+
+# Drop overrides here (FORGEPANEL_PANEL_PORT, FORGEPANEL_DOMAIN, …). The leading
+# dash keeps the unit working when the file is absent.
+EnvironmentFile=-/etc/forgepanel/forgepanel.env
+Environment=FORGEPANEL_DATA=/var/lib/forgepanel
+
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+# systemd creates/chowns /var/lib/forgepanel before the first start.
+StateDirectory=forgepanel
+StateDirectoryMode=0700
+
+# The service runs as root (no User=), which is what lets it bind 80/443 for
+# ACME + HTTPS and 53/udp for ForgeDNS, supervise engine processes and program
+# the nftables rules used by hysteria2 port-hopping. Root already holds every
+# capability, so the line below changes nothing today — it is here so that
+# adding `User=forgepanel` is a one-line change that keeps those two powers.
+# Do not add CapabilityBoundingSet= without testing engine supervision: it would
+# strip caps the panel needs while running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+
+# Hardening — deliberately stops short of settings that would break engine
+# process management or writing generated engine configs under /etc/forgepanel.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/lib/forgepanel /etc/forgepanel
+
+[Install]
+WantedBy=multi-user.target

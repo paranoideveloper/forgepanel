@@ -11,6 +11,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +36,7 @@ type Store struct {
 	mu       sync.RWMutex
 	imported map[string]*Imported
 	acme     *autocert.Manager
+	cacheDir string
 }
 
 // NewStore creates a cert store whose ACME cache lives at cacheDir and whose
@@ -51,7 +55,61 @@ func NewStore(cacheDir string, staging bool, allow func(domain string) bool) *St
 	if staging {
 		m.Client = &acme.Client{DirectoryURL: "https://acme-staging-v02.api.letsencrypt.org/directory"}
 	}
-	return &Store{imported: map[string]*Imported{}, acme: m}
+	return &Store{imported: map[string]*Imported{}, acme: m, cacheDir: cacheDir}
+}
+
+// CachedInfo returns metadata for a domain's certificate — an imported pair if
+// one exists, otherwise a certificate already issued by ACME and sitting in the
+// on-disk cache. It never triggers issuance (pure read), so it is safe to call
+// from a status endpoint. ok is false when no certificate is available yet.
+func (s *Store) CachedInfo(domain string) (*Imported, bool) {
+	s.mu.RLock()
+	for _, imp := range s.imported {
+		for _, d := range imp.Domains {
+			if strings.EqualFold(d, domain) {
+				cp := *imp
+				s.mu.RUnlock()
+				return &cp, true
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if s.cacheDir == "" {
+		return nil, false
+	}
+	raw, err := os.ReadFile(filepath.Join(s.cacheDir, strings.ToLower(domain)))
+	if err != nil {
+		return nil, false
+	}
+	// autocert stores the private key then the certificate chain as PEM blocks.
+	var leaf *x509.Certificate
+	rest := raw
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			if c, err := x509.ParseCertificate(block.Bytes); err == nil {
+				leaf = c
+				break
+			}
+		}
+	}
+	if leaf == nil {
+		return nil, false
+	}
+	domains := leaf.DNSNames
+	if len(domains) == 0 && leaf.Subject.CommonName != "" {
+		domains = []string{leaf.Subject.CommonName}
+	}
+	return &Imported{
+		Domains:   domains,
+		NotBefore: leaf.NotBefore,
+		NotAfter:  leaf.NotAfter,
+		Issuer:    leaf.Issuer.CommonName,
+	}, true
 }
 
 // TLSConfig returns a *tls.Config that serves imported certs when present and
