@@ -200,6 +200,42 @@ func applyCreateDefaults(n *model.Node) {
 		if w.Keepalive == 0 {
 			w.Keepalive = 25
 		}
+	case model.ProtoAmneziaWG:
+		if n.AmneziaWG == nil {
+			n.AmneziaWG = &model.AmneziaWGOptions{}
+		}
+		w := &n.AmneziaWG.WireGuardOptions
+		// Same keypair provisioning as WireGuard (awg is WG + obfuscation).
+		if w.PrivateKey == "" || w.PublicKey == "" {
+			if kp, err := keygen.WireGuardKeys(); err == nil {
+				if w.PrivateKey == "" {
+					w.PrivateKey = kp.PrivateKey
+				}
+				if w.PublicKey == "" {
+					w.PublicKey = kp.PublicKey
+				}
+			}
+		}
+		if w.PeerPrivateKey == "" || w.PeerPublicKey == "" {
+			if kp, err := keygen.WireGuardKeys(); err == nil {
+				if w.PeerPrivateKey == "" {
+					w.PeerPrivateKey = kp.PrivateKey
+				}
+				if w.PeerPublicKey == "" {
+					w.PeerPublicKey = kp.PublicKey
+				}
+			}
+		}
+		if len(w.ServerAddress) == 0 {
+			w.ServerAddress = []string{"10.67.67.1/24"}
+		}
+		if len(w.PeerAddress) == 0 {
+			w.PeerAddress = []string{"10.67.67.2/32"}
+		}
+		if len(w.AllowedIPs) == 0 {
+			w.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
+		}
+		// Normalize() fills the obfuscation defaults (Jc/Jmin/Jmax/S1/S2/H1..H4).
 	}
 	n.Normalize()
 }

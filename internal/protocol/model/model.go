@@ -49,6 +49,7 @@ const (
 	ProtoTUIC        Protocol = "tuic"
 	ProtoAnyTLS      Protocol = "anytls"
 	ProtoWireGuard   Protocol = "wireguard"
+	ProtoAmneziaWG   Protocol = "amneziawg"
 	ProtoShadowTLS   Protocol = "shadowtls"
 	ProtoSSH         Protocol = "ssh"
 	ProtoBrook       Protocol = "brook"
@@ -362,6 +363,24 @@ type WireGuardOptions struct {
 	LocalAddress []string `json:"local_address,omitempty"`
 }
 
+// AmneziaWGOptions is a WireGuard config plus AmneziaWG's obfuscation parameters
+// (Jc/Jmin/Jmax junk packets, S1/S2 init/response junk sizes, H1..H4 header type
+// magics). ForgePanel runs AmneziaWG in KERNEL mode via the amneziawg module and
+// awg-quick, so these live on the interface and MUST match between server and
+// client. It embeds WireGuardOptions so the base wg-quick fields are reused.
+type AmneziaWGOptions struct {
+	WireGuardOptions
+	Jc   int   `json:"jc,omitempty"`   // junk packet count (1..128)
+	Jmin int   `json:"jmin,omitempty"` // junk packet min size
+	Jmax int   `json:"jmax,omitempty"` // junk packet max size (Jmin < Jmax <= 1280)
+	S1   int   `json:"s1,omitempty"`   // init packet junk size (S1+56 != S2)
+	S2   int   `json:"s2,omitempty"`   // response packet junk size
+	H1   int64 `json:"h1,omitempty"`   // header magics, distinct and > 4
+	H2   int64 `json:"h2,omitempty"`
+	H3   int64 `json:"h3,omitempty"`
+	H4   int64 `json:"h4,omitempty"`
+}
+
 // ShadowTLSOptions wraps a Shadowsocks inbound behind a real TLS handshake.
 // ShadowTLS is a camouflage layer, not a proxy: the sing-box shadowtls inbound
 // must `detour` to an inner Shadowsocks inbound that carries the actual traffic.
@@ -444,6 +463,7 @@ type Node struct {
 	TUIC      *TUICOptions      `json:"tuic,omitempty"`
 	AnyTLS    *AnyTLSOptions    `json:"anytls,omitempty"`
 	WireGuard *WireGuardOptions `json:"wireguard,omitempty"`
+	AmneziaWG *AmneziaWGOptions `json:"amneziawg,omitempty"`
 	ShadowTLS *ShadowTLSOptions `json:"shadowtls,omitempty"`
 	SSH       *SSHOptions       `json:"ssh,omitempty"`
 	Brook     *BrookOptions     `json:"brook,omitempty"`
@@ -541,6 +561,16 @@ func (n *Node) Validate() error {
 		}
 		if len(n.WireGuard.Reserved) != 0 && len(n.WireGuard.Reserved) != 3 {
 			return errors.New("wireguard: reserved must be exactly 3 bytes")
+		}
+	case ProtoAmneziaWG:
+		if n.AmneziaWG == nil || n.AmneziaWG.PrivateKey == "" || n.AmneziaWG.PublicKey == "" {
+			return fmt.Errorf("amneziawg: %w (needs private and peer public key)", ErrNoCredential)
+		}
+		if n.AmneziaWG.Jmax != 0 && n.AmneziaWG.Jmin >= n.AmneziaWG.Jmax {
+			return errors.New("amneziawg: Jmin must be less than Jmax")
+		}
+		if n.AmneziaWG.S1 != 0 && n.AmneziaWG.S2 != 0 && n.AmneziaWG.S1+56 == n.AmneziaWG.S2 {
+			return errors.New("amneziawg: S1+56 must not equal S2")
 		}
 	case ProtoShadowTLS:
 		if n.ShadowTLS == nil || n.ShadowTLS.Password == "" {
@@ -748,6 +778,41 @@ func (n *Node) Normalize() {
 		if n.WireGuard != nil && n.WireGuard.MTU == 0 {
 			n.WireGuard.MTU = 1420
 		}
+	case ProtoAmneziaWG:
+		if n.AmneziaWG == nil {
+			n.AmneziaWG = &AmneziaWGOptions{}
+		}
+		a := n.AmneziaWG
+		if a.MTU == 0 {
+			a.MTU = 1420
+		}
+		if a.Jc == 0 {
+			a.Jc = 8
+		}
+		if a.Jmin == 0 {
+			a.Jmin = 50
+		}
+		if a.Jmax == 0 {
+			a.Jmax = 1000
+		}
+		if a.S1 == 0 {
+			a.S1 = 86
+		}
+		if a.S2 == 0 {
+			a.S2 = 574
+		}
+		if a.H1 == 0 {
+			a.H1 = 1234567
+		}
+		if a.H2 == 0 {
+			a.H2 = 2345678
+		}
+		if a.H3 == 0 {
+			a.H3 = 3456789
+		}
+		if a.H4 == 0 {
+			a.H4 = 4567890
+		}
 	case ProtoShadowTLS:
 		if n.ShadowTLS == nil {
 			n.ShadowTLS = &ShadowTLSOptions{}
@@ -932,6 +997,13 @@ func (n *Node) Clone() *Node {
 		v.AllowedIPs = append([]string(nil), n.WireGuard.AllowedIPs...)
 		v.Reserved = append([]int(nil), n.WireGuard.Reserved...)
 		c.WireGuard = &v
+	}
+	if n.AmneziaWG != nil {
+		v := *n.AmneziaWG
+		v.LocalAddress = append([]string(nil), n.AmneziaWG.LocalAddress...)
+		v.AllowedIPs = append([]string(nil), n.AmneziaWG.AllowedIPs...)
+		v.Reserved = append([]int(nil), n.AmneziaWG.Reserved...)
+		c.AmneziaWG = &v
 	}
 	if n.ShadowTLS != nil {
 		v := *n.ShadowTLS

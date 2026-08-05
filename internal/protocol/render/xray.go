@@ -417,6 +417,10 @@ func EngineFor(p model.Protocol) string {
 	// standard-interoperable server; sing-box's old wg outbound was removed).
 	case model.ProtoHysteria2, model.ProtoTUIC, model.ProtoAnyTLS, model.ProtoShadowTLS, model.ProtoSSH, model.ProtoWireGuard:
 		return "sing-box"
+	case model.ProtoAmneziaWG:
+		// AmneziaWG runs in KERNEL mode via the amneziawg module + awg-quick, its
+		// own engine — never sing-box (that would be the userspace implementation).
+		return "amneziawg"
 	case model.ProtoBrook:
 		return "brook"
 	case model.ProtoForgeDNS:
