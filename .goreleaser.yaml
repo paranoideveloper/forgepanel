@@ -26,6 +26,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
 
   - id: forgectl
     main: ./cmd/forgectl
@@ -39,7 +42,11 @@ builds:
     # forgectl is the only command with a `version` var to stamp
     # (cmd/forgectl/version.go); `forgectl version` prints it.
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+      - -X main.version={{ .Version }}
 
   - id: forgenode
     main: ./cmd/forgenode
@@ -52,6 +59,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
 
 archives:
   # Raw, uncompressed binaries: forgepanel-linux-amd64, forgectl-linux-arm64, …
@@ -105,6 +115,15 @@ nfpms:
       preremove: packaging/scripts/preremove.sh
       postremove: packaging/scripts/postremove.sh
 
+# An SBOM per released artifact, so a consumer can audit what is inside
+# without unpacking it. Requires syft on PATH (the release workflow
+# installs it before invoking goreleaser).
+sboms:
+  - id: archive
+    artifacts: archive
+  - id: packages
+    artifacts: package
+
 checksum:
   name_template: "checksums.txt"
 
@@ -128,9 +147,29 @@ release:
   prerelease: auto
   extra_files:
     - glob: ./install.sh
+    - glob: ./install.sh.sha256
   footer: |
     ## Install
 
+    A pipeline that produces checksums, SBOMs and signatures should not then ask
+    you to pipe an unverified script from a moving branch straight into a root
+    shell. Fetch the pinned installer for THIS release and check it first:
+
     ```
-    curl -fsSL https://raw.githubusercontent.com/paranoideveloper/forgepanel/main/install.sh | sudo bash
+    curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/{{ .Tag }}/install.sh
+    curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/{{ .Tag }}/install.sh.sha256
+    sha256sum -c install.sh.sha256 && sudo bash install.sh
     ```
+
+    ### Docker
+
+    ```
+    docker run -d --name forgepanel --restart unless-stopped \
+      -p 2053:2053 -v forgepanel-data:/var/lib/forgepanel \
+      ghcr.io/paranoideveloper/forgepanel:{{ .Tag }}
+    ```
+
+    Or with Compose — see `docker-compose.yml` in the repository.
+
+    The image runs as a non-root user with only `CAP_NET_BIND_SERVICE`, which is
+    what lets it bind 80/443/53 without being root.

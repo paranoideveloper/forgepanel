@@ -31,6 +31,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 //go:embed web/*
@@ -264,7 +265,13 @@ func configureTrustedProxies(r *gin.Engine) {
 func (s *Server) routes() {
 	r := s.router
 	configureTrustedProxies(r)
-	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+	// healthz carries the build identity so an operator (and the release
+	// pipeline's metadata check) can confirm which artifact is actually serving,
+	// without shelling into the host or the container.
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok", "version": version.Get()})
+	})
+	r.GET("/api/version", func(c *gin.Context) { c.JSON(200, version.Get()) })
 
 	api := r.Group("/api")
 	{

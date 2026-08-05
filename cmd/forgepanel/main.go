@@ -20,15 +20,26 @@ import (
 
 	"github.com/forgepanel/forgepanel/internal/api"
 	"github.com/forgepanel/forgepanel/internal/config"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 func main() {
+	// --version before anything else: it must work without a data directory,
+	// a config, or the ability to bind a port, because it is what a package
+	// smoke test and the release pipeline's metadata check call.
+	for _, a := range os.Args[1:] {
+		if a == "--version" || a == "-version" || a == "version" {
+			fmt.Println(version.String("forgepanel"))
+			return
+		}
+	}
 	cfg, srv, ln, err := start()
 	if err != nil {
 		// A bind failure after a settings change: restore the last-known-good
 		// panel.json and try once more so a bad port/domain can't lock us out.
 		if cfg != nil && config.RestoreRollback(cfg.DataDir) {
 			fmt.Fprintln(os.Stderr, "forgepanel: new settings failed to bind — rolled back to previous configuration")
+			releaseDataLock() // the retry re-takes it; do not block on ourselves
 			cfg, srv, ln, err = start()
 		}
 		if err != nil {
@@ -78,11 +89,32 @@ func main() {
 
 // start loads config, builds the server, and opens the panel listener. Splitting
 // this out lets main retry once after a rollback.
+// dataUnlock releases the data-directory lock taken in start(). A failed bind
+// re-runs start(), so it is released before retrying rather than deadlocking
+// against ourselves.
+var dataUnlock func() error
+
+func releaseDataLock() {
+	if dataUnlock != nil {
+		_ = dataUnlock()
+		dataUnlock = nil
+	}
+}
+
 func start() (*config.Config, *api.Server, net.Listener, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("config: %w", err)
 	}
+	// Refuse to share a data directory with another running instance. The
+	// systemd→Docker migration makes this easy to get wrong, and two panels on
+	// one SQLite file corrupt traffic accounting in ways that are painful to
+	// diagnose after the fact. The lock is advisory and released on exit.
+	unlock, err := config.LockDataDir(cfg.DataDir)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	dataUnlock = unlock
 	srv, err := api.NewWithStore(cfg)
 	if err != nil {
 		return cfg, nil, nil, fmt.Errorf("store: %w", err)
@@ -108,6 +140,9 @@ func banner(cfg *config.Config, srv *api.Server) {
 	fmt.Println("┌─────────────────────────────────────────────┐")
 	fmt.Println("│  ⚡ ForgePanel                               │")
 	fmt.Println("└─────────────────────────────────────────────┘")
+	// The build identity goes in the startup log so a support conversation can
+	// start from what is actually running rather than what was meant to be.
+	fmt.Printf("  %s\n", version.String("forgepanel"))
 	fmt.Printf("  Panel:  %s\n", srv.PublicURL())
 	fmt.Printf("  Listen: %s://%s:%d  (data: %s)\n", scheme, orAll(p.BindAddress), p.Port, cfg.DataDir)
 	if srv.SetupToken != "" {

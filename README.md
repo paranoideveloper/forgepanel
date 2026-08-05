@@ -26,8 +26,15 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 ## Quick install (Linux, one command)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/paranoideveloper/forgepanel/main/install.sh | sudo bash
+VERSION=v1.0.0
+curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh
+curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh.sha256
+sha256sum -c install.sh.sha256 && sudo bash install.sh
 ```
+
+Two steps rather than a pipe into a root shell, on purpose: the installer is
+published with a checksum for each release, so verify it before running it. See
+[docs/INSTALL.md](docs/INSTALL.md).
 
 The installer downloads the latest release binary, creates a `forgepanel` systemd service, starts it, and prints your **panel URL** and a **one-time setup token**. Open the URL and create your administrator account with that token — no password is generated for you. It walks you through the panel port and (optional) domain/HTTPS with plain, coloured prompts; add `--tui` for a full-screen dialog UI.
 
