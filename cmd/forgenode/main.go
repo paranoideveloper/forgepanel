@@ -90,9 +90,27 @@ func (a *NodeAgent) applyConfig(cfg string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	tmpConfigPath := filepath.Join(a.dataDir, "node-xray.tmp.json")
 	configPath := filepath.Join(a.dataDir, "node-xray.json")
-	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
-		fmt.Fprintln(os.Stderr, "forgenode: failed to write config:", err)
+
+	if err := os.WriteFile(tmpConfigPath, []byte(cfg), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: failed to write temp config:", err)
+		return
+	}
+
+	if a.xrayBin != "" {
+		// Validate config before touching active process or committing config
+		testCmd := exec.Command(a.xrayBin, "run", "-test", "-config", tmpConfigPath)
+		if out, err := testCmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "forgenode: invalid xray config rejected: %v: %s\n", err, string(out))
+			_ = os.Remove(tmpConfigPath)
+			return
+		}
+	}
+
+	if err := os.Rename(tmpConfigPath, configPath); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: failed to commit config:", err)
+		_ = os.Remove(tmpConfigPath)
 		return
 	}
 
@@ -110,14 +128,7 @@ func (a *NodeAgent) applyConfig(cfg string) {
 		return
 	}
 
-	// Validate config before launching
-	testCmd := exec.Command(a.xrayBin, "run", "-test", "-config", configPath)
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "forgenode: invalid xray config: %v: %s\n", err, string(out))
-		return
-	}
-
-	// Launch xray core
+	// Launch xray core with validated config
 	cmd := exec.Command(a.xrayBin, "run", "-config", configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

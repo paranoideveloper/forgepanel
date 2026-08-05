@@ -306,3 +306,31 @@ func TestStore_SettingsAndAudit(t *testing.T) {
 	// Audit
 	s.Audit(&AuditLog{Actor: "admin", Action: "user.create", IP: "1.2.3.4", Target: "bob"})
 }
+
+
+func TestDeleteUserCascadePurgesNodeClientTraffic(t *testing.T) {
+	s := newTestStore(t)
+	u := &User{Username: "purge_test_user"}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+
+	nt := &NodeClientTraffic{NodeID: 10, Username: "purge_test_user", LastRecorded: 5000}
+	if err := s.SaveNodeClientTraffic(nt); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetNodeClientTraffic(10, "purge_test_user")
+	if err != nil || got.LastRecorded != 5000 {
+		t.Fatalf("failed to retrieve stored node traffic baseline: %v, got %v", err, got)
+	}
+
+	if err := s.DeleteUserCascade(u.ID); err != nil {
+		t.Fatalf("DeleteUserCascade failed: %v", err)
+	}
+
+	gotAfter, _ := s.GetNodeClientTraffic(10, "purge_test_user")
+	if gotAfter != nil && gotAfter.LastRecorded != 0 {
+		t.Fatalf("expected node client traffic baseline to be purged, got %v", gotAfter.LastRecorded)
+	}
+}

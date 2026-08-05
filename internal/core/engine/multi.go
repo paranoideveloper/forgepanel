@@ -51,8 +51,8 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 				b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, err.Error()})
 				continue
 			}
+			applyXrayClients(in, n, sp.Clients)
 			if len(sp.Clients) > 0 {
-				applyXrayClients(in, n, sp.Clients)
 				statsUsed = true
 			}
 			xin = append(xin, in)
@@ -137,7 +137,7 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 	if settings == nil {
 		return
 	}
-	var arr []any
+	var arr = []any{}
 	for _, cl := range clients {
 		switch n.Protocol {
 		case model.ProtoVLESS:
@@ -157,9 +157,7 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 			return
 		}
 	}
-	if len(arr) > 0 {
-		settings["clients"] = arr
-	}
+	settings["clients"] = arr
 }
 
 // applySingboxUsers rewrites a sing-box inbound's users array per user.

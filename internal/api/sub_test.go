@@ -212,3 +212,93 @@ func TestValidTokenNotBlockedByAnotherSourcesGuessing(t *testing.T) {
 		t.Fatalf("legitimate subscriber got %d after another source was throttled", rec.Code)
 	}
 }
+
+
+func TestMultiLocationSubscriptionLinks(t *testing.T) {
+	s := dbServerT(t)
+
+	n1 := &store.Node{Name: "us-east", Address: "useast.vpn.com", EnrollToken: "tok-useast", Enrolled: true}
+	if err := s.db.CreateNode(n1); err != nil {
+		t.Fatal(err)
+	}
+
+	n2 := &store.Node{Name: "eu-west", Address: "euwest.vpn.com", EnrollToken: "tok-euwest", Enrolled: true}
+	if err := s.db.CreateNode(n2); err != nil {
+		t.Fatal(err)
+	}
+
+	spec1 := &model.Node{Protocol: model.ProtoVLESS, Port: 443, Remark: "US-Node", Address: "0.0.0.0", UUID: "11111111-1111-1111-1111-111111111111"}
+	ib1, err := s.db.CreateInbound(spec1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ib1.NodeID = n1.ID
+	if err := s.db.SaveInbound(ib1); err != nil {
+		t.Fatal(err)
+	}
+
+	spec2 := &model.Node{Protocol: model.ProtoVLESS, Port: 8443, Remark: "EU-Node", Address: "0.0.0.0", UUID: "11111111-1111-1111-1111-111111111111"}
+	ib2, err := s.db.CreateInbound(spec2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ib2.NodeID = n2.ID
+	if err := s.db.SaveInbound(ib2); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &store.Group{Name: "multinode-g", InboundIDs: []uint{ib1.ID, ib2.ID}}
+	if err := s.db.CreateGroup(g); err != nil {
+		t.Fatal(err)
+	}
+
+	u := &store.User{Username: "bob", GroupID: g.ID, SubToken: "multitok123", UUID: "11111111-1111-1111-1111-111111111111", Status: store.StatusActive}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.GET("/sub/:token", s.handleSub)
+	r.GET("/sub/:token/*format", s.handleSub)
+	s.router = r
+
+	// Links
+	rec := subGet(t, s, "/sub/multitok123/links", "")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200 for links, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "@useast.vpn.com:443") || !strings.Contains(body, "@euwest.vpn.com:8443") {
+		t.Fatalf("links format missing multi-node hostnames: %s", body)
+	}
+
+	// Clash
+	rec = subGet(t, s, "/sub/multitok123/clash", "")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200 for clash, got %d", rec.Code)
+	}
+	cbody := rec.Body.String()
+	if !strings.Contains(cbody, "server: useast.vpn.com") || !strings.Contains(cbody, "server: euwest.vpn.com") {
+		t.Fatalf("clash format missing multi-node hostnames: %s", cbody)
+	}
+
+	// JSON
+	rec = subGet(t, s, "/sub/multitok123/json", "")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200 for json, got %d", rec.Code)
+	}
+	var jsonNodes []*model.Node
+	if err := json.Unmarshal(rec.Body.Bytes(), &jsonNodes); err != nil {
+		t.Fatalf("failed to parse json sub response: %v", err)
+	}
+	if len(jsonNodes) != 2 {
+		t.Fatalf("expected 2 nodes in json sub, got %d", len(jsonNodes))
+	}
+	hosts := map[string]bool{}
+	for _, jn := range jsonNodes {
+		hosts[jn.Address] = true
+	}
+	if !hosts["useast.vpn.com"] || !hosts["euwest.vpn.com"] {
+		t.Fatalf("json sub missing multi-node addresses: %v", hosts)
+	}
+}

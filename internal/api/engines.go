@@ -107,6 +107,11 @@ func (s *Server) engineUnavailable(c *gin.Context) {
 // Errors are non-fatal (surfaced via /api/admin/engines): a panel must not crash
 // because a core failed to download or a saved config is rejected.
 func (s *Server) reloadEngines() {
+	defer func() {
+		if r := recover(); r != nil {
+			// recover gracefully from engine reload panic
+		}
+	}()
 	if s.engine == nil {
 		return
 	}

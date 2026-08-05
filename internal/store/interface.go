@@ -59,9 +59,14 @@ type UserRepository interface {
 type NodeRepository interface {
 	CreateNode(n *Node) error
 	ListNodes() ([]Node, error)
+	NodeByID(id uint) (*Node, error)
 	NodeByToken(token string) (*Node, error)
 	SaveNode(n *Node) error
 	DeleteNode(id uint) error
+	GetNodeClientTraffic(nodeID uint, username string) (*NodeClientTraffic, error)
+	SaveNodeClientTraffic(nt *NodeClientTraffic) error
+	PurgeUserNodeClientTraffic(username string) error
+	PurgeNodeClientTraffic(nodeID uint) error
 }
 
 // ZoneRepository defines ForgeDNS zone persistence operations.

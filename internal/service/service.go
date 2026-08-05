@@ -66,6 +66,17 @@ func (m *Manager) DecommissionNode(ctx context.Context, nodeID uint, fallbackNod
 	if err != nil {
 		return err
 	}
+	inbounds, _ := m.db.ListInbounds()
+	attachedCount := 0
+	for _, in := range inbounds {
+		n, err := in.Node()
+		if err == nil && n.Address == node.Address {
+			attachedCount++
+		}
+	}
+	if attachedCount > 0 && fallbackNodeID == 0 {
+		return fmt.Errorf("%w: node has %d attached inbounds; specify a fallback node", ErrInvalidMigration, attachedCount)
+	}
 	if fallbackNodeID != 0 && fallbackNodeID == nodeID {
 		return fmt.Errorf("%w: fallback node cannot be the deleted node", ErrInvalidMigration)
 	}
@@ -161,7 +172,11 @@ func (m *Manager) RecordTraffic(ctx context.Context, username string, bytes int6
 	}
 	for _, u := range users {
 		if u.Username == username {
-			u.UsedTraffic += bytes
+			if 9223372036854775807-bytes < u.UsedTraffic {
+				u.UsedTraffic = 9223372036854775807
+			} else {
+				u.UsedTraffic += bytes
+			}
 			return m.db.SaveUser(&u)
 		}
 	}
@@ -181,7 +196,11 @@ func (m *Manager) PollAndSyncTraffic(ctx context.Context, stats map[string]int64
 		}
 		for _, u := range users {
 			if u.Username == username {
-				u.UsedTraffic += delta
+				if 9223372036854775807-delta < u.UsedTraffic {
+					u.UsedTraffic = 9223372036854775807
+				} else {
+					u.UsedTraffic += delta
+				}
 				if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit {
 					u.Status = store.StatusDisabled
 					expired = append(expired, u.ID)
@@ -265,4 +284,84 @@ func (m *Manager) MigrateNodeInbounds(ctx context.Context, sourceNodeID uint, de
 		}
 	}
 	return migrated, nil
+}
+
+// ValidateNodeAddress checks node IP / hostname against SSRF & dangerous loopback targets.
+func ValidateNodeAddress(addr string) error {
+	if addr == "" {
+		return nil
+	}
+	if addr == "127.0.0.1" || addr == "localhost" || addr == "::1" || addr == "0.0.0.0" {
+		return errors.New("service: node address cannot be loopback or wildcard")
+	}
+	return nil
+}
+
+// MergeNodeClientTraffic calculates the exact incremental delta for a node user
+// based on NodeClientTraffic cumulative baseline, preventing double counting on restarts.
+func (m *Manager) MergeNodeClientTraffic(ctx context.Context, nodeID uint, username string, cumulativeBytes int64) (int64, error) {
+	if cumulativeBytes < 0 {
+		return 0, nil
+	}
+
+	nt, err := m.db.GetNodeClientTraffic(nodeID, username)
+	if err != nil {
+		// New baseline entry for this (node, user)
+		newNT := &store.NodeClientTraffic{NodeID: nodeID, Username: username, LastRecorded: cumulativeBytes}
+		_ = m.db.SaveNodeClientTraffic(newNT)
+		if cumulativeBytes > 0 {
+			_ = m.RecordTraffic(ctx, username, cumulativeBytes)
+		}
+		return cumulativeBytes, nil
+	}
+
+	var delta int64
+	if cumulativeBytes < nt.LastRecorded {
+		// Node restarted or counter reset -> delta is current cumulative
+		delta = cumulativeBytes
+	} else {
+		delta = cumulativeBytes - nt.LastRecorded
+	}
+
+	nt.LastRecorded = cumulativeBytes
+	_ = m.db.SaveNodeClientTraffic(nt)
+
+	if delta > 0 {
+		_ = m.RecordTraffic(ctx, username, delta)
+	}
+
+	return delta, nil
+}
+
+// SanitizeInboundSpec strips master-internal fields before handing config specs to node agents.
+func SanitizeInboundSpec(spec *model.Node) *model.Node {
+	if spec == nil {
+		return nil
+	}
+	cl := spec.Clone()
+	cl.Normalize()
+	return cl
+}
+
+// MarkNodeDirty marks a node as needing configuration re-sync.
+func (m *Manager) MarkNodeDirty(ctx context.Context, nodeID uint) error {
+	node, err := m.GetNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	node.ConfigDirty = true
+	node.ConfigDirtyAt = &now
+	return m.db.SaveNode(node)
+}
+
+// ClearNodeDirty clears dirty flag after a successful network sync.
+func (m *Manager) ClearNodeDirty(ctx context.Context, nodeID uint) error {
+	node, err := m.GetNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	node.ConfigDirty = false
+	node.ConfigDirtyAt = nil
+	return m.db.SaveNode(node)
 }

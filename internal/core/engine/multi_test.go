@@ -169,3 +169,49 @@ func TestSingboxUserNameNeverLeaksCredentials(t *testing.T) {
 		t.Fatalf("stats name leaks a credential: %q", name)
 	}
 }
+
+
+func TestBuildMultiZeroClientsRendersEmptyArray(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoVLESS, Address: "0.0.0.0", Port: 443, UUID: "tmpl", Transport: model.Transport{Network: model.NetTCP}}
+	n.Normalize()
+	sp := InboundSpec{Node: n, Clients: []ClientCred{}}
+	b, err := BuildMulti([]InboundSpec{sp}, 10085, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg struct {
+		Inbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Clients []map[string]any `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(b.Xray, &cfg); err != nil {
+		t.Fatalf("failed to unmarshal xray config: %v", err)
+	}
+
+	if len(cfg.Inbounds) == 0 {
+		t.Fatal("expected at least 1 inbound")
+	}
+
+	var vlessClients []map[string]any
+	found := false
+	for _, in := range cfg.Inbounds {
+		if in.Protocol == "vless" {
+			vlessClients = in.Settings.Clients
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("vless inbound not found in config")
+	}
+	if vlessClients == nil {
+		t.Fatal("expected clients array to be non-nil [] (rendered as [])")
+	}
+	if len(vlessClients) != 0 {
+		t.Fatalf("expected 0 clients, got %d", len(vlessClients))
+	}
+}

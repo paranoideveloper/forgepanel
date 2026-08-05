@@ -83,7 +83,14 @@ func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			fn()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// recover gracefully from scheduler job panic
+					}
+				}()
+				fn()
+			}()
 		}
 	}
 }
@@ -107,7 +114,11 @@ func (s *Scheduler) pollAndAccount() {
 		if u == nil {
 			continue
 		}
-		u.UsedTraffic += bytes
+		if 9223372036854775807-bytes < u.UsedTraffic {
+			u.UsedTraffic = 9223372036854775807
+		} else {
+			u.UsedTraffic += bytes
+		}
 		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
 			u.Status = store.StatusLimited
 			changed = true

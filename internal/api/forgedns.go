@@ -24,6 +24,11 @@ import (
 // syncForgeDNS pushes the panel's enabled zones to the DNS controller — called
 // after any zone mutation and at boot, so activation is entirely UI-driven.
 func (s *Server) syncForgeDNS() {
+	defer func() {
+		if r := recover(); r != nil {
+			// recover gracefully from forgedns sync panic
+		}
+	}()
 	if s.fdns == nil || s.db == nil {
 		return
 	}

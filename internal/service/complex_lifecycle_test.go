@@ -194,3 +194,134 @@ func TestServiceEdgeCases(t *testing.T) {
 		t.Error("Expected error migrating user to non-existent group, got nil")
 	}
 }
+
+func TestTrafficCounterOverflowProtection(t *testing.T) {
+	ctx := context.Background()
+	mgr, db := setupTestService(t)
+
+	usr := &store.User{Username: "user_overflow", Status: store.StatusActive}
+	if err := db.CreateUser(usr); err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+
+	// Record huge traffic near int64 limit
+	hugeTraffic := int64(9223372036854775800)
+	if err := mgr.RecordTraffic(ctx, "user_overflow", hugeTraffic); err != nil {
+		t.Fatalf("RecordTraffic failed: %v", err)
+	}
+
+	// Add more traffic that would overflow int64
+	if err := mgr.RecordTraffic(ctx, "user_overflow", 1000); err != nil {
+		t.Fatalf("RecordTraffic second pass failed: %v", err)
+	}
+
+	uReloaded, _ := db.UserByID(usr.ID)
+	if uReloaded.UsedTraffic != 9223372036854775807 {
+		t.Errorf("expected traffic clamped to MaxInt64 (9223372036854775807), got %d", uReloaded.UsedTraffic)
+	}
+}
+
+func TestNodeDecommissionBlockedWhenInboundsAttached(t *testing.T) {
+	ctx := context.Background()
+	mgr, _ := setupTestService(t)
+
+	nodeA, _, _, err := mgr.EnrollNode(ctx, "Node-Attached", "192.168.1.50")
+	if err != nil {
+		t.Fatalf("EnrollNode failed: %v", err)
+	}
+
+	nodeSpec := &model.Node{
+		Protocol: model.ProtoVLESS, Port: 443, Address: "192.168.1.50", UUID: "a0a0a0a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4",
+	}
+	if _, err := mgr.CreateInbound(ctx, nodeSpec); err != nil {
+		t.Fatalf("CreateInbound failed: %v", err)
+	}
+
+	// Attempting to decommission Node A without a fallback node must fail
+	if err := mgr.DecommissionNode(ctx, nodeA.ID, 0); err == nil {
+		t.Error("expected error decommissioning node with attached inbounds without fallback, got nil")
+	}
+}
+
+func TestNodeClientTrafficMergeAntiDoubleCount(t *testing.T) {
+	ctx := context.Background()
+	mgr, db := setupTestService(t)
+
+	usr := &store.User{Username: "user_anti_double", Status: store.StatusActive}
+	if err := db.CreateUser(usr); err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+
+	// First heartbeat: cumulative = 1,000,000 bytes (1MB)
+	delta1, err := mgr.MergeNodeClientTraffic(ctx, 1, "user_anti_double", 1000000)
+	if err != nil {
+		t.Fatalf("MergeNodeClientTraffic pass 1 failed: %v", err)
+	}
+	if delta1 != 1000000 {
+		t.Errorf("expected initial delta = 1,000,000, got %d", delta1)
+	}
+
+	// Second heartbeat: cumulative = 1,500,000 bytes (500KB new delta)
+	delta2, err := mgr.MergeNodeClientTraffic(ctx, 1, "user_anti_double", 1500000)
+	if err != nil {
+		t.Fatalf("MergeNodeClientTraffic pass 2 failed: %v", err)
+	}
+	if delta2 != 500000 {
+		t.Errorf("expected delta 2 = 500,000, got %d", delta2)
+	}
+
+	// Third heartbeat after node restart: cumulative resets to 200,000 bytes
+	delta3, err := mgr.MergeNodeClientTraffic(ctx, 1, "user_anti_double", 200000)
+	if err != nil {
+		t.Fatalf("MergeNodeClientTraffic pass 3 failed: %v", err)
+	}
+	if delta3 != 200000 {
+		t.Errorf("expected delta 3 after restart = 200,000, got %d", delta3)
+	}
+
+	uReloaded, _ := db.UserByID(usr.ID)
+	// Total traffic = 1,000,000 + 500,000 + 200,000 = 1,700,000 bytes
+	if uReloaded.UsedTraffic != 1700000 {
+		t.Errorf("expected total traffic = 1,700,000, got %d", uReloaded.UsedTraffic)
+	}
+}
+
+func TestNodeAddressSSRFGuard(t *testing.T) {
+	if err := service.ValidateNodeAddress("127.0.0.1"); err == nil {
+		t.Error("expected SSRF error for 127.0.0.1, got nil")
+	}
+	if err := service.ValidateNodeAddress("localhost"); err == nil {
+		t.Error("expected SSRF error for localhost, got nil")
+	}
+	if err := service.ValidateNodeAddress("192.168.1.100"); err != nil {
+		t.Errorf("expected valid address 192.168.1.100, got %v", err)
+	}
+}
+
+func TestNodeProactiveDirtyMarking(t *testing.T) {
+	ctx := context.Background()
+	mgr, db := setupTestService(t)
+
+	nodeA, _, _, err := mgr.EnrollNode(ctx, "Node-Dirty", "192.168.1.88")
+	if err != nil {
+		t.Fatalf("EnrollNode failed: %v", err)
+	}
+
+	if err := mgr.MarkNodeDirty(ctx, nodeA.ID); err != nil {
+		t.Fatalf("MarkNodeDirty failed: %v", err)
+	}
+
+	nDirty, _ := db.NodeByToken(nodeA.EnrollToken)
+	if !nDirty.ConfigDirty || nDirty.ConfigDirtyAt == nil {
+		t.Error("expected node marked dirty with timestamp")
+	}
+
+	if err := mgr.ClearNodeDirty(ctx, nodeA.ID); err != nil {
+		t.Fatalf("ClearNodeDirty failed: %v", err)
+	}
+
+	nClean, _ := db.NodeByToken(nodeA.EnrollToken)
+	if nClean.ConfigDirty || nClean.ConfigDirtyAt != nil {
+		t.Error("expected node dirty flag cleared")
+	}
+}

@@ -63,3 +63,34 @@ func TestNodeAgentHeartbeatAndApplyConfig(t *testing.T) {
 		t.Fatalf("expected written config %q, got %q", cfg, string(data))
 	}
 }
+
+
+func TestNodeAgentRejectsInvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a dummy failing binary for xray test failure simulation
+	dummyBin := filepath.Join(dir, "fake-xray")
+	script := "#!/bin/sh\nif [ \"$1\" = \"run\" ] && [ \"$2\" = \"-test\" ]; then\n  echo \"invalid config schema\" >&2\n  exit 1\nfi\nexit 0\n"
+	if err := os.WriteFile(dummyBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := &NodeAgent{
+		panel:   "http://localhost:8080",
+		token:   "test-token",
+		dataDir: dir,
+		xrayBin: dummyBin,
+	}
+
+	// Apply invalid config
+	agent.applyConfig("bad-config")
+
+	writtenConfigPath := filepath.Join(dir, "node-xray.json")
+	if _, err := os.Stat(writtenConfigPath); !os.IsNotExist(err) {
+		t.Fatalf("expected node-xray.json NOT to exist after invalid config rejection")
+	}
+
+	if agent.lastCfg != "" {
+		t.Fatalf("expected lastCfg to be empty, got %q", agent.lastCfg)
+	}
+}
