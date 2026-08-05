@@ -59,6 +59,9 @@ func awgToolsAvailable() bool {
 // of kernel mode). Returns nil when the module is available.
 func awgModuleReady() error {
 	// Already loaded?
+	if _, err := os.Stat("/sys/module/amneziawg"); err == nil {
+		return nil
+	}
 	if data, err := os.ReadFile("/proc/modules"); err == nil && strings.Contains(string(data), "amneziawg") {
 		return nil
 	}

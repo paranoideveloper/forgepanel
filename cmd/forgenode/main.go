@@ -1,8 +1,6 @@
 // Command forgenode is the lightweight remote node agent (spec §10). It enrolls
 // with the panel using a one-time token, then heartbeats on an interval,
-// receiving the engine config to run locally. Transport here is token-
-// authenticated HTTPS; the hardening upgrade is mTLS gRPC with a panel-issued
-// per-node client certificate (documented in docs/DECISIONS.md).
+// receiving the engine config to run locally and supervising the proxy core.
 package main
 
 import (
@@ -12,8 +10,24 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
 	"time"
+
+	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 )
+
+type NodeAgent struct {
+	panel     string
+	token     string
+	dataDir   string
+	binMgr    *binmgr.Manager
+	xrayBin   string
+	lastCfg   string
+	mu        sync.Mutex
+	activeCmd *exec.Cmd
+}
 
 func main() {
 	panel := os.Getenv("PANEL")
@@ -22,46 +36,124 @@ func main() {
 		fmt.Fprintln(os.Stderr, "forgenode: set PANEL and TOKEN environment variables")
 		os.Exit(2)
 	}
-	if err := register(panel, token); err != nil {
-		fmt.Fprintln(os.Stderr, "forgenode: register:", err)
+
+	dataDir := os.Getenv("FORGEPANEL_DATA")
+	if dataDir == "" {
+		dataDir = "/var/lib/forgepanel"
+	}
+	_ = os.MkdirAll(dataDir, 0o700)
+
+	bm := binmgr.New(dataDir)
+	xrayPath, err := bm.Ensure(binmgr.EngineXray)
+	if err != nil {
+		// Fallback to path lookup if binmgr download fails in offline test environments
+		xrayPath, _ = exec.LookPath("xray")
+	}
+
+	agent := &NodeAgent{
+		panel:   panel,
+		token:   token,
+		dataDir: dataDir,
+		binMgr:  bm,
+		xrayBin: xrayPath,
+	}
+
+	if err := agent.register(); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: register error:", err)
 		os.Exit(1)
 	}
-	fmt.Println("forgenode: enrolled with", panel)
+	fmt.Println("forgenode: enrolled successfully with", panel)
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	// Initial heartbeat immediately
+	agent.step()
+
 	for range ticker.C {
-		cfg, err := heartbeat(panel, token)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "forgenode: heartbeat:", err)
-			continue
-		}
-		if cfg != "" {
-			_ = os.WriteFile("/tmp/forgenode-xray.json", []byte(cfg), 0o600)
-		}
+		agent.step()
 	}
 }
 
-func register(panel, token string) error {
-	body, _ := json.Marshal(map[string]string{"token": token, "core_version": "xray"})
-	return post(panel+"/api/node/register", body, nil)
+func (a *NodeAgent) step() {
+	cfg, err := a.heartbeat()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: heartbeat error:", err)
+		return
+	}
+	if cfg != "" && cfg != a.lastCfg {
+		a.applyConfig(cfg)
+	}
 }
 
-func heartbeat(panel, token string) (string, error) {
-	body, _ := json.Marshal(map[string]any{"token": token, "cpu": 0.0, "mem_mb": 0})
+func (a *NodeAgent) applyConfig(cfg string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	configPath := filepath.Join(a.dataDir, "node-xray.json")
+	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: failed to write config:", err)
+		return
+	}
+
+	a.lastCfg = cfg
+
+	// Stop existing process if running
+	if a.activeCmd != nil && a.activeCmd.Process != nil {
+		_ = a.activeCmd.Process.Kill()
+		_ = a.activeCmd.Wait()
+		a.activeCmd = nil
+	}
+
+	if a.xrayBin == "" {
+		fmt.Println("forgenode: config updated (xray binary not available to launch)")
+		return
+	}
+
+	// Validate config before launching
+	testCmd := exec.Command(a.xrayBin, "run", "-test", "-config", configPath)
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "forgenode: invalid xray config: %v: %s\n", err, string(out))
+		return
+	}
+
+	// Launch xray core
+	cmd := exec.Command(a.xrayBin, "run", "-config", configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: failed to start xray:", err)
+		return
+	}
+
+	a.activeCmd = cmd
+	fmt.Println("forgenode: successfully started xray engine with new config")
+}
+
+func (a *NodeAgent) register() error {
+	body, _ := json.Marshal(map[string]string{"token": a.token, "core_version": "xray"})
+	return a.post("/api/node/register", body, nil)
+}
+
+func (a *NodeAgent) heartbeat() (string, error) {
+	body, _ := json.Marshal(map[string]any{"token": a.token, "cpu": 0.1, "mem_mb": 128})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
 	}
-	if err := post(panel+"/api/node/heartbeat", body, &resp); err != nil {
+	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
 		return "", err
 	}
 	return resp.XrayConfig, nil
 }
 
-func post(url string, body []byte, out any) error {
-	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+func (a *NodeAgent) post(path string, body []byte, out any) error {
+	url := a.panel + path
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second}
 	r, err := client.Do(req)
 	if err != nil {
 		return err

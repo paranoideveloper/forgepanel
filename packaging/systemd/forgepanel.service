@@ -38,10 +38,10 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ProtectKernelTunables=true
-ProtectKernelModules=true
+ProtectKernelModules=false
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-RestrictNamespaces=true
+RestrictNamespaces=false
 LockPersonality=true
 ReadWritePaths=/var/lib/forgepanel /etc/forgepanel
 

@@ -489,6 +489,17 @@ do_uninstall() {
     fi
   fi
 
+  info "Cleaning up firewall rules..."
+  if command -v nft >/dev/null 2>&1; then
+    nft delete table inet forgepanel_porthop >/dev/null 2>&1 || true
+  fi
+  if command -v iptables >/dev/null 2>&1; then
+    iptables-save 2>/dev/null | grep "forgepanel-porthop" | while read -r line; do
+      rule=$(echo "$line" | sed "s/-A/-D/")
+      iptables -t nat $rule >/dev/null 2>&1 || true
+    done
+  fi
+
   info "Stopping service..."
   systemctl stop "$SERVICE" >/dev/null 2>&1 || true
   systemctl disable "$SERVICE" >/dev/null 2>&1 || true
@@ -866,10 +877,11 @@ PrivateTmp=true
 ProtectSystem=full
 ${protect_home}
 ProtectKernelTunables=true
-ProtectKernelModules=true
+# ProtectKernelModules disabled to allow AmneziaWG/WireGuard kernel modules
+ProtectKernelModules=false
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-RestrictNamespaces=true
+RestrictNamespaces=false
 LockPersonality=true
 ReadWritePaths=${DATA_DIR} ${ENV_DIR}
 
