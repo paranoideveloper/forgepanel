@@ -29,18 +29,25 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 curl -fsSL https://raw.githubusercontent.com/paranoideveloper/forgepanel/main/install.sh | sudo bash
 ```
 
-The installer downloads the latest release binary, creates a `forgepanel` systemd service, starts it, and prints your **panel URL, the secret admin path, and a generated admin password** — save them, they're shown once.
+The installer downloads the latest release binary, creates a `forgepanel` systemd service, starts it, and prints your **panel URL** and a **one-time setup token**. Open the URL and create your administrator account with that token — no password is generated for you. It walks you through the panel port and (optional) domain/HTTPS with plain, coloured prompts; add `--tui` for a full-screen dialog UI.
 
-Then open the URL it prints (e.g. `http://YOUR_SERVER_IP:2053/panel/<secret>`).
+Then open the URL it prints (e.g. `http://YOUR_SERVER_IP:2053/panel/<secret>`) and complete first-run setup.
+
+**This one command is the recommended install** — it needs no Docker.
 
 ## Docker
+
+Requires Docker **with the Compose plugin**. If `docker compose` reports `unknown command`, install it first — `apt-get install -y docker-compose-plugin` (Debian/Ubuntu) — or use the standalone `docker-compose` binary; the commands below fall back to it automatically.
 
 ```bash
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-docker compose up -d
-docker compose logs forgepanel   # first-boot admin credentials are printed here
+docker compose up -d      2>/dev/null || docker-compose up -d
+docker compose logs -f forgepanel 2>/dev/null || docker-compose logs -f forgepanel
+# ^ the container prints your panel URL + one-time setup token on first boot
 ```
+
+Then open the URL and create your admin account with the setup token.
 
 ## Build from source
 

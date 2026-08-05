@@ -116,6 +116,7 @@ Usage:
 
 Options:
   -y, --yes              Accept defaults, never prompt (implied when no TTY)
+      --tui              Use a full-screen dialog UI (gum/whiptail) if available
       --port <n>         Panel port (default 2053)
       --domain <host>    Panel domain; enables auto-HTTPS
       --email <addr>     Contact e-mail for certificate issuance
@@ -154,6 +155,7 @@ parse_args() {
       --version)    VERSION="${2:-}"; shift 2 ;;
       --version=*)  VERSION="${1#*=}"; shift ;;
       --plain)      UI_PREF="plain"; shift ;;
+      --tui)        UI_PREF="tui"; shift ;;
       --uninstall)  DO_UNINSTALL=1; shift ;;
       -h|--help)    usage; exit 0 ;;
       *)            usage >&2; die "Unknown option: $1" ;;
@@ -180,17 +182,27 @@ detect_ui() {
   fi
 
   case "$UI_PREF" in
-    plain) UI="plain" ;;
-    gum|whiptail|dialog)
-      if command -v "$UI_PREF" >/dev/null 2>&1; then UI="$UI_PREF"; else UI="plain"; fi
-      ;;
-    *)
+    # Plain, coloured text prompts are the default: they render correctly on every
+    # terminal, leave nothing painted behind, and never mangle typed input. A full
+    # TUI (gum/whiptail/dialog) is opt-in via --tui or FORGEPANEL_UI=whiptail.
+    plain|auto|"") UI="plain" ;;
+    tui)
       if command -v gum >/dev/null 2>&1; then UI="gum"
       elif command -v whiptail >/dev/null 2>&1; then UI="whiptail"
       elif command -v dialog >/dev/null 2>&1; then UI="dialog"
       else UI="plain"; fi
       ;;
+    gum|whiptail|dialog)
+      if command -v "$UI_PREF" >/dev/null 2>&1; then UI="$UI_PREF"; else UI="plain"; fi
+      ;;
+    *) UI="plain" ;;
   esac
+  # whiptail/dialog default to a backdrop that renders as a jarring magenta block
+  # on some terminals (and can linger after the dialog closes). Pin a clean, dark
+  # scheme so the backdrop matches a normal terminal instead.
+  if [[ "$UI" == "whiptail" || "$UI" == "dialog" ]]; then
+    export NEWT_COLORS='root=,black;window=white,black;shadow=,black;border=white,black;title=white,black;textbox=white,black;listbox=white,black;actlistbox=black,white;entry=white,black;button=black,white;actbutton=white,black;compactbutton=white,black;checkbox=white,black;actcheckbox=black,white'
+  fi
 }
 
 # ---------------------------------------------------------------------------
