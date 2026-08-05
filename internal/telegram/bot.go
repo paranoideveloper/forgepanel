@@ -30,12 +30,13 @@ type Sender interface {
 
 // Bot routes updates to command handlers.
 type Bot struct {
-	token    string
-	adminIDs map[int64]bool
-	data     PanelData
-	sender   Sender
-	client   *http.Client
-	offset   int64
+	token      string
+	adminIDs   map[int64]bool
+	data       PanelData
+	sender     Sender
+	client     *http.Client
+	sendClient *http.Client
+	offset     int64
 }
 
 // New builds a bot. adminIDs are the Telegram chat IDs allowed to run admin
@@ -45,7 +46,7 @@ func New(token string, adminIDs []int64, data PanelData) *Bot {
 	for _, id := range adminIDs {
 		m[id] = true
 	}
-	b := &Bot{token: token, adminIDs: m, data: data, client: &http.Client{Timeout: 65 * time.Second}}
+	b := &Bot{token: token, adminIDs: m, data: data, client: &http.Client{Timeout: 65 * time.Second}, sendClient: &http.Client{Timeout: 10 * time.Second}}
 	b.sender = b // default: real transport
 	return b
 }
@@ -62,7 +63,7 @@ func (b *Bot) Send(chatID int64, text string) error {
 	v.Set("chat_id", strconv.FormatInt(chatID, 10))
 	v.Set("text", text)
 	v.Set("parse_mode", "Markdown")
-	resp, err := b.client.PostForm("https://api.telegram.org/bot"+b.token+"/sendMessage", v)
+	resp, err := b.sendClient.PostForm("https://api.telegram.org/bot"+b.token+"/sendMessage", v)
 	if err != nil {
 		return err
 	}

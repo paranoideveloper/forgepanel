@@ -62,6 +62,10 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 	now := time.Now()
 	n.Enrolled = true
 	n.Healthy = true
+	if n.LastSeen != nil && now.Before(*n.LastSeen) {
+		c.JSON(200, gin.H{"xray_config": ""})
+		return
+	}
 	n.LastSeen = &now
 	n.CoreVersion = req.CoreVersion
 	_ = s.db.SaveNode(n)

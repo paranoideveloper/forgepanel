@@ -35,7 +35,21 @@ func Create(master string, files []string) ([]byte, error) {
 	var tarBuf bytes.Buffer
 	tw := tar.NewWriter(&tarBuf)
 	included := 0
+	// Expand files to include WAL and SHM sidecars for SQLite databases to ensure zero backup corruption
+	var expanded []string
 	for _, f := range files {
+		expanded = append(expanded, f)
+		if filepath.Ext(f) == ".db" {
+			if _, err := os.Stat(f + "-wal"); err == nil {
+				expanded = append(expanded, f+"-wal")
+			}
+			if _, err := os.Stat(f + "-shm"); err == nil {
+				expanded = append(expanded, f+"-shm")
+			}
+		}
+	}
+
+	for _, f := range expanded {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			continue // skip absent files
