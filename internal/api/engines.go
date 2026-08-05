@@ -31,8 +31,11 @@ func (s *Server) enabledInboundNodes() []*model.Node {
 }
 
 // enabledInboundSpecs builds the multi-user materialisation: each enabled
-// inbound plus a client per active user whose group binds that inbound. This is
-// what the served config must contain for users to authenticate (spec §11).
+// inbound plus a client per active user whose EFFECTIVE access includes it —
+// inherited from their group or assigned to them directly. This is what the
+// served config must contain for users to authenticate (spec §11), so it has to
+// agree with what the subscription hands out: an inbound a user can see in their
+// subscription but cannot authenticate on is worse than not offering it.
 func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 	if s.db == nil {
 		return nil
@@ -53,8 +56,22 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		if u.Status != store.StatusActive {
 			continue
 		}
+		seen := map[uint]bool{}
 		for _, inID := range groupInbounds[u.GroupID] {
-			byInbound[inID] = append(byInbound[inID], u)
+			if !seen[inID] {
+				seen[inID] = true
+				byInbound[inID] = append(byInbound[inID], u)
+			}
+		}
+		direct, err := s.db.UserAssignments(u.ID)
+		if err != nil {
+			continue
+		}
+		for _, inID := range direct.Direct {
+			if !seen[inID] {
+				seen[inID] = true
+				byInbound[inID] = append(byInbound[inID], u)
+			}
 		}
 	}
 	var specs []engine.InboundSpec

@@ -87,6 +87,13 @@ type Group struct {
 	Base
 	Name       string   `gorm:"uniqueIndex;not null" json:"name"`
 	InboundIDs IntSlice `gorm:"type:text" json:"inbound_ids"`
+	// Description is free text shown in the group list.
+	Description string `json:"description"`
+	// IsDefault marks the group offered as the pre-selection when creating a
+	// user. It is a visible suggestion, never a silent assignment: user creation
+	// always records exactly the group the administrator chose, including none.
+	// At most one group holds this flag.
+	IsDefault bool `gorm:"index" json:"is_default"`
 }
 
 // User is a proxy account.
@@ -170,7 +177,8 @@ type AuditLog struct {
 
 // AllModels is the migration set.
 func AllModels() []any {
-	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &ForgeDNSZone{}}
+	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
+		&ForgeDNSZone{}, &UserInbound{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

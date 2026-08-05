@@ -305,14 +305,16 @@ func (s *Server) handleListGroups(c *gin.Context) {
 
 func (s *Server) handleCreateGroup(c *gin.Context) {
 	var req struct {
-		Name       string `json:"name"`
-		InboundIDs []uint `json:"inbound_ids"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InboundIDs  []uint `json:"inbound_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
 		c.JSON(400, gin.H{"error": "name and inbound_ids required"})
 		return
 	}
-	g := &store.Group{Name: req.Name, InboundIDs: store.IntSlice(req.InboundIDs)}
+	g := &store.Group{Name: req.Name, Description: req.Description,
+		InboundIDs: store.IntSlice(req.InboundIDs)}
 	if err := s.db.CreateGroup(g); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -447,12 +449,16 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 	if u.SubRevoked != nil || u.Status == store.StatusDisabled || u.Status == store.StatusExpired {
 		return []*model.Node{}
 	}
-	g, err := s.db.GroupByID(u.GroupID)
+	// Effective access = inbounds assigned to this user directly, plus those
+	// inherited from their group. A user with no group is valid and still gets
+	// their direct assignments; previously a missing group meant an empty
+	// subscription regardless of what was assigned to the user.
+	inboundIDs, err := s.db.InboundsForUser(u.ID)
 	if err != nil {
 		return []*model.Node{}
 	}
 	var out []*model.Node
-	for _, inID := range g.InboundIDs {
+	for _, inID := range inboundIDs {
 		in, err := s.db.InboundByID(inID)
 		if err != nil || !in.Enabled {
 			continue

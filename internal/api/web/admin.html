@@ -104,9 +104,56 @@ textarea.input{resize:vertical;min-height:80px;font-family:ui-monospace,SFMono-R
 .topbar h2{margin:0;font-size:17px;font-weight:700;letter-spacing:-.3px}
 .topbar .spacer{flex:1}
 .health{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);background:var(--panel);border:1px solid var(--border);padding:6px 11px;border-radius:20px;font-weight:600}
+.health{cursor:pointer;position:relative}
+.health:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .health .dot{width:8px;height:8px;border-radius:50%;background:var(--muted-pill)}
-.health.up .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(39,209,124,.18)}
-.health.down .dot{background:var(--err);box-shadow:0 0 0 3px rgba(255,77,77,.18)}
+/* Health colours never carry meaning on their own — the adjacent .txt always
+   names the state, so the indicator works in monochrome and for screen readers. */
+.health.s-healthy .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(39,209,124,.18)}
+.health.s-warning .dot{background:var(--warn,#e8a33d);box-shadow:0 0 0 3px rgba(232,163,61,.18)}
+.health.s-critical .dot{background:var(--err);box-shadow:0 0 0 3px rgba(255,77,77,.18)}
+.health.s-not_configured .dot{background:var(--muted-pill)}
+.health.s-unknown .dot{background:var(--muted-pill);box-shadow:0 0 0 3px rgba(148,163,184,.16)}
+.health .caret{opacity:.6;font-size:9px}
+/* Health details popover */
+.hpop{position:absolute;top:calc(100% + 8px);right:0;width:min(380px,calc(100vw - 32px));
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:6px;
+  box-shadow:0 18px 44px rgba(0,0,0,.34);z-index:60;text-align:start}
+.hpop .hrow{display:flex;gap:9px;align-items:flex-start;padding:9px 10px;border-radius:9px}
+.hpop .hrow+.hrow{border-top:1px solid var(--border)}
+.hpop .hrow .d{width:8px;height:8px;border-radius:50%;margin-top:5px;flex:none;background:var(--muted-pill)}
+.hpop .hrow.s-healthy .d{background:var(--ok)}
+.hpop .hrow.s-warning .d{background:var(--warn,#e8a33d)}
+.hpop .hrow.s-critical .d{background:var(--err)}
+.hpop .hrow .b{flex:1;min-width:0}
+.hpop .hrow .nm{font-weight:700;font-size:12px;display:flex;gap:7px;align-items:center}
+.hpop .hrow .st{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint)}
+.hpop .hrow .sm{font-size:12px;color:var(--text-dim);margin-top:2px;line-height:1.45}
+.hpop .hrow .dt{font-size:11px;color:var(--text-faint);margin-top:3px;line-height:1.45;word-break:break-word}
+/* Contextual help: an accessible info affordance next to a label. Click/Enter/
+   Space opens it — never hover alone, which is unusable on touch and invisible
+   to keyboard users. */
+.help-b{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;
+  border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text-faint);
+  font-size:10px;font-weight:700;cursor:pointer;padding:0;margin-inline-start:6px;line-height:1;vertical-align:middle}
+.help-b:hover{color:var(--brand);border-color:var(--brand)}
+.help-b:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.help-pop{position:fixed;z-index:120;width:min(320px,calc(100vw - 24px));background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;padding:11px 13px;box-shadow:0 14px 36px rgba(0,0,0,.32);
+  font-size:12px;line-height:1.55;color:var(--text-dim);font-weight:400;text-align:start}
+.help-pop .ht{font-weight:700;color:var(--text);margin-bottom:4px;font-size:12px}
+.help-pop a{color:var(--brand)}
+.help-pop .more{display:inline-block;margin-top:7px;font-size:11px}
+/* Direct vs inherited assignment rows */
+.asg{display:flex;flex-direction:column;gap:5px;max-height:280px;overflow:auto;padding:2px}
+.asg label,.asg .ro{display:flex;gap:9px;align-items:center;padding:8px 10px;border:1px solid var(--border);
+  border-radius:9px;cursor:pointer;font-size:12px}
+.asg .ro{cursor:default;opacity:.85;background:var(--panel-2,rgba(127,127,127,.06))}
+.asg .tagi{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-faint);margin-inline-start:auto;flex:none}
+.asg .none{color:var(--text-faint);font-size:12px;padding:8px 2px}
+.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.filters input,.filters select{max-width:220px}
 .content{padding:24px 26px;max-width:1220px;width:100%}
 @media(min-width:1400px){.content{max-width:1320px}}
 
@@ -572,6 +619,85 @@ function confirmDialog(msg,opt){ opt=opt||{}; return new Promise(res=>{
 function copyBtn(getVal,cls){ return h('button',{class:'btn '+(cls||'sm'),html:icon('copy')+'<span>'+t('copy')+'</span>',
   onClick:async e=>{ const b=e.currentTarget; const ok=await copyText(typeof getVal==='function'?getVal():getVal);
     if(ok){ const old=b.innerHTML; b.innerHTML=icon('check')+'<span>'+t('copied')+'</span>'; setTimeout(()=>b.innerHTML=old,1400); } else toast('Copy failed','error'); }}); }
+/* ---------------------------------------------------------------------------
+   CONTEXTUAL HELP. One registry, referenced by key, rather than help text
+   scattered through the views: it keeps wording consistent, makes it
+   translatable in one place, and means a setting's explanation lives next to
+   the other settings' explanations instead of buried in whichever view happened
+   to render it first.
+
+   Each entry is {t: title, b: plain-language body, d: optional doc anchor}. The
+   body leads with what the setting DOES in ordinary words; the technical detail
+   comes second, because someone opening a help bubble usually needs the former.
+   --------------------------------------------------------------------------- */
+const DOCS_BASE='https://github.com/paranoideveloper/forgepanel/blob/main/docs/';
+const HELP={
+  data_limit:{t:'Traffic quota',b:'How much traffic this user may transfer before being cut off. 0 means unlimited. Counting covers Xray-served protocols (VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP); Hysteria2, TUIC, AnyTLS, ShadowTLS and WireGuard are not metered yet.',d:'PROTOCOLS.md'},
+  reset_strategy:{t:'Reset strategy',b:'When the used-traffic counter goes back to zero. "No reset" counts forever. The periodic options reset at the start of each day, week, month or year. Lifetime totals are kept either way, so a reset never hides past usage.'},
+  expire_at:{t:'Expiry date',b:'After this moment the account stops working. Leave it empty for an account that never expires. Expiry is independent of the traffic quota — whichever limit is reached first applies.'},
+  on_hold:{t:'On-hold status',b:'The account is created but its clock has not started. The expiry period begins counting from the user\'s first connection instead of from now, which is what you want when you sell access ahead of time.'},
+  group_assignment:{t:'Group',b:'A group is a bundle of inbounds. Every member of a group can use all of the group\'s inbounds. A user does not need a group — "No group" is a valid choice, and they will then only have whatever is assigned to them directly.'},
+  inbound_assignment:{t:'Assigned inbounds',b:'Which servers/protocols this user can connect through. Assignments made here belong to this user alone. They add to whatever the user already inherits from their group.'},
+  direct_vs_inherited:{t:'Direct vs inherited',b:'Direct assignments belong to this user and can be changed here. Inherited ones come from the user\'s group and are shown read-only: removing one would have to happen on the group, where it affects every member.'},
+  sub_format:{t:'Subscription format',b:'The panel serves the same account in several client formats and picks one from the client\'s User-Agent. You can force a format by adding it to the URL, for example /sub/<token>/clash or /sub/<token>/sing-box.',d:'API.md'},
+  engine_selection:{t:'Engine',b:'Which proxy core serves this inbound. The panel picks it from the protocol: Xray for VLESS/VMess/Trojan/Shadowsocks/SOCKS/HTTP, sing-box for Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard, and separate binaries for Brook and AmneziaWG.',d:'PROTOCOLS.md'},
+  node_selection:{t:'Node',b:'Which machine serves this inbound. The panel itself always counts as one; additional nodes are separate servers running the ForgePanel agent and receiving configs from here.'},
+  tls_reality:{t:'TLS and REALITY',b:'REALITY borrows a real, unrelated website\'s certificate chain during the handshake, so the connection looks like ordinary traffic to that site and needs no certificate of your own. Plain TLS needs a real certificate for a domain you control.',d:'PROTOCOLS.md'},
+  panel_address:{t:'Domain and panel port',b:'Where administrators reach this panel. Changing either requires a restart, and the panel keeps a backup of the previous settings so a change that fails to bind is rolled back automatically rather than locking you out.',d:'CONFIGURATION.md'},
+  ssl_auto:{t:'Automatic SSL',b:'The panel obtains and renews a Let\'s Encrypt certificate for its own domain. It needs the domain to already resolve to this server, and port 80 reachable for the challenge.',d:'CONFIGURATION.md'},
+  dns_tunnel:{t:'DNS tunnel',b:'Carries traffic inside ordinary DNS queries, for networks where only DNS is allowed out. It needs a domain delegated to this server with NS records, and UDP port 53.',d:'FORGEDNS.md'},
+  reseller_quota:{t:'Reseller quotas',b:'Caps how many users a reseller may create and how much traffic they may hand out in total. Enforced when the user is created, so a reseller cannot exceed what you allocated them.'},
+  two_factor:{t:'Two-factor authentication',b:'Adds a time-based code from an authenticator app to your login. Recovery codes are shown once when you enable it — store them somewhere other than this panel, because they are the only way back in if you lose the app.',d:'SECURITY.md'},
+  recovery_codes:{t:'Recovery codes',b:'Single-use codes that stand in for your authenticator. Each works once. Using one signs out every other session on the account, on the assumption that needing a recovery code may mean the account is compromised.',d:'SECURITY.md'},
+  health_indicator:{t:'System health',b:'Shows the worst state across the panel API, database, proxy engine, remote nodes, certificates and DNS. "Not configured" is a normal state, not a fault — it means that part is deliberately not in use here.'},
+  user_status:{t:'Status',b:'Active accounts work. Disabled ones are switched off by you. Limited means the traffic quota is used up, expired means the date passed, and on-hold means the clock has not started yet.'},
+  ip_limit:{t:'IP limit',b:'How many distinct addresses may use this account at once. 0 means no limit. Useful for spotting a shared or resold account.'}
+};
+let openHelpPop=null;
+function closeHelp(){ if(openHelpPop){ openHelpPop.remove(); openHelpPop=null;
+  document.removeEventListener('keydown',helpKey,true); document.removeEventListener('click',helpAway,true); } }
+function helpKey(e){ if(e.key==='Escape'){ e.stopPropagation(); closeHelp(); } }
+function helpAway(e){ if(openHelpPop&&!openHelpPop.contains(e.target)&&!e.target.closest('.help-b')) closeHelp(); }
+// helpIcon returns an accessible info button for a HELP key. It responds to
+// click, Enter and Space — never hover alone, which touch and keyboard users
+// cannot reach — and the popover is positioned to stay on screen.
+function helpIcon(key){
+  const e=HELP[key]; if(!e) return document.createComment('no help: '+key);
+  const btn=h('button',{class:'help-b',type:'button',text:'i'});
+  btn.setAttribute('aria-label','What is "'+e.t+'"?');
+  btn.setAttribute('aria-expanded','false');
+  btn.addEventListener('click',ev=>{ ev.preventDefault(); ev.stopPropagation();
+    if(openHelpPop&&openHelpPop.dataset.key===key){ closeHelp(); btn.setAttribute('aria-expanded','false'); return; }
+    closeHelp();
+    const pop=h('div',{class:'help-pop',role:'dialog'});
+    pop.dataset.key=key;
+    pop.setAttribute('aria-label',e.t);
+    pop.appendChild(h('div',{class:'ht',text:e.t}));
+    pop.appendChild(h('div',{text:e.b}));
+    if(e.d) pop.appendChild(h('a',{class:'more',href:DOCS_BASE+e.d,target:'_blank',rel:'noopener',text:'Learn more →'}));
+    document.body.appendChild(pop);
+    // Keep the bubble on screen in both directions and in RTL.
+    const r=btn.getBoundingClientRect(), pw=pop.offsetWidth, ph=pop.offsetHeight;
+    let left=Math.min(Math.max(8,r.left),window.innerWidth-pw-8);
+    let top=r.bottom+7; if(top+ph>window.innerHeight-8) top=Math.max(8,r.top-ph-7);
+    pop.style.left=left+'px'; pop.style.top=top+'px';
+    openHelpPop=pop; btn.setAttribute('aria-expanded','true');
+    document.addEventListener('keydown',helpKey,true);
+    setTimeout(()=>document.addEventListener('click',helpAway,true),0);
+  });
+  return btn;
+}
+// fieldH is field() with a help affordance on the label.
+function fieldH(label,control,req,helpKey){
+  const f=field(label,control,req);
+  // :scope > label so a control that itself contains labels (a checkbox list)
+  // cannot steal the help icon from the field's own label.
+  const lb=f.querySelector(':scope > label');
+  if(lb&&helpKey) lb.appendChild(helpIcon(helpKey));
+  return f;
+}
+window.addEventListener('resize',closeHelp);
+
 function pill(kind,label){ return '<span class="pill '+kind+'"><span class="d"></span>'+esc(label)+'</span>'; }
 function loadingEl(msg){ return h('div',{class:'loading'},[h('span',{class:'spin'}),h('span',{text:msg||'Loading…'})]); }
 function emptyEl(msg){ return h('div',{class:'empty',html:icon('empty')+'<div>'+esc(msg||'Nothing here yet')+'</div>'}); }
@@ -731,6 +857,10 @@ function renderApp(){ applyTheme(); applyLang();
   }
   renderShellChrome();
   highlightNav(view);
+  closeHelp(); closeHealthPop();
+  // Health is a property of the panel, not of the current page, so it refreshes
+  // on every navigation regardless of which view is open.
+  refreshHealth();
   const content=$('#content'); clear(content);
   content.appendChild(loadingEl());
   const fn=VIEWS[view]; stopPoll();
@@ -753,7 +883,8 @@ function buildMain(){
     h('button',{class:'btn icon ghost hamburger',html:icon('menu'),onClick:()=>$('.app').classList.toggle('nav-open')}),
     h('h2',{id:'view-title',text:''}),
     h('div',{class:'spacer'}),
-    h('div',{class:'health',id:'health',html:'<span class="dot"></span><span class="txt">…</span>'}),
+    h('div',{class:'health',id:'health',tabindex:'0',role:'button','aria-label':'System health',
+      html:'<span class="dot"></span><span class="txt">Checking…</span><span class="caret">▾</span>'}),
     h('button',{class:'btn icon ghost',id:'theme-btn',html:icon(state.theme==='dark'?'sun':'moon'),onClick:toggleTheme,title:'Toggle theme'}),
     h('button',{class:'btn ghost sm',id:'lang-btn',text:state.lang==='fa'?'EN':'فا',onClick:toggleLang,title:'Language'}),
     h('button',{class:'btn ghost sm',html:icon('logout')+'<span>'+esc(t('logout'))+'</span>',onClick:doLogout})
@@ -771,9 +902,74 @@ function renderShellChrome(){
 function highlightNav(view){ $$('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view)); const vt=$('#view-title'); if(vt) vt.textContent=t(view); }
 async function doLogout(){ try{ /* stateless JWT: just drop tokens client-side */ }finally{ clearTokens(); stopPoll(); clear($('#root')); renderLogin(); } }
 
-// health indicator in topbar (engine + forgedns), refreshed by dashboard poll
-function setHealth(up,text){ const el=$('#health'); if(!el) return;
-  el.className='health '+(up?'up':'down'); el.innerHTML='<span class="dot"></span><span class="txt">'+esc(text)+'</span>'; }
+/* ---------------------------------------------------------------------------
+   SYSTEM HEALTH INDICATOR.
+
+   This used to be a bare coloured dot driven by whichever view rendered last:
+   the dashboard set it from the engine count, and opening the ForgeDNS page
+   overwrote it with that subsystem's state. So a perfectly healthy panel showed
+   red whenever it had no inbounds yet or no DNS zones configured — a warning
+   light with no label, no explanation and nothing to click, which teaches people
+   to ignore warning lights.
+
+   It is now backed by /api/admin/health/detail. Three rules:
+     - the state is always accompanied by text, never signalled by colour alone;
+     - "not configured" is a normal state and never shows as a fault;
+     - every row says which subsystem it is, what is wrong, and where to look.
+   --------------------------------------------------------------------------- */
+const HSTATE={
+  healthy:{label:'Healthy'},warning:{label:'Warning'},critical:{label:'Critical'},
+  not_configured:{label:'Not configured'},unknown:{label:'Unknown'}
+};
+let lastHealth=null, healthPop=null;
+function closeHealthPop(){ if(healthPop){ healthPop.remove(); healthPop=null;
+  const el=$('#health'); if(el) el.setAttribute('aria-expanded','false'); } }
+function renderHealthPop(){
+  closeHealthPop();
+  const el=$('#health'); if(!el||!lastHealth) return;
+  const pop=h('div',{class:'hpop',role:'dialog','aria-label':'System health details'});
+  (lastHealth.subsystems||[]).forEach(s=>{
+    const row=h('div',{class:'hrow s-'+(s.state||'unknown')});
+    row.appendChild(h('span',{class:'d'}));
+    const b=h('div',{class:'b'});
+    // The state is spelled out in text next to the name, so the colour is a
+    // redundant cue rather than the only one.
+    b.appendChild(h('div',{class:'nm'},[h('span',{text:s.label}),
+      h('span',{class:'st',text:(HSTATE[s.state]||HSTATE.unknown).label})]));
+    b.appendChild(h('div',{class:'sm',text:s.summary||''}));
+    if(s.detail) b.appendChild(h('div',{class:'dt',text:s.detail}));
+    row.appendChild(b); pop.appendChild(row);
+  });
+  el.appendChild(pop); healthPop=pop; el.setAttribute('aria-expanded','true');
+  setTimeout(()=>document.addEventListener('click',healthAway,true),0);
+}
+function healthAway(e){ if(healthPop&&!e.target.closest('#health')){
+  closeHealthPop(); document.removeEventListener('click',healthAway,true); } }
+function paintHealth(rep){
+  lastHealth=rep; const el=$('#health'); if(!el) return;
+  const st=rep&&rep.state?rep.state:'unknown';
+  const label=(HSTATE[st]||HSTATE.unknown).label;
+  el.className='health s-'+st;
+  el.innerHTML='<span class="dot"></span><span class="txt">'+esc(label)+'</span><span class="caret">▾</span>';
+  // Accessible name carries the full sentence, so a screen reader gets the
+  // meaning without the colour.
+  el.setAttribute('aria-label','System health: '+label+'. '+(rep&&rep.summary?rep.summary:''));
+  el.title=(rep&&rep.summary)||label;
+  if(healthPop) renderHealthPop(); // keep an open panel current
+}
+async function refreshHealth(){
+  try{ paintHealth(await api('/api/admin/health/detail')); }
+  catch(e){ paintHealth({state:'unknown',summary:'Could not reach the panel API.',
+    subsystems:[{key:'api',label:'Panel API',state:'unknown',
+      summary:'The health check itself failed.',detail:e&&e.message?e.message:''}]}); }
+}
+document.addEventListener('click',e=>{ const el=e.target.closest&&e.target.closest('#health');
+  if(!el) return; if(healthPop){ closeHealthPop(); document.removeEventListener('click',healthAway,true); }
+  else renderHealthPop(); });
+document.addEventListener('keydown',e=>{ if(!$('#health')) return;
+  if(e.key==='Escape'&&healthPop){ closeHealthPop(); return; }
+  if((e.key==='Enter'||e.key===' ')&&document.activeElement&&document.activeElement.id==='health'){
+    e.preventDefault(); if(healthPop) closeHealthPop(); else renderHealthPop(); } });
 
 /* keyboard quick-nav: g then d/i/u/g/n/c/f/s */
 let gKey=false, gTimer=null;
@@ -833,7 +1029,10 @@ VIEWS.dashboard=async function(content){
       dnsCard.appendChild(h('div',{class:'kv',html:'<b>Address</b><span class="t-mono">'+esc(dns.addr||'—')+'</span>'}));
       dnsCard.appendChild(h('div',{class:'kv',html:'<b>Zones served</b><span class="t-mono">'+esc(zones.length?zones.join(', '):'—')+'</span>'}));
       if(dns.last_error) dnsCard.appendChild(h('div',{class:'finding warn',style:{marginTop:'10px'},html:icon('alert')+'<div>'+esc(dns.last_error)+'</div>'}));
-      setHealth(running>0||dns.listening, running+' engine'+(running===1?'':'s')+' · '+(dns.listening?'dns up':'dns off'));
+      // The topbar indicator is driven by /health/detail, not by whichever
+      // view rendered last: 'no engine yet' and 'no DNS zones' are normal
+      // states on a fresh panel and must not light it red.
+      refreshHealth();
     }catch(err){ if(err.status!==401){ clear(engineCard); engineCard.appendChild(h('div',{class:'finding error',html:icon('alert')+'<div>'+esc(err.message)+'</div>'})); } }
   }
   async function reloadEngines(){ try{ await api('/api/admin/engines/reload',{method:'POST'}); toast('Engines reloaded','success'); refresh(); }
@@ -1191,40 +1390,244 @@ VIEWS.users=async function(content){
   clear(content);
   const head=h('div',{class:'section-head'},[h('h3',{text:t('users')}),h('div',{class:'spacer'}),
     h('button',{class:'btn primary',html:icon('plus')+'<span>'+esc(t('newUser'))+'</span>',onClick:openNew})]);
+  // Search / filter / sort. A panel with a few hundred accounts is unusable
+  // without them, and they cost nothing on a small one.
+  const q=inp('u-q',{placeholder:'Search username or UUID…'});
+  const fStatus=sel('u-fs',[['','All statuses'],['active','Active'],['disabled','Disabled'],
+    ['limited','Limited'],['expired','Expired'],['on_hold','On hold']],'');
+  const fSort=sel('u-so',[['username','Sort: name'],['created','Sort: newest'],
+    ['traffic','Sort: traffic used'],['expiry','Sort: expiry']],'username');
+  const filters=h('div',{class:'filters'},[q,fStatus,fSort]);
   const tableWrap=h('div',{class:'table-wrap'});
-  content.appendChild(head); content.appendChild(tableWrap);
-  async function load(){ tableWrap.innerHTML=''; tableWrap.appendChild(loadingEl());
-    const rows=await api('/api/admin/users'); clear(tableWrap);
-    if(!rows||!rows.length){ tableWrap.appendChild(emptyEl('No users yet — add your first account')); return; }
+  content.appendChild(head); content.appendChild(filters); content.appendChild(tableWrap);
+
+  let rows=[], groups=[], inbounds=[];
+  [q,fStatus,fSort].forEach(el=>el.addEventListener('input',draw));
+
+  async function load(){
+    tableWrap.innerHTML=''; tableWrap.appendChild(loadingEl());
+    const [us,gs,ins]=await Promise.all([
+      api('/api/admin/users'),
+      api('/api/admin/groups').catch(()=>[]),
+      api('/api/admin/inbounds').catch(()=>[])]);
+    rows=us||[]; groups=gs||[]; inbounds=ins||[];
+    draw();
+  }
+
+  function draw(){
+    clear(tableWrap);
+    if(!rows.length){
+      // Empty states say what to do next rather than just reporting emptiness.
+      tableWrap.appendChild(emptyEl('No users yet — create an account, then share its subscription link.'));
+      return;
+    }
+    const needle=(q.value||'').trim().toLowerCase();
+    let list=rows.filter(u=>{
+      if(fStatus.value && (u.status||'active')!==fStatus.value) return false;
+      if(!needle) return true;
+      return (u.username||'').toLowerCase().includes(needle)||(u.uuid||'').toLowerCase().includes(needle);
+    });
+    const byName=(a,b)=>(a.username||'').localeCompare(b.username||'');
+    ({username:()=>list.sort(byName),
+      created:()=>list.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))),
+      traffic:()=>list.sort((a,b)=>Number(b.used_traffic||0)-Number(a.used_traffic||0)),
+      expiry:()=>list.sort((a,b)=>String(a.expire_at||'9999').localeCompare(String(b.expire_at||'9999')))
+    }[fSort.value]||(()=>list.sort(byName)))();
+
+    if(!list.length){ tableWrap.appendChild(emptyEl('No users match this search or filter.')); return; }
+    const gname={}; groups.forEach(g=>gname[g.id]=g.name);
     const tbl=h('table',{class:'tbl'});
-    tbl.appendChild(h('thead',{html:'<tr><th>Username</th><th>Status</th><th>Traffic</th><th>Expires</th><th></th></tr>'}));
+    tbl.appendChild(h('thead',{html:'<tr><th>Username</th><th>Status</th><th>Group</th><th>Traffic</th><th>Expires</th><th></th></tr>'}));
     const tb=h('tbody');
-    rows.forEach(u=>{ const st=u.status||'active';
+    list.forEach(u=>{
+      const st=u.status||'active';
       const tr=h('tr');
       tr.innerHTML='<td><b>'+esc(u.username)+'</b><div class="t-mono" style="font-size:11px;color:var(--text-faint)">'+esc((u.uuid||'').slice(0,8))+'</div></td>'
         +'<td>'+pill(USTATUS[st]||'grey',st.replace('_',' '))+'</td>'
+        +'<td>'+(u.group_id?esc(gname[u.group_id]||('#'+u.group_id)):'<span class="hint">no group</span>')+'</td>'
         +'<td>'+trafficCell(u.used_traffic,u.data_limit)+'</td>'
         +'<td class="t-mono">'+esc(u.expire_at?fmtDate(u.expire_at):'never')+'</td>';
-      const act=h('td'); act.appendChild(h('div',{class:'t-actions'},[
-        h('button',{class:'btn sm danger',html:icon('trash'),onClick:async()=>{ if(await confirmDialog('Delete user "'+u.username+'"? Their subscription stops working immediately.')){
-          try{ await api('/api/admin/users/'+u.id,{method:'DELETE'}); toast('User deleted','success'); load(); }catch(e){ toast(e.message,'error'); } } }})]));
-      tr.appendChild(act); tb.appendChild(tr); });
+      const act=h('td');
+      // Icon-only actions carry a title AND an aria-label: an unlabelled icon is
+      // a guessing game, and the destructive ones must never be guessed at.
+      const ab=(ic,label,kind,fn)=>{
+        const b=h('button',{class:'btn sm'+(kind?' '+kind:''),html:icon(ic),onClick:fn,title:label});
+        b.setAttribute('aria-label',label); return b;
+      };
+      act.appendChild(h('div',{class:'t-actions'},[
+        ab('settings','Edit user','',()=>openEdit(u.id)),
+        ab('shield',st==='disabled'?'Enable user':'Disable user','',async()=>{
+          const next=st==='disabled'?'active':'disabled';
+          if(next==='disabled'&&!await confirmDialog('Disable "'+u.username+'"? They stop connecting immediately, but nothing is deleted.')) return;
+          try{ await api('/api/admin/users/'+u.id,{method:'PATCH',body:{status:next}});
+            toast(next==='active'?'User enabled':'User disabled','success'); load();
+          }catch(e){ toast(e.message,'error'); } }),
+        ab('copy','Copy subscription link','',async()=>{
+          try{ const d=await api('/api/admin/users/'+u.id);
+            const ok=await copyText(d.sub_url||('/sub/'+(d.user&&d.user.sub_token)));
+            toast(ok?'Subscription link copied':'Copy failed',ok?'success':'error');
+          }catch(e){ toast(e.message,'error'); } }),
+        ab('trash','Delete user','danger',async()=>{
+          if(await confirmDialog('Delete user "'+u.username+'"? Their subscription stops working immediately.')){
+            try{ await api('/api/admin/users/'+u.id,{method:'DELETE'}); toast('User deleted','success'); load(); }
+            catch(e){ toast(e.message,'error'); } } })
+      ].filter(Boolean)));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
     tbl.appendChild(tb); tableWrap.appendChild(tbl);
   }
+
+  /* ---- Edit user ---------------------------------------------------------
+     Every field the backend accepts is editable here. Two properties matter:
+     the form sends only what changed, and it never touches credentials —
+     rotating a subscription token breaks every client the user has configured,
+     so that lives behind its own explicit action below. */
+  async function openEdit(id){
+    let d; try{ d=await api('/api/admin/users/'+id); }catch(e){ toast(e.message,'error'); return; }
+    const u=d.user||{}, asg=d.assignments||{direct:[],inherited:[],effective:[]};
+    const byId={}; inbounds.forEach(i=>byId[i.id]=i);
+
+    const nameI=inp('e-name',{value:u.username||''});
+    const statusS=sel('e-st',[['active','Active'],['disabled','Disabled'],['limited','Limited'],
+      ['expired','Expired'],['on_hold','On hold']],u.status||'active');
+    // "No group" is a first-class option, not an absence of one.
+    const grpS=sel('e-grp',[['0','— No group —']].concat(groups.map(g=>[String(g.id),g.name])),String(u.group_id||0));
+    const limI=inp('e-lim',{type:'number',min:0,value:String(Math.round((Number(u.data_limit||0))/1073741824*1000)/1000)});
+    const resetS=sel('e-rs',[['no_reset','No reset'],['day','Daily'],['week','Weekly'],
+      ['month','Monthly'],['year','Yearly'],['on_expire','On expiry']],u.reset_strategy||'no_reset');
+    const expI=inp('e-exp',{type:'date',value:u.expire_at?String(u.expire_at).slice(0,10):''});
+    const ipI=inp('e-ip',{type:'number',min:0,value:String(u.ip_limit||0)});
+    const tgI=inp('e-tg',{type:'number',min:0,value:String(u.telegram_id||0)});
+    const noteI=inp('e-note',{value:u.note||''});
+
+    // Assignment editor: direct assignments are checkboxes; inherited ones are
+    // shown read-only with a link to the group that grants them, because
+    // removing one here would silently diverge this user from their group.
+    const asgBox=h('div',{class:'asg'});
+    const direct=new Set(asg.direct||[]);
+    const inherited=new Set(asg.inherited||[]);
+    function drawAsg(){
+      clear(asgBox);
+      if(!inbounds.length){ asgBox.appendChild(h('div',{class:'none',text:'No inbounds exist yet — create one first.'})); return; }
+      inbounds.forEach(i=>{
+        const label='<b>'+esc(i.remark||'(unnamed)')+'</b> · '+esc((i.protocol||'').toUpperCase())+' :'+esc(i.port)
+          +(i.enabled===false?' <span class="pill grey">disabled</span>':'');
+        if(inherited.has(i.id)){
+          const row=h('div',{class:'ro'},[h('span',{html:label}),h('span',{class:'tagi',text:'inherited'})]);
+          row.title='Granted by the group "'+(asg.group_name||'')+'". Change it on the group to affect all members.';
+          asgBox.appendChild(row);
+        }else{
+          const cb=h('input',{type:'checkbox',value:String(i.id)});
+          cb.checked=direct.has(i.id);
+          cb.addEventListener('change',()=>{ cb.checked?direct.add(i.id):direct.delete(i.id); });
+          asgBox.appendChild(h('label',{},[cb,h('span',{html:label}),h('span',{class:'tagi',text:'direct'})]));
+        }
+      });
+    }
+    drawAsg();
+
+    const body=h('div',{},[
+      h('div',{class:'form-grid'},[field('Username',nameI,true),fieldH('Status',statusS,false,'user_status')]),
+      fieldH('Group',grpS,false,'group_assignment'),
+      h('div',{class:'hint',style:{marginTop:'-4px'},text:'Changing the group changes which inbounds this user inherits. Direct assignments below are kept either way.'}),
+      h('div',{class:'form-grid'},[fieldH('Traffic quota (GB, 0 = unlimited)',limI,false,'data_limit'),
+        fieldH('Reset strategy',resetS,false,'reset_strategy')]),
+      h('div',{class:'form-grid'},[fieldH('Expires on (empty = never)',expI,false,'expire_at'),
+        fieldH('IP limit',ipI,false,'ip_limit')]),
+      h('div',{class:'form-grid'},[field('Telegram ID',tgI),field('Note',noteI)]),
+      fieldH('Assigned inbounds',asgBox,false,'direct_vs_inherited'),
+      h('div',{class:'hint',html:'Direct assignments belong to this user. Inherited ones come from the group and are read-only here.'}),
+      h('div',{style:{marginTop:'14px',display:'flex',gap:'8px',flexWrap:'wrap'}},[
+        h('button',{class:'btn sm',html:icon('key')+'<span>Reset credentials…</span>',onClick:()=>openReset(u)})])
+    ]);
+
+    modal({title:'Edit user — '+(u.username||''),wide:true,body,okText:t('save'),cancelText:t('cancel'),
+      onOk:async()=>{
+        // Send only what actually changed, and include updated_at so a stale
+        // write is refused instead of quietly overwriting someone else's edit.
+        const patch={updated_at:d.updated_at};
+        const set=(k,v,orig)=>{ if(v!==orig) patch[k]=v; };
+        set('username',nameI.value.trim(),u.username||'');
+        set('status',statusS.value,u.status||'active');
+        set('group_id',Number(grpS.value)||0,Number(u.group_id||0));
+        set('data_limit',Math.round(Number(limI.value||0)*1073741824),Number(u.data_limit||0));
+        set('reset_strategy',resetS.value,u.reset_strategy||'no_reset');
+        set('ip_limit',Number(ipI.value||0),Number(u.ip_limit||0));
+        set('telegram_id',Number(tgI.value||0),Number(u.telegram_id||0));
+        set('note',noteI.value,u.note||'');
+        const newExp=expI.value?new Date(expI.value+'T00:00:00Z').toISOString():null;
+        const oldExp=u.expire_at?new Date(u.expire_at).toISOString():null;
+        if(newExp!==oldExp) patch.expire_at=newExp;
+
+        const wantDirect=Array.from(direct);
+        const sameAsg=wantDirect.length===(asg.direct||[]).length&&
+          wantDirect.every(x=>(asg.direct||[]).includes(x));
+        if(Object.keys(patch).length>1){
+          try{ await api('/api/admin/users/'+id,{method:'PATCH',body:patch}); }
+          catch(e){
+            if(e.status===409){ toast('This user was changed by someone else — reopen and reapply.','error'); return false; }
+            if(e.status===422&&e.data&&e.data.fields){
+              toast(Object.entries(e.data.fields).map(([k,v])=>k+': '+v).join('; '),'error'); return false; }
+            throw e;
+          }
+        }
+        if(!sameAsg){
+          await api('/api/admin/users/'+id+'/inbounds',{method:'PUT',body:{inbound_ids:wantDirect}});
+        }
+        toast('User updated','success'); load();
+      }});
+  }
+
+  /* ---- Credential reset -------------------------------------------------- */
+  function openReset(u){
+    const cbU=h('input',{type:'checkbox'}), cbP=h('input',{type:'checkbox'}), cbS=h('input',{type:'checkbox'});
+    const body=h('div',{},[
+      h('div',{class:'finding warn',html:icon('alert')+'<div>Rotating the subscription token invalidates every client already configured with this account. They will need the new link.</div>'}),
+      h('div',{class:'asg',style:{marginTop:'10px'}},[
+        h('label',{},[cbU,h('span',{html:'<b>UUID</b> — VLESS/VMess identity'})]),
+        h('label',{},[cbP,h('span',{html:'<b>Password</b> — Trojan/Shadowsocks and friends'})]),
+        h('label',{},[cbS,h('span',{html:'<b>Subscription token</b> — the /sub/… link'})])])]);
+    modal({title:'Reset credentials — '+u.username,body,okText:'Reset',okKind:'danger',cancelText:t('cancel'),
+      onOk:async()=>{
+        if(!cbU.checked&&!cbP.checked&&!cbS.checked){ toast('Select at least one credential','error'); return false; }
+        if(!await confirmDialog('Reset the selected credentials for "'+u.username+'"? Existing clients using them stop working.')) return false;
+        await api('/api/admin/users/'+u.id+'/reset-credentials',
+          {method:'POST',body:{uuid:cbU.checked,password:cbP.checked,sub_token:cbS.checked}});
+        toast('Credentials reset','success'); load();
+      }});
+  }
+
+  /* ---- Create user -------------------------------------------------------
+     The group control offers "No group" explicitly and pre-selects only a group
+     the operator marked as default. It never silently picks the first group in
+     the list, and it never creates one. */
   async function openNew(){
-    let groups=[]; try{ groups=await api('/api/admin/groups')||[]; }catch(e){}
+    if(!groups.length){ try{ groups=await api('/api/admin/groups')||[]; }catch(e){} }
+    const def=groups.find(g=>g.is_default);
     const nameI=inp('u-name',{placeholder:'jane'});
-    const grpSel=sel('u-grp',groups.length?groups.map(g=>[g.id,g.name+' ('+((g.inbound_ids||[]).length)+' inbounds)']):[['','— no groups —']],groups.length?groups[0].id:'');
+    const opts=[['0','— No group —']].concat(groups.map(g=>[String(g.id),
+      g.name+' ('+((g.inbound_ids||[]).length)+' inbounds)'+(g.is_default?' · default':'')]));
+    const grpSel=sel('u-grp',opts,def?String(def.id):'0');
     const limitI=inp('u-lim',{type:'number',min:0,value:0,placeholder:'0 = unlimited'});
     const expI=inp('u-exp',{type:'number',min:0,value:30,placeholder:'0 = never'});
-    const body=h('div',{},[ field('Username',nameI,true), field('Group',grpSel,true),
-      h('div',{class:'form-grid'},[ field('Data limit (GB)',limitI), field('Expires in (days)',expI) ]),
-      groups.length?null:h('div',{class:'finding warn',style:{marginTop:'6px'},html:icon('alert')+'<div>Create a group first so the user gets inbounds.</div>'})]);
+    const note=h('div',{class:'hint',id:'u-grp-note'});
+    function explain(){
+      const id=Number(grpSel.value)||0;
+      if(!id){ note.textContent='This user will have no group. They get only the inbounds you assign to them directly, on the Edit screen.'; return; }
+      const g=groups.find(x=>x.id===id);
+      note.textContent=g?('Inherits '+((g.inbound_ids||[]).length)+' inbound(s) from "'+g.name+'".'):'';
+    }
+    grpSel.addEventListener('change',explain); explain();
+
+    const body=h('div',{},[ field('Username',nameI,true),
+      fieldH('Group',grpSel,false,'group_assignment'), note,
+      h('div',{class:'form-grid'},[ fieldH('Data limit (GB)',limitI,false,'data_limit'),
+        fieldH('Expires in (days)',expI,false,'expire_at') ]),
+      groups.length?null:h('div',{class:'finding info',style:{marginTop:'6px'},html:icon('alert')+'<div>No groups exist yet. You can still create this user with no group and assign inbounds directly afterwards.</div>'})]);
     modal({title:t('newUser'),body,okText:t('create'),cancelText:t('cancel'),
       onOk:async()=>{ const username=nameI.value.trim(); if(!username){ toast('Username required','error'); return false; }
         const payload={username,group_id:Number(grpSel.value)||0,data_limit_gb:Number(limitI.value)||0,expire_days:Number(expI.value)||0};
         const r=await api('/api/admin/users',{method:'POST',body:payload}); toast('User created','success'); load();
-        // success modal with sub URL + QR
         const sub=r.sub_url||('/sub/'+r.sub_token);
         setTimeout(()=>{ const box=h('div',{},[
           h('div',{class:'finding info',html:icon('check')+'<div>User <b>'+esc(r.username)+'</b> created. Share this subscription:</div>'}),
@@ -1235,41 +1638,187 @@ VIEWS.users=async function(content){
   }
   await load();
 };
-
 /* ===== Groups ===== */
 VIEWS.groups=async function(content){
   clear(content);
   const head=h('div',{class:'section-head'},[h('h3',{text:t('groups')}),h('div',{class:'spacer'}),
     h('button',{class:'btn primary',html:icon('plus')+'<span>'+esc(t('newGroup'))+'</span>',onClick:openNew})]);
+  const q=inp('g-q',{placeholder:'Search groups…'});
+  const filters=h('div',{class:'filters'},[q]);
   const tableWrap=h('div',{class:'table-wrap'});
-  content.appendChild(head); content.appendChild(tableWrap);
-  let inbounds=[];
-  async function load(){ tableWrap.innerHTML=''; tableWrap.appendChild(loadingEl());
-    const [groups,ins]=await Promise.all([api('/api/admin/groups'),api('/api/admin/inbounds').catch(()=>[])]);
-    inbounds=ins||[]; const byId={}; inbounds.forEach(i=>byId[i.id]=i);
+  content.appendChild(head); content.appendChild(filters); content.appendChild(tableWrap);
+  let inbounds=[], groups=[], memberCount={};
+  q.addEventListener('input',draw);
+
+  async function load(){
+    tableWrap.innerHTML=''; tableWrap.appendChild(loadingEl());
+    const [gs,ins]=await Promise.all([api('/api/admin/groups'),api('/api/admin/inbounds').catch(()=>[])]);
+    groups=gs||[]; inbounds=ins||[];
+    // Member counts drive the "this affects N users" warnings below, so they are
+    // fetched up front rather than only when a destructive action is attempted.
+    memberCount={};
+    await Promise.all(groups.map(async g=>{
+      try{ const d=await api('/api/admin/groups/'+g.id); memberCount[g.id]=d.members||0; }
+      catch(e){ memberCount[g.id]=null; }
+    }));
+    draw();
+  }
+
+  function draw(){
     clear(tableWrap);
-    if(!groups||!groups.length){ tableWrap.appendChild(emptyEl('No groups yet — bundle inbounds into a group')); return; }
+    if(!groups.length){
+      tableWrap.appendChild(emptyEl('No groups yet — a group bundles inbounds so several users can share them. Users can also work with no group at all.'));
+      return;
+    }
+    const needle=(q.value||'').trim().toLowerCase();
+    const list=groups.filter(g=>!needle||(g.name||'').toLowerCase().includes(needle)
+      ||(g.description||'').toLowerCase().includes(needle));
+    if(!list.length){ tableWrap.appendChild(emptyEl('No groups match this search.')); return; }
+    const byId={}; inbounds.forEach(i=>byId[i.id]=i);
     const tbl=h('table',{class:'tbl'});
-    tbl.appendChild(h('thead',{html:'<tr><th>Name</th><th>Inbounds</th><th>Bindings</th></tr>'}));
+    tbl.appendChild(h('thead',{html:'<tr><th>Name</th><th>Members</th><th>Inbounds</th><th>Bindings</th><th></th></tr>'}));
     const tb=h('tbody');
-    groups.forEach(g=>{ const ids=g.inbound_ids||[];
-      const names=ids.map(id=>byId[id]?(byId[id].remark||byId[id].protocol):('#'+id)).map(n=>'<span class="pill blue">'+esc(n)+'</span>').join(' ');
-      tb.appendChild(h('tr',{html:'<td><b>'+esc(g.name)+'</b></td><td><span class="badge-count">'+ids.length+'</span></td><td>'+(names||'<span class="hint">none</span>')+'</td>'})); });
+    list.forEach(g=>{
+      const ids=g.inbound_ids||[];
+      const names=ids.map(id=>byId[id]?(byId[id].remark||byId[id].protocol):('#'+id))
+        .map(n=>'<span class="pill blue">'+esc(n)+'</span>').join(' ');
+      const mc=memberCount[g.id];
+      const tr=h('tr');
+      tr.innerHTML='<td><b>'+esc(g.name)+'</b>'+(g.is_default?' <span class="pill amber">default</span>':'')
+          +(g.description?'<div class="hint">'+esc(g.description)+'</div>':'')+'</td>'
+        +'<td><span class="badge-count">'+(mc===null||mc===undefined?'?':mc)+'</span></td>'
+        +'<td><span class="badge-count">'+ids.length+'</span></td>'
+        +'<td>'+(names||'<span class="hint">none</span>')+'</td>';
+      const ab=(ic,label,kind,fn)=>{
+        const b=h('button',{class:'btn sm'+(kind?' '+kind:''),html:icon(ic),onClick:fn,title:label});
+        b.setAttribute('aria-label',label); return b;
+      };
+      const act=h('td');
+      act.appendChild(h('div',{class:'t-actions'},[
+        ab('settings','Edit group','',()=>openEdit(g)),
+        ab('users','View members','',()=>{ location.hash='#/users'; }),
+        ab('check',g.is_default?'Unset as default':'Set as default','',async()=>{
+          try{ await api('/api/admin/groups/'+g.id,{method:'PATCH',body:{is_default:!g.is_default}});
+            toast(g.is_default?'Default cleared':'Set as default group','success'); load();
+          }catch(e){ toast(e.message,'error'); } }),
+        ab('trash','Delete group','danger',()=>openDelete(g))
+      ]));
+      tr.appendChild(act); tb.appendChild(tr);
+    });
     tbl.appendChild(tb); tableWrap.appendChild(tbl);
   }
+
+  // inboundPicker is shared by create and edit.
+  function inboundPicker(selectedIds){
+    const box=h('div',{class:'asg'});
+    const sel=new Set(selectedIds||[]);
+    if(!inbounds.length) box.appendChild(h('div',{class:'none',text:'No inbounds available — create one first.'}));
+    else inbounds.forEach(i=>{
+      const cb=h('input',{type:'checkbox',value:String(i.id)});
+      cb.checked=sel.has(i.id);
+      cb.addEventListener('change',()=>{ cb.checked?sel.add(i.id):sel.delete(i.id); });
+      box.appendChild(h('label',{},[cb,h('span',{html:'<b>'+esc(i.remark||'(unnamed)')+'</b> · '
+        +esc((i.protocol||'').toUpperCase())+' :'+esc(i.port)
+        +(i.enabled===false?' <span class="pill grey">disabled</span>':'')})]));
+    });
+    return {box,get:()=>Array.from(sel)};
+  }
+
+  /* ---- Edit group --------------------------------------------------------
+     A group edit reaches every member at once, so the form states the blast
+     radius before it is applied rather than after. */
+  async function openEdit(g){
+    let d; try{ d=await api('/api/admin/groups/'+g.id); }catch(e){ toast(e.message,'error'); return; }
+    const cur=d.group||g, members=d.members||0;
+    const nameI=inp('ge-name',{value:cur.name||''});
+    const descI=inp('ge-desc',{value:cur.description||''});
+    const pick=inboundPicker(cur.inbound_ids||[]);
+    const defCb=h('input',{type:'checkbox'}); defCb.checked=!!cur.is_default;
+
+    const body=h('div',{},[
+      members?h('div',{class:'finding warn',html:icon('alert')+'<div>This group has <b>'+members
+        +'</b> member'+(members===1?'':'s')+'. Changing its inbounds changes what every one of them can connect to.</div>'}):null,
+      field('Group name',nameI,true),
+      field('Description',descI),
+      fieldH('Inbounds in this group',pick.box,false,'inbound_assignment'),
+      h('label',{class:'chk',style:{marginTop:'10px',display:'flex',gap:'8px',alignItems:'center'}},
+        [defCb,h('span',{text:'Pre-select this group when creating a user'}),helpIcon('group_assignment')]),
+      h('div',{class:'hint',text:'A default is only a pre-selection in the create form. It is never applied to a user without the administrator seeing it.'})
+    ].filter(Boolean));
+
+    modal({title:'Edit group — '+(cur.name||''),wide:true,body,okText:t('save'),cancelText:t('cancel'),
+      onOk:async()=>{
+        const name=nameI.value.trim(); if(!name){ toast('Name required','error'); return false; }
+        const ids=pick.get();
+        const removed=(cur.inbound_ids||[]).filter(x=>!ids.includes(x));
+        if(removed.length&&members){
+          if(!await confirmDialog('Removing '+removed.length+' inbound(s) will take that access away from '
+            +members+' member'+(members===1?'':'s')+' immediately. Continue?')) return false;
+        }
+        const patch={name,description:descI.value,inbound_ids:ids,updated_at:d.updated_at};
+        if(!!cur.is_default!==defCb.checked) patch.is_default=defCb.checked;
+        try{ await api('/api/admin/groups/'+cur.id,{method:'PATCH',body:patch}); }
+        catch(e){
+          if(e.status===409){ toast('This group was changed by someone else — reopen and reapply.','error'); return false; }
+          throw e;
+        }
+        toast('Group updated','success'); load();
+      }});
+  }
+
+  /* ---- Delete group ------------------------------------------------------
+     Deleting a container must never delete its contents. When the group has
+     members the dialog makes the operator choose what happens to them; there is
+     no path here that removes a user account. */
+  async function openDelete(g){
+    let members=memberCount[g.id];
+    if(members===null||members===undefined){
+      try{ members=(await api('/api/admin/groups/'+g.id)).members||0; }catch(e){ members=0; }
+    }
+    if(!members){
+      if(await confirmDialog('Delete group "'+g.name+'"? It has no members.')){
+        try{ await api('/api/admin/groups/'+g.id,{method:'DELETE'}); toast('Group deleted','success'); load(); }
+        catch(e){ toast(e.message,'error'); }
+      }
+      return;
+    }
+    const others=groups.filter(x=>x.id!==g.id);
+    const modeS=sel('gd-mode',[['none','Leave them with no group']].concat(
+      others.length?[['move','Move them to another group']]:[]),'none');
+    const targetS=sel('gd-to',others.map(x=>[String(x.id),x.name]),others.length?String(others[0].id):'');
+    const targetField=field('Move members to',targetS,true);
+    targetField.style.display='none';
+    modeS.addEventListener('change',()=>{ targetField.style.display=modeS.value==='move'?'':'none'; });
+
+    const body=h('div',{},[
+      h('div',{class:'finding warn',html:icon('alert')+'<div>"'+esc(g.name)+'" has <b>'+members+'</b> member'
+        +(members===1?'':'s')+'. <b>No user account will be deleted</b> — choose where they go.</div>'}),
+      field('What happens to the members',modeS,true), targetField,
+      h('div',{class:'hint',text:'Members left with no group keep any inbounds assigned to them directly, and lose the ones this group granted.'})
+    ]);
+    modal({title:'Delete group — '+g.name,body,okText:'Delete group',okKind:'danger',cancelText:t('cancel'),
+      onOk:async()=>{
+        const qs=modeS.value==='move'
+          ? '?reassign_to='+encodeURIComponent(targetS.value)
+          : '?remove_members_from_group=true';
+        await api('/api/admin/groups/'+g.id+qs,{method:'DELETE'});
+        toast('Group deleted — members kept','success'); load();
+      }});
+  }
+
   async function openNew(){
-    let ins=inbounds; if(!ins.length){ try{ ins=await api('/api/admin/inbounds')||[]; }catch(e){} }
+    if(!inbounds.length){ try{ inbounds=await api('/api/admin/inbounds')||[]; }catch(e){} }
     const nameI=inp('g-name',{placeholder:'premium'});
-    const list=h('div',{class:'checklist'});
-    if(!ins.length) list.appendChild(h('div',{class:'none',text:'No inbounds available — create one first.'}));
-    else ins.forEach(i=>list.appendChild(h('label',{},[h('input',{type:'checkbox',value:i.id}),
-      h('span',{html:'<b>'+esc(i.remark||'(unnamed)')+'</b> · '+esc((i.protocol||'').toUpperCase())+' :'+esc(i.port)})])));
-    const body=h('div',{},[field('Group name',nameI,true),field('Inbounds in this group',list,true)]);
+    const descI=inp('g-desc',{placeholder:'optional description'});
+    const pick=inboundPicker([]);
+    const body=h('div',{},[field('Group name',nameI,true),field('Description',descI),
+      fieldH('Inbounds in this group',pick.box,true,'inbound_assignment')]);
     modal({title:t('newGroup'),body,okText:t('create'),cancelText:t('cancel'),
       onOk:async()=>{ const name=nameI.value.trim(); if(!name){ toast('Name required','error'); return false; }
-        const ids=$$('input:checked',list).map(c=>Number(c.value));
+        const ids=pick.get();
         if(!ids.length){ toast('Select at least one inbound','error'); return false; }
-        await api('/api/admin/groups',{method:'POST',body:{name,inbound_ids:ids}}); toast('Group created','success'); load(); }});
+        await api('/api/admin/groups',{method:'POST',body:{name,description:descI.value,inbound_ids:ids}});
+        toast('Group created','success'); load(); }});
   }
   await load();
 };
@@ -1405,7 +1954,7 @@ VIEWS.forgedns=async function(content){
     clear(statusTile);
     statusTile.appendChild(h('div',{class:'section-head'},[h('h3',{text:'DNS tunnel listener'}),h('div',{class:'spacer'}),
       h('div',{html:status.listening?pill('green','listening on '+esc(status.addr||'')):pill('grey','stopped')})]));
-    setHealth(status.listening,status.listening?'dns up':'dns off');
+    // Do NOT set the global indicator from one subsystem — see refreshHealth.
     // session counts per zone (best-effort, live)
     const counts={};
     await Promise.all(zones.map(async z=>{ try{ const s=await api('/api/admin/forgedns/zones/'+z.id+'/sessions'); counts[z.id]=(s||[]).length; }catch(e){ counts[z.id]=0; } }));
