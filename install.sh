@@ -215,13 +215,20 @@ ask() {
     printf '%s' "$def"
     return 0
   fi
+  # IMPORTANT: never seed the TUI input field with the default. whiptail/dialog
+  # (and, less severely, gum) place the cursor at the END of a pre-filled value,
+  # so a user typing "3000" over a default of "2053" gets "20533000" — a garbage
+  # port/domain. Instead we start with an EMPTY field, show the default as a hint,
+  # and fall back to it when the field is submitted blank.
   case "$UI" in
     gum)
-      out=$(gum input --prompt "$ARROW $prompt " --value "$def" \
-              --placeholder "$def" </dev/tty 2>/dev/tty || true)
+      out=$(gum input --prompt "$ARROW $prompt " --placeholder "${def:-type a value}" \
+              </dev/tty 2>/dev/tty || true)
       ;;
     whiptail|dialog)
-      out=$("$UI" --title "$TITLE" --inputbox "$prompt" 10 "$RULE_WIDTH" "$def" \
+      local label="$prompt"
+      [[ -n "$def" ]] && label="$prompt"$'\n\n'"Leave blank to use the default: $def"
+      out=$("$UI" --title "$TITLE" --inputbox "$label" 11 "$RULE_WIDTH" "" \
               3>&1 1>&2 2>&3 </dev/tty || true)
       ;;
     *)
