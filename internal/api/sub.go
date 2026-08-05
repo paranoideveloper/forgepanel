@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,20 +14,79 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 )
 
+// subFormats are the subscription formats this endpoint can render, listed for
+// the error message when a client asks for something else.
+var subFormats = []string{"v2ray", "clash", "sing-box", "links", "json"}
+
+// canonicalSubFormat maps a requested format (and its aliases) to the single
+// name the renderer switch uses. It returns "" for anything unsupported, so an
+// explicit request for a format we do not have becomes a clear error instead of
+// silently returning a different one the client cannot parse.
+func canonicalSubFormat(f string) string {
+	switch strings.ToLower(strings.TrimSpace(f)) {
+	case "v2ray", "v2rayn", "v2rayng", "base64":
+		return "v2ray"
+	case "clash", "clash-meta", "clashmeta":
+		return "clash"
+	case "sing-box", "singbox", "sb":
+		return "sing-box"
+	case "links", "raw", "uri", "plain":
+		return "links"
+	case "json":
+		return "json"
+	default:
+		return ""
+	}
+}
+
 // handleSub serves a subscription (spec §9). Format is chosen by explicit
 // suffix (/clash, /sing-box, /links, /json) or, absent that, auto-detected from
 // the User-Agent. Correct subscription headers are always emitted.
 func (s *Server) handleSub(c *gin.Context) {
+	// This response is per-subscriber, and its body varies on the User-Agent
+	// while the URL stays constant. Without both headers an intermediate cache
+	// could serve one subscriber's config — their credentials — to another, or
+	// hand a sing-box client the body rendered for a Clash client. Set them
+	// first so they are present on every path out of here, errors included.
+	c.Header("Vary", "User-Agent")
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	c.Header("Pragma", "no-cache")
+
+	// Subscription tokens are bearer credentials on an unauthenticated endpoint,
+	// so blind guessing is throttled per source. Valid subscribers are unaffected:
+	// only failed lookups count against the budget.
+	ip := c.ClientIP()
+	if s.subs != nil && !s.subs.Allowed(ip) {
+		c.String(http.StatusTooManyRequests, "too many subscription lookups; try again shortly")
+		return
+	}
+
+	// Resolve the format before doing any work, so an unsupported explicit
+	// request fails cleanly rather than rendering something else.
+	explicit := strings.Trim(c.Param("format"), "/")
+	requested := explicit
+	if requested == "" {
+		// Explicit path/query always wins; sniffing is only the fallback.
+		requested = detectFormat(c.GetHeader("User-Agent"))
+	}
+	format := canonicalSubFormat(requested)
+	if format == "" {
+		c.String(http.StatusNotFound, "unsupported subscription format %q; supported: %s",
+			explicit, strings.Join(subFormats, ", "))
+		return
+	}
+
 	token := c.Param("token")
 	nodes := s.subscriptionNodes(token, hostOnly(c.Request.Host))
 	if nodes == nil {
 		// Unknown token: return an empty but valid subscription rather than
-		// leaking which tokens exist.
+		// leaking which tokens exist — but charge it against the guess budget.
+		if s.subs != nil {
+			s.subs.Fail(ip)
+		}
 		nodes = []*model.Node{}
-	}
-	format := strings.Trim(c.Param("format"), "/")
-	if format == "" {
-		format = detectFormat(c.GetHeader("User-Agent"))
+	} else if s.subs != nil {
+		s.subs.Success(ip)
 	}
 
 	// Never hand a subscriber material only the server should hold (REALITY/TLS/
@@ -40,7 +100,7 @@ func (s *Server) handleSub(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	switch format {
-	case "clash", "clash-meta":
+	case "clash":
 		y, err := export.ClashYAML(nodes)
 		if err != nil {
 			c.String(500, err.Error())
@@ -51,7 +111,7 @@ func (s *Server) handleSub(c *gin.Context) {
 		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinks(nodes)))
 	case "json":
 		c.JSON(200, nodes)
-	case "sing-box", "singbox", "sb":
+	case "sing-box":
 		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes))
 	default: // v2ray/base64 subscription
 		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))

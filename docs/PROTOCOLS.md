@@ -97,6 +97,42 @@ verifiable chain.
 
 ---
 
+## Per-user traffic accounting: which protocols are covered
+
+Every protocol below is rendered with a stable, opaque per-user identifier
+(`u<ID>`, resolved back through the panel database — never a contact address, and
+never the client's UUID or password, both of which would then appear in engine
+logs). That identifier is what makes traffic attributable to one user rather than
+to the inbound as a whole.
+
+**Collection, however, is currently Xray-only.** The panel reads counters via
+`xray api statsquery`, which covers every Xray-served protocol: VLESS, VMess,
+Trojan, Shadowsocks, SOCKS and HTTP. Quota enforcement and traffic resets work
+for those.
+
+Protocols served by sing-box — **Hysteria2, TUIC, AnyTLS, ShadowTLS and
+WireGuard** — carry correct per-user names in their configs, and sing-box
+attributes traffic to them internally, but the panel does not currently collect
+those counters. The reason is upstream: per-user totals would come from
+`experimental.v2ray_api`, and the **official sing-box release archives are not
+built with it** — starting one fails with `v2ray api is not included in this
+build, rebuild with -tags with_v2ray_api`. The binary manager pins those official
+archives by SHA-256, so enabling it would mean taking over the sing-box build and
+its supply chain.
+
+`clash_api`, which official builds *do* include, reports live connections rather
+than cumulative per-user totals. Polling it would miss every connection that
+closed between polls, so quotas would appear enforced while silently leaking
+traffic — worse than reporting nothing, because the failure would be invisible.
+
+Practical consequence: **do not rely on traffic quotas for users whose only
+inbound is Hysteria2, TUIC, AnyTLS, ShadowTLS or WireGuard.** Expiry and
+enable/disable still apply to them normally, since those do not depend on
+counters. Closing the gap needs either a self-built sing-box with
+`with_v2ray_api` or upstream shipping it by default.
+
+---
+
 ## VLESS
 
 **Canonical ID** `vless` · **Engine** Xray · **Uses transport** yes

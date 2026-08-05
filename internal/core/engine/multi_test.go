@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"strings"
@@ -96,5 +97,75 @@ func TestApplySingboxUsersAnyTLSShadowTLS(t *testing.T) {
 		if seen["a@x"] != "pw-a" || seen["b@x"] != "pw-b" {
 			t.Fatalf("%s: per-user passwords wrong: %v", proto, seen)
 		}
+	}
+}
+
+// TestEngineConfigsCarryOpaqueUserTags pins the privacy property behind the
+// per-user stats tag: the identifier that reaches generated engine configs (and
+// therefore engine logs and metrics labels) is the panel's opaque per-client
+// tag, never a contact address. The panel resolves it back to the user through
+// its own database — see job.UserEmail / parseUserEmail, which produce and
+// consume "u<ID>". "email" is Xray's field name for the stats key, not an
+// instruction to put a mailbox there.
+func TestEngineConfigsCarryOpaqueUserTags(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoVLESS, Address: "0.0.0.0", Port: 443,
+		UUID: "11111111-2222-3333-4444-555555555555"}
+	// What internal/api/engines.go actually passes: job.UserEmail(u.ID).
+	sp := InboundSpec{Node: n, Clients: []ClientCred{
+		{Email: "u1", UUID: "11111111-2222-3333-4444-555555555555"},
+		{Email: "u2", UUID: "66666666-7777-8888-9999-000000000000"},
+	}}
+	b, err := BuildMulti([]InboundSpec{sp}, 10085, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, blob := range [][]byte{b.Xray, b.Singbox} {
+		if bytes.Contains(blob, []byte("@")) {
+			t.Fatalf("engine config contains an '@' — a contact address may have "+
+				"leaked into a stats tag:\n%s", blob)
+		}
+	}
+	if !bytes.Contains(b.Xray, []byte(`"email": "u1"`)) {
+		t.Fatalf("xray config lost the opaque per-user tag:\n%s", b.Xray)
+	}
+}
+
+// TestSingboxUserNamesAreUniqueAndStable: names must not collide within an
+// inbound, and must not change between regenerations, or per-user stats would be
+// merged or reset.
+func TestSingboxUserNamesAreUniqueAndStable(t *testing.T) {
+	clients := []ClientCred{{Email: "u1"}, {Email: "u1"}, {Email: ""}, {Email: ""}}
+	first := map[string]bool{}
+	var firstNames []string
+	seen := map[string]int{}
+	for i, cl := range clients {
+		name := singboxUserName(cl, i, seen)
+		if name == "" {
+			t.Fatalf("client %d got an empty name", i)
+		}
+		if first[name] {
+			t.Fatalf("duplicate name %q within one inbound", name)
+		}
+		first[name] = true
+		firstNames = append(firstNames, name)
+	}
+	// Regenerate: identical input must yield identical names.
+	seen2 := map[string]int{}
+	for i, cl := range clients {
+		if got := singboxUserName(cl, i, seen2); got != firstNames[i] {
+			t.Fatalf("name for client %d changed across regeneration: %q -> %q",
+				i, firstNames[i], got)
+		}
+	}
+}
+
+// TestSingboxUserNameNeverLeaksCredentials: the name appears in engine logs and
+// stats, so it must never be the client's authentication secret.
+func TestSingboxUserNameNeverLeaksCredentials(t *testing.T) {
+	const uuid = "11111111-2222-3333-4444-555555555555"
+	const pw = "s3cr3t-password"
+	name := singboxUserName(ClientCred{UUID: uuid, Password: pw}, 0, map[string]int{})
+	if strings.Contains(name, uuid) || strings.Contains(name, pw) {
+		t.Fatalf("stats name leaks a credential: %q", name)
 	}
 }

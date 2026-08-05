@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/forgepanel/forgepanel/internal/cert"
@@ -26,6 +27,10 @@ type Controller struct {
 	dataDir     string
 	xrayAPIPort int
 	bins        *binmgr.Manager
+
+	// mMalformedStats counts engine traffic counters that failed to parse, so
+	// degraded accounting is visible rather than looking like flat usage.
+	mMalformedStats atomic.Int64
 
 	mu             sync.Mutex
 	xray           *supervisor.Process

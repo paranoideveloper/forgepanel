@@ -372,6 +372,39 @@ func (s *Store) SetAdminRecoveryCodes(adminID uint, hashesJSON string) error {
 	return s.db.Model(&Admin{}).Where("id = ?", adminID).Update("recovery_codes", hashesJSON).Error
 }
 
+// BumpAdminSessionEpoch invalidates every token already issued to an admin by
+// advancing the epoch stamped into them. Used when the account's authentication
+// state changes under recovery conditions (recovery-code login, 2FA disabled,
+// password changed), so a session an attacker already holds does not survive the
+// owner recovering the account.
+func (s *Store) BumpAdminSessionEpoch(adminID uint) error {
+	return s.db.Model(&Admin{}).Where("id = ?", adminID).
+		UpdateColumn("session_epoch", gorm.Expr("session_epoch + 1")).Error
+}
+
+// AdminSessionEpoch reads an admin's current session epoch, for token validation.
+func (s *Store) AdminSessionEpoch(adminID uint) (uint, error) {
+	var a Admin
+	if err := s.db.Select("session_epoch").First(&a, adminID).Error; err != nil {
+		return 0, err
+	}
+	return a.SessionEpoch, nil
+}
+
+// ClaimTOTPStep records a successfully verified TOTP time step, refusing to
+// re-record a step at or below the one already stored. The compare-and-set runs
+// as a single conditional UPDATE so two concurrent logins presenting the same
+// intercepted code cannot both succeed.
+func (s *Store) ClaimTOTPStep(adminID uint, step int64) (bool, error) {
+	res := s.db.Model(&Admin{}).
+		Where("id = ? AND (last_totp_step IS NULL OR last_totp_step < ?)", adminID, step).
+		UpdateColumn("last_totp_step", step)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
 // ConsumeRecoveryCode atomically removes one matching recovery-code hash from an
 // admin and reports whether it was present. The read-check-write runs in a
 // transaction so two concurrent logins can never both spend the same code

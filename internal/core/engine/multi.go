@@ -103,6 +103,21 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	}
 	b.Xray = raw
 
+	// No stats API is configured for sing-box, and that is a limitation of the
+	// upstream binary rather than an oversight. Per-user counters would come from
+	// experimental.v2ray_api, which the OFFICIAL sing-box release archives are not
+	// built with — starting one errors with "v2ray api is not included in this
+	// build, rebuild with -tags with_v2ray_api". binmgr pins those official
+	// archives by SHA-256, so the panel cannot enable it without taking over the
+	// build. clash_api (which official builds do include) reports live
+	// connections, not cumulative per-user totals, so polling it would undercount
+	// every connection that closes between polls — worse than no accounting,
+	// because quotas would appear enforced while silently leaking traffic.
+	//
+	// The user names emitted above are still correct and required: sing-box
+	// attributes traffic to them internally and in its own logs. What is missing
+	// is panel-side COLLECTION, so quota enforcement currently covers Xray-served
+	// protocols only. See docs/PROTOCOLS.md.
 	singboxCfg := jobj{"log": jobj{"level": "warn"}, "inbounds": orEmpty(sin), "outbounds": []any{jobj{"type": "direct", "tag": "direct"}}}
 	if len(sep) > 0 {
 		singboxCfg["endpoints"] = sep

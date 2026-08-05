@@ -21,7 +21,7 @@ func dbServerT(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	return &Server{cfg: &config.Config{}, db: db, router: gin.New(),
-		signer: auth.NewSigner([]byte("test")), login: newLoginLimiter()}
+		signer: auth.NewSigner([]byte("test")), login: newLoginLimiter(), subs: newLoginLimiter()}
 }
 
 // #1: engine-dependent routes must not panic when s.engine is nil.

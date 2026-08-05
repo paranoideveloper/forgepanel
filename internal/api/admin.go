@@ -55,7 +55,16 @@ func (s *Server) handleLogin(c *gin.Context) {
 	if admin.TOTPSecret != "" {
 		switch {
 		case req.TOTP != "":
-			if !auth.VerifyTOTP(admin.TOTPSecret, req.TOTP, time.Now()) {
+			// Reject a code whose time step was already spent. A TOTP stays valid
+			// across the skew window, so without this an intercepted code could be
+			// replayed for up to 90 seconds. The claim is a conditional UPDATE, so
+			// two concurrent logins with the same code cannot both win.
+			step, ok := auth.VerifyTOTPStep(admin.TOTPSecret, req.TOTP, time.Now(), admin.LastTOTPStep)
+			if ok {
+				claimed, cerr := s.db.ClaimTOTPStep(admin.ID, step)
+				ok = cerr == nil && claimed
+			}
+			if !ok {
 				if s.login != nil {
 					s.login.Fail(ip)
 				}
@@ -73,7 +82,13 @@ func (s *Server) handleLogin(c *gin.Context) {
 				c.JSON(401, gin.H{"error": "invalid or already-used recovery code", "totp_required": true})
 				return
 			}
+			// A recovery-code login means the owner lost their authenticator, which
+			// is exactly the situation where an attacker may already hold a
+			// session. Revoke every existing token for the account before issuing
+			// the new one.
+			_ = s.db.BumpAdminSessionEpoch(admin.ID)
 			s.db.Audit(&store.AuditLog{AdminID: admin.ID, Actor: admin.Username, IP: c.ClientIP(), Action: "2fa.recovery.use"})
+			s.db.Audit(&store.AuditLog{AdminID: admin.ID, Actor: admin.Username, IP: c.ClientIP(), Action: "sessions.revoke"})
 			c.Header("X-Recovery-Codes-Remaining", strconv.Itoa(remaining))
 		default:
 			c.JSON(401, gin.H{"error": "2fa/totp code required", "totp_required": true})
@@ -83,7 +98,10 @@ func (s *Server) handleLogin(c *gin.Context) {
 	if s.login != nil {
 		s.login.Success(ip)
 	}
-	access, refresh, err := s.signer.Issue(admin.ID, admin.Username, string(admin.Role))
+	// Re-read the epoch: a recovery-code login just advanced it, and the new
+	// token must carry the new value or it would invalidate itself.
+	epoch, _ := s.db.AdminSessionEpoch(admin.ID)
+	access, refresh, err := s.signer.IssueAt(admin.ID, admin.Username, string(admin.Role), epoch)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -106,7 +124,13 @@ func (s *Server) handleRefresh(c *gin.Context) {
 		c.JSON(401, gin.H{"error": "invalid refresh token"})
 		return
 	}
-	access, refresh, err := s.signer.Issue(claims.AdminID, claims.Username, claims.Role)
+	// A revoked session must not be able to mint itself a fresh access token —
+	// otherwise the refresh endpoint would quietly undo every invalidation.
+	if !s.signer.SessionValid(claims) {
+		c.JSON(401, gin.H{"error": "session revoked; sign in again"})
+		return
+	}
+	access, refresh, err := s.signer.IssueAt(claims.AdminID, claims.Username, claims.Role, claims.SessionEpoch)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

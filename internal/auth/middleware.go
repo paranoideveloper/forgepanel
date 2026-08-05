@@ -9,6 +9,24 @@ import (
 // ctxKey is the gin context key under which the authenticated claims are stored.
 const ctxKey = "forgepanel.claims"
 
+// SessionValidator reports whether a token minted at the given session epoch is
+// still valid for the admin. It exists as a callback so this package stays free
+// of a storage dependency; the API layer wires it to the admin table.
+type SessionValidator func(adminID uint, epoch uint) bool
+
+// SetSessionValidator installs the callback the middleware consults to honour
+// session invalidation. Without one, tokens remain valid until they expire.
+func (s *Signer) SetSessionValidator(v SessionValidator) { s.sessions = v }
+
+// SessionValid reports whether a token's epoch is still current. A signer with
+// no validator accepts everything, preserving the stateless behaviour.
+func (s *Signer) SessionValid(claims *Claims) bool {
+	if s.sessions == nil || claims == nil {
+		return true
+	}
+	return s.sessions(claims.AdminID, claims.SessionEpoch)
+}
+
 // Middleware requires a valid access token (Bearer header or "token" cookie)
 // and stashes the claims in the gin context.
 func (s *Signer) Middleware() gin.HandlerFunc {
@@ -21,6 +39,12 @@ func (s *Signer) Middleware() gin.HandlerFunc {
 		claims, err := s.Verify(tok)
 		if err != nil || claims.Kind != "access" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid or expired token"})
+			return
+		}
+		// A token minted before the account's session epoch advanced has been
+		// revoked (recovery-code login, 2FA disabled, password changed).
+		if !s.SessionValid(claims) {
+			c.AbortWithStatusJSON(401, gin.H{"error": "session revoked; sign in again"})
 			return
 		}
 		c.Set(ctxKey, claims)

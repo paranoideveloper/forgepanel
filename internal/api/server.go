@@ -46,6 +46,7 @@ type Server struct {
 	engine  *core.Controller         // proxy-core supervisor (spec §6); nil in the light constructor
 	sched   *job.Scheduler           // cron scheduler (spec §11); nil in the light constructor
 	login   *loginLimiter            // per-IP login rate limiter (spec §12)
+	subs    *loginLimiter            // per-IP subscription-token guess limiter
 	fdns    *core.ForgeDNSController // DNS-tunnel manager (spec §5)
 	domains *domain.Registry         // domain registry + DNS health (spec §7)
 	certs   *cert.Store              // cert store + ACME (spec §7)
@@ -65,7 +66,7 @@ type Server struct {
 // pure Config Studio. Use NewWithStore for a persistent panel.
 func New(cfg *config.Config) *Server {
 	gin.SetMode(gin.ReleaseMode)
-	s := &Server{cfg: cfg, router: gin.New(), mem: NewNodeStore(), signer: auth.NewSigner([]byte(deriveSecret(cfg))), domains: domain.New(nil), certs: cert.NewStore(filepath.Join(cfg.DataDir, "acme"), false, nil), login: newLoginLimiter()}
+	s := &Server{cfg: cfg, router: gin.New(), mem: NewNodeStore(), signer: auth.NewSigner([]byte(deriveSecret(cfg))), domains: domain.New(nil), certs: cert.NewStore(filepath.Join(cfg.DataDir, "acme"), false, nil), login: newLoginLimiter(), subs: newLoginLimiter()}
 	s.router.Use(gin.Recovery(), securityHeaders())
 	s.routes()
 	return s
@@ -99,7 +100,18 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		domains: domain.New(nil),
 		certs:   cert.NewStore(filepath.Join(cfg.DataDir, "acme"), staging, allowPanelHost),
 		login:   newLoginLimiter(),
+		subs:    newLoginLimiter(),
 	}
+	// Honour session revocation: a token whose epoch is behind the account's
+	// current one was invalidated by a recovery-code login, a 2FA disable or a
+	// password change. Fail closed — if the epoch cannot be read, reject.
+	s.signer.SetSessionValidator(func(adminID, epoch uint) bool {
+		cur, err := db.AdminSessionEpoch(adminID)
+		if err != nil {
+			return false
+		}
+		return epoch >= cur
+	})
 	if err := s.reconcileSetup(); err != nil {
 		return nil, err
 	}

@@ -90,9 +90,20 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "could not generate recovery codes"})
 		return
 	}
+	// Adding a factor changes what an authenticated session means, so sessions
+	// minted before 2FA existed are revoked. The caller keeps working via the
+	// fresh pair below.
+	_ = s.db.BumpAdminSessionEpoch(admin.ID)
 	s.audit(c, "2fa.enable", claims.Username)
 	s.audit(c, "2fa.recovery.generate", claims.Username)
-	c.JSON(200, gin.H{"enabled": true, "recovery_codes": codes})
+	s.audit(c, "sessions.revoke", claims.Username)
+	resp := gin.H{"enabled": true, "recovery_codes": codes, "sessions_revoked": true}
+	if epoch, err := s.db.AdminSessionEpoch(admin.ID); err == nil {
+		if access, refresh, err := s.signer.IssueAt(admin.ID, admin.Username, string(admin.Role), epoch); err == nil {
+			resp["access_token"], resp["refresh_token"] = access, refresh
+		}
+	}
+	c.JSON(200, resp)
 }
 
 // handle2FADisable turns off 2FA after verifying a current code.
@@ -118,8 +129,13 @@ func (s *Server) handle2FADisable(c *gin.Context) {
 	admin.TOTPSecret = ""
 	admin.RecoveryCodes = "" // invalidate recovery codes when 2FA is turned off
 	_ = s.db.SaveAdmin(admin)
+	// Dropping a factor changes what every existing session was authenticated
+	// with, so revoke them and make the operator sign in again under the new
+	// (weaker) policy rather than leaving pre-existing sessions in place.
+	_ = s.db.BumpAdminSessionEpoch(admin.ID)
 	s.audit(c, "2fa.disable", claims.Username)
-	c.JSON(200, gin.H{"enabled": false})
+	s.audit(c, "sessions.revoke", claims.Username)
+	c.JSON(200, gin.H{"enabled": false, "sessions_revoked": true})
 }
 
 // handle2FARecoveryStatus reports how many unused recovery codes remain (never
@@ -205,6 +221,19 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 	}
 	admin.PasswordHash = hash
 	_ = s.db.SaveAdmin(admin)
+	// A credential reset must not leave sessions minted under the old password
+	// alive, or changing a leaked password would not actually evict the intruder.
+	_ = s.db.BumpAdminSessionEpoch(admin.ID)
 	s.audit(c, "password.change", claims.Username)
-	c.JSON(200, gin.H{"ok": true})
+	s.audit(c, "sessions.revoke", claims.Username)
+	// The caller's own token is now stale too; hand back a fresh pair so the UI
+	// does not bounce the operator to the login screen for their own action.
+	epoch, _ := s.db.AdminSessionEpoch(admin.ID)
+	access, refresh, err := s.signer.IssueAt(admin.ID, admin.Username, string(admin.Role), epoch)
+	if err != nil {
+		c.JSON(200, gin.H{"ok": true, "sessions_revoked": true})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true, "sessions_revoked": true,
+		"access_token": access, "refresh_token": refresh})
 }

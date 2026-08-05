@@ -71,22 +71,44 @@ func TOTPCode(secret string, now time.Time) (string, error) {
 
 // VerifyTOTP checks a user-supplied code against the secret, tolerating one step
 // of clock skew on either side (RFC 6238 §5.2). Constant-time compare.
+//
+// Prefer VerifyTOTPStep where the caller can persist the last used step: a code
+// stays valid for up to 90 seconds across the skew window, so on its own this
+// function cannot tell a legitimate use from a replay of an intercepted code.
 func VerifyTOTP(secret, code string, now time.Time) bool {
+	_, ok := VerifyTOTPStep(secret, code, now, -1)
+	return ok
+}
+
+// VerifyTOTPStep verifies a code and returns the time step it matched, rejecting
+// any step at or below lastUsed. RFC 6238 §5.2 is explicit that a verifier must
+// accept each one-time password only once; without this an attacker who observes
+// a code (shoulder-surfing, a phished form, a proxy) can replay it for the rest
+// of its validity window. Pass lastUsed < 0 to skip the replay check.
+//
+// The returned step is meaningful only when ok is true; persist it against the
+// account so the next attempt is compared to it.
+func VerifyTOTPStep(secret, code string, now time.Time, lastUsed int64) (int64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != totpDigits {
-		return false
+		return 0, false
 	}
-	counter := uint64(now.Unix()) / totpPeriod
+	counter := int64(uint64(now.Unix()) / totpPeriod)
 	for _, delta := range []int64{0, -1, 1} {
-		want, err := totpAt(secret, uint64(int64(counter)+delta))
+		step := counter + delta
+		want, err := totpAt(secret, uint64(step))
 		if err != nil {
-			return false
+			return 0, false
 		}
-		if subtle.ConstantTimeCompare([]byte(want), []byte(code)) == 1 {
-			return true
+		if subtle.ConstantTimeCompare([]byte(want), []byte(code)) != 1 {
+			continue
 		}
+		if lastUsed >= 0 && step <= lastUsed {
+			return step, false // already used: replay
+		}
+		return step, true
 	}
-	return false
+	return 0, false
 }
 
 // RecoveryCodes returns n single-use recovery codes (spec §12).

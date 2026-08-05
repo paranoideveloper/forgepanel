@@ -31,12 +31,18 @@ func (v *statValue) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		// Xray traffic counters are monotonic byte totals. A negative value is
+		// corruption, and applying it would credit the user bytes back and
+		// silently weaken quota enforcement.
+		if n < 0 {
+			return fmt.Errorf("stats: negative counter %q", s)
+		}
 		*v = statValue(n)
 		return nil
 	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		if f != math.Trunc(f) || f < math.MinInt64 || f >= math.MaxInt64 {
-			return fmt.Errorf("stats: value %q is not an exact int64", s)
+		if f != math.Trunc(f) || f < 0 || f >= math.MaxInt64 {
+			return fmt.Errorf("stats: value %q is not an exact non-negative int64", s)
 		}
 		*v = statValue(int64(f))
 		return nil
@@ -65,18 +71,32 @@ func (c *Controller) QueryUserStats(reset bool) (map[string]*UserTraffic, error)
 	if err != nil {
 		return nil, err
 	}
-	return parseStatsQuery(out), nil
+	res, skipped := parseStatsQuery(out)
+	if skipped > 0 {
+		// Surface malformed counters instead of letting them look like flat
+		// usage: a sustained run of them means accounting is silently degraded,
+		// which is exactly the condition that stops quota enforcement working.
+		c.mMalformedStats.Add(int64(skipped))
+	}
+	return res, nil
 }
 
+// MalformedStatsTotal is the number of engine stat counters that could not be
+// parsed since start. A non-zero and growing value means per-user accounting is
+// incomplete.
+func (c *Controller) MalformedStatsTotal() int64 { return c.mMalformedStats.Load() }
+
 // parseStatsQuery decodes the JSON `xray api statsquery` emits: {"stat":[{"name":
-// "user>>>alice>>>traffic>>>uplink","value":"123"}, ...]}.
-func parseStatsQuery(out []byte) map[string]*UserTraffic {
+// "user>>>alice>>>traffic>>>uplink","value":"123"}, ...]}. It returns the
+// per-user totals and how many entries were skipped as malformed.
+func parseStatsQuery(out []byte) (map[string]*UserTraffic, int) {
 	res := map[string]*UserTraffic{}
+	skipped := 0
 	var doc struct {
 		Stat []json.RawMessage `json:"stat"`
 	}
 	if err := json.Unmarshal(out, &doc); err != nil {
-		return res
+		return res, 0
 	}
 	for _, raw := range doc.Stat {
 		var e struct {
@@ -86,6 +106,7 @@ func parseStatsQuery(out []byte) map[string]*UserTraffic {
 		// Decode each stat independently so one malformed counter (bad value type
 		// or overflow) never discards the whole document.
 		if err := json.Unmarshal(raw, &e); err != nil {
+			skipped++
 			continue
 		}
 		parts := strings.Split(e.Name, ">>>")
@@ -105,7 +126,7 @@ func parseStatsQuery(out []byte) map[string]*UserTraffic {
 			ut.Downlink = int64(e.Value)
 		}
 	}
-	return res
+	return res, skipped
 }
 
 // RemoveUser hot-removes a user from a live inbound via the Xray HandlerService

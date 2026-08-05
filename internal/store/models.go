@@ -42,6 +42,17 @@ type Admin struct {
 	// codes. Never plaintext. Empty when 2FA is off or codes were never generated
 	// (existing 2FA admins migrate here with an empty set and can regenerate).
 	RecoveryCodes string `json:"-"`
+	// SessionEpoch is stamped into every issued token. Bumping it invalidates all
+	// tokens the account already holds, which is what makes "sign out everywhere"
+	// possible with stateless JWTs. It is bumped whenever the account's
+	// authentication state changes under recovery conditions — a recovery code is
+	// used, 2FA is disabled, or the password is changed — so an attacker who
+	// already had a session does not keep it after the legitimate owner recovers.
+	SessionEpoch uint `json:"-"`
+	// LastTOTPStep is the most recent RFC 6238 time step accepted for this admin.
+	// A code stays valid across the skew window, so without this an intercepted
+	// code could be replayed for up to 90 seconds.
+	LastTOTPStep int64 `json:"-"`
 	// Reseller quotas (enforced at the repository layer, spec §4).
 	UserQuota     int   `json:"user_quota"`
 	TrafficCredit int64 `json:"traffic_credit"`

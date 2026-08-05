@@ -107,10 +107,33 @@ access, not through a web-facing recovery flow.
 
 ### Two-factor authentication: TOTP
 
-TOTP (RFC 6238) via `pquerna/otp`, provisioned by QR code, with a small window to
-tolerate clock skew and **replay rejection of already-used codes within the
-window**. Single-use recovery codes are generated at enrollment, shown once, and
-stored hashed. Enabling 2FA invalidates other active sessions.
+TOTP (RFC 6238), implemented in-tree with no third-party dependency
+(`internal/auth/totp.go`), provisioned by QR code, with a one-step window either
+side to tolerate clock skew.
+
+**Already-used codes are rejected.** The window means a code stays valid for up
+to 90 seconds, so accepting it more than once would let anyone who observed it —
+by shoulder-surfing, a phishing form, or a proxy — replay it. The account records
+the last time step it accepted, and a login presenting that step or earlier is
+refused. The record is claimed with a conditional `UPDATE`, so two logins racing
+with the same intercepted code cannot both succeed; exactly one wins.
+
+**Recovery codes are real, single-use, and hashed.** They are generated at
+enrollment, displayed exactly once, and stored as salted SHA-256 — never
+plaintext. Consuming one runs inside a transaction, so two concurrent logins
+cannot spend the same code. After the initial display the panel only reports how
+many remain. Recovery-code attempts count against the same failed-login lockout
+as passwords, so the recovery path is not a way around it.
+
+**Sessions are revocable despite stateless tokens.** Every token carries the
+account's session epoch, and the middleware rejects a token whose epoch is behind
+the account's current one — including at the refresh endpoint, which would
+otherwise launder a revoked session into a fresh access token. The epoch is
+advanced whenever the account's authentication state changes: 2FA enabled, 2FA
+disabled, a recovery code used, or the password changed. The recovery-code case
+matters most: reaching for a recovery code means the authenticator is gone, which
+is exactly when someone else may already hold a session. The operator performing
+the action is handed a fresh token pair, so their own UI is not signed out.
 
 TOTP shares a secret with the server, so it protects against credential theft and
 reuse but not against a compromised panel. That is the correct trade for this
