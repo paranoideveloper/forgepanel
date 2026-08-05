@@ -235,8 +235,10 @@ func singboxProtocol(n *model.Node) (jobj, error) {
 	case model.ProtoWireGuard:
 		w := n.WireGuard
 		o := jobj{
+			// A client outbound uses the CLIENT's key (PeerPrivateKey); w.PrivateKey
+			// is the server's and must never be shipped to a client.
 			"type": "wireguard", "server": n.Address, "server_port": n.Port,
-			"private_key": w.PrivateKey, "peer_public_key": w.PublicKey,
+			"private_key": w.PeerPrivateKey, "peer_public_key": w.PublicKey,
 		}
 		if w.PreSharedKey != "" {
 			o["pre_shared_key"] = w.PreSharedKey

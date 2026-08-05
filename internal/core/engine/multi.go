@@ -174,6 +174,21 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 				e["uuid"] = cl.UUID
 			}
 			arr = append(arr, e)
+		case model.ProtoAnyTLS:
+			// AnyTLS + ShadowTLS were previously skipped (default: return), so every
+			// panel user shared the inbound's single template password with no
+			// per-user attribution. Emit one entry per user with a stable name.
+			pw := cl.Password
+			if pw == "" {
+				pw = n.Password
+			}
+			arr = append(arr, jobj{"name": name, "password": pw})
+		case model.ProtoShadowTLS:
+			pw := cl.Password
+			if pw == "" && n.ShadowTLS != nil {
+				pw = n.ShadowTLS.Password
+			}
+			arr = append(arr, jobj{"name": name, "password": pw})
 		default:
 			return
 		}

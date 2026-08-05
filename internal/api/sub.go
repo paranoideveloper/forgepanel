@@ -29,6 +29,11 @@ func (s *Server) handleSub(c *gin.Context) {
 		format = detectFormat(c.GetHeader("User-Agent"))
 	}
 
+	// Never hand a subscriber material only the server should hold (REALITY/TLS/
+	// WireGuard server private keys). Redact once, up front, so every format below
+	// is safe; client-side fields are preserved so configs still work.
+	nodes = redactNodesForClient(nodes)
+
 	c.Header("Profile-Update-Interval", "12")
 	c.Header("Subscription-Userinfo", "upload=0; download=0; total=0; expire=0")
 	c.Header("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte("ForgePanel")))
@@ -91,6 +96,26 @@ func singboxSubscription(nodes []*model.Node) []byte {
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return b
+}
+
+// redactNodesForClient returns copies of the nodes with server-only secrets
+// blanked. Client-facing fields (public keys, shortIDs, the client's own peer
+// private key) are kept so links/clash/sing-box/json all still produce working
+// configs. Operates on deep copies — the stored config is never mutated.
+func redactNodesForClient(nodes []*model.Node) []*model.Node {
+	out := make([]*model.Node, 0, len(nodes))
+	for _, n := range nodes {
+		c := n.Clone()
+		if c.Security.Reality != nil {
+			c.Security.Reality.PrivateKey = ""
+		}
+		c.Security.KeyFile = "" // path to the server's TLS private key
+		if c.WireGuard != nil {
+			c.WireGuard.PrivateKey = "" // the server's WG key; clients use PeerPrivateKey
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func plainLinks(nodes []*model.Node) string {

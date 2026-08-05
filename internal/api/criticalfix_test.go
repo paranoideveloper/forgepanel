@@ -164,3 +164,31 @@ func TestResellerQuotaConcurrent(t *testing.T) {
 		t.Fatalf("quota breached under concurrency: %d created, cap 5", ok)
 	}
 }
+
+func TestRedactNodesForClient(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoVLESS, Address: "1.2.3.4", Port: 443, UUID: "u",
+		Security: model.Security{Type: model.SecReality, KeyFile: "/etc/forgepanel/key.pem",
+			Reality: &model.Reality{PrivateKey: "SERVER-PRIV", PublicKey: "PUB", ShortID: "ab"}},
+		WireGuard: &model.WireGuardOptions{PrivateKey: "WG-SERVER-PRIV", PeerPrivateKey: "CLIENT-PRIV", PublicKey: "WG-PUB"},
+	}
+	out := redactNodesForClient([]*model.Node{n})
+	r := out[0]
+	if r.Security.Reality.PrivateKey != "" {
+		t.Fatal("REALITY server private key leaked to client")
+	}
+	if r.Security.KeyFile != "" {
+		t.Fatal("TLS key file path leaked to client")
+	}
+	if r.WireGuard.PrivateKey != "" {
+		t.Fatal("WireGuard server private key leaked to client")
+	}
+	// Client-side fields must survive so configs still work.
+	if r.Security.Reality.PublicKey != "PUB" || r.WireGuard.PeerPrivateKey != "CLIENT-PRIV" {
+		t.Fatal("client fields must be preserved")
+	}
+	// The stored node must NOT be mutated by redaction.
+	if n.Security.Reality.PrivateKey != "SERVER-PRIV" || n.WireGuard.PrivateKey != "WG-SERVER-PRIV" {
+		t.Fatal("original node was mutated by redaction")
+	}
+}

@@ -69,3 +69,32 @@ func TestApplySingboxUsersNameTags(t *testing.T) {
 		t.Fatalf("email collision de-dup wrong: %v", names)
 	}
 }
+
+func TestApplySingboxUsersAnyTLSShadowTLS(t *testing.T) {
+	// Regression: AnyTLS/ShadowTLS used to hit default:return, so all users shared
+	// one template password. Now each gets its own {name,password}.
+	for _, proto := range []model.Protocol{model.ProtoAnyTLS, model.ProtoShadowTLS} {
+		in := jobj{}
+		applySingboxUsers(in, &model.Node{Protocol: proto}, []ClientCred{
+			{Email: "a@x", Password: "pw-a"},
+			{Email: "b@x", Password: "pw-b"},
+		})
+		arr, ok := in["users"].([]any)
+		if !ok || len(arr) != 2 {
+			t.Fatalf("%s: expected 2 users, got %v", proto, in["users"])
+		}
+		seen := map[string]string{}
+		for _, u := range arr {
+			m := u.(jobj)
+			name, _ := m["name"].(string)
+			pw, _ := m["password"].(string)
+			if name == "" || pw == "" {
+				t.Fatalf("%s: blank name/password: %v", proto, m)
+			}
+			seen[name] = pw
+		}
+		if seen["a@x"] != "pw-a" || seen["b@x"] != "pw-b" {
+			t.Fatalf("%s: per-user passwords wrong: %v", proto, seen)
+		}
+	}
+}
