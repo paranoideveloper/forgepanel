@@ -101,6 +101,40 @@ of nearly every difficulty: it enforces its own limits on name length and
 response size, it may rewrite case, it may refuse certain record types, and it
 adds a full round-trip of latency to every exchange.
 
+### Apex queries are ordinary DNS, not tunnel traffic
+
+Not every query arriving for a tunnel zone is tunnel traffic. A query for the
+zone apex itself — `t.example.com`, with no encoded label in front of it — is an
+ordinary DNS question: the parent zone's delegation check, a resolver fetching
+`SOA` or `NS`, an uptime monitor, an operator running `dig`.
+
+The two are separated *before* any decoding happens, and the split is deliberate:
+
+| Component | Responsibility |
+|---|---|
+| `codec.SplitQName` | reports **whether** the name carries an encoded payload |
+| `adapter.Match` / `Decode` | decides whether frame parsing should happen at all; returns `ErrNoPayload` for a name that carries none |
+| `codec.ParseFrame` | rejects only genuinely invalid frames |
+
+This matters because an apex query yields an empty payload, and an empty payload
+is not a malformed frame — it is not a frame at all. Feeding it to the decoder
+made it fail the header-length check and be answered `NXDOMAIN`, which meant
+`SOA` and `NS` at the apex also returned `NXDOMAIN`, and **a zone in that state
+cannot be delegated**: the parent's delegation check and every resolver's `SOA`
+lookup both fail. Apex queries are now answered from the zone's authoritative
+data, and they never touch the session manager, so a health check can never be
+mistaken for a client.
+
+A name under the zone whose type we do not serve is `NOERROR`/`NODATA` with the
+`SOA` in the authority section — the name exists, we simply hold no records of
+that type. `NXDOMAIN` is reserved for names that genuinely do not exist.
+
+The nameserver hostname the apex advertises is derived the same way the
+delegation wizard derives it, from the **registrable** domain: zone
+`t.example.com` advertises `ns1.example.com`, never `ns1.com`. The two must agree
+or the delegation the panel tells the operator to create will not match what the
+server answers.
+
 ---
 
 ## The adapter interface
@@ -207,6 +241,52 @@ a one triggers resolver rate limiting, which looks like sudden total loss.
 different queries from one client may traverse different resolver instances
 entirely. Sequence numbers in the `Frame` header let the session layer
 reassemble the stream, with a bounded buffer and a retransmission timer.
+Upstream frames are de-duplicated: a retransmitted client frame whose sequence
+was already consumed is dropped rather than being counted twice or parked in the
+reorder buffer forever.
+
+**Downstream delivery is stop-and-wait.** DNS over UDP is unreliable, and a
+dropped *answer* is invisible to the server — the client simply repeats the same
+query. Downstream bytes are therefore **not** removed from the queue when they
+are sent. One chunk is held in flight; a repeat of the same query replays it
+byte-for-byte, and the queue advances only once the client has acknowledged it.
+
+Acknowledgement is explicit for v2 peers, which carry `AckSeq` in the frame
+extension. For v1 peers it is implicit: a *new* request sequence means the
+previous answer arrived, while a repeat of the same request does not. That
+implicit rule is what makes the fix work for existing clients without a protocol
+change, because the failure the doc describes — "the response was lost so the
+client repeats the query" — is precisely a repeat of the same request sequence.
+
+Without this, one lost packet silently deleted bytes from the middle of the
+tunnelled stream: the client asked again and got the *next* chunk, and whatever
+was in the lost one was gone for good. Downstream bytes are billed once, when a
+chunk first goes in flight; replays are never re-billed. An in-flight chunk that
+is never acknowledged expires on a timer and is re-sent rather than pinning
+memory.
+
+**Session identity and frame authentication.** Because the replay buffer above
+hands a stored chunk to whoever asks for a given `(session, sequence)`, session
+identity has to be strong enough to carry that weight over a transport whose
+source address is trivially spoofable. A v2 session id is a 64-bit CSPRNG value —
+not the 16-bit field, which is enumerable in seconds — and every v2 frame carries
+a truncated HMAC over `(session, seq, flags, ackseq, payload)` under a key
+established at handshake. Frames that fail verification are dropped **before any
+session state is read or created**, so forged identifiers can neither retrieve
+another session's buffered data, nor forge an acknowledgement that discards it,
+nor fill the session table. Authenticated ids are always `>= 2^16` so they cannot
+collide with the legacy id space.
+
+v1 (unauthenticated, 16-bit) sessions remain accepted for compatibility and can
+be turned off with `Options.AllowLegacy`. They get the retransmission fix but not
+the identity guarantees, which is inherent to a wire format with nowhere to put
+an authenticator.
+
+**Bounded everywhere.** Live sessions, per-session downstream queue bytes, and
+held out-of-order upstream frames all have caps, and every rejection is counted
+(`sessions_rejected`, `outbound_dropped`, `auth_failures`, `retransmits`,
+`duplicate_queries`, `invalid_sequence`, `expired_frames`, `stale_upstream`), so
+memory pressure from a flood is visible rather than fatal.
 
 **Resolver capability probing.** Which downstream encoding actually works depends
 on the client's recursive resolver, not on the client and not on us. Some
@@ -337,15 +417,28 @@ discovered, gets the server null-routed by its provider, and gets the operator's
 account terminated. There is no configuration flag that enables recursion,
 because the correct number of ways to accidentally turn on recursion is zero.
 
-**NXDOMAIN for unknown zones.** A query for a zone we do not serve gets
-`NXDOMAIN` — not `REFUSED`, not a referral, not silence. `NXDOMAIN` is the
-boring, expected answer an authoritative server gives, so it reveals nothing and
-invites no follow-up. Sending a referral would make the server look like it might
-recurse; silence makes scanners retry.
+**REFUSED for zones we do not serve.** A query for a zone we are not
+authoritative for gets `REFUSED` — not a referral, not silence, and *not*
+`NXDOMAIN`. `NXDOMAIN` is an authoritative statement that the name does not
+exist, and we have no standing to make it about somebody else's zone; a resolver
+is entitled to cache that denial. `REFUSED` says the true thing ("not mine"), is
+the smaller datagram, and reveals nothing. Sending a referral would make the
+server look like it might recurse; silence makes scanners retry.
 
-**Drop ANY queries.** `QTYPE=ANY` is the classic amplification lever: a small
-query soliciting a large response. There is no legitimate reason for a ForgeDNS
-client to send one, so they are dropped.
+Inside a zone we *do* serve, `NXDOMAIN` is used exactly where it belongs: a name
+under the zone that genuinely does not exist, including a subdomain whose encoded
+label is not a decodable frame. Those answers carry the zone's `SOA` so resolvers
+can cache the negative result.
+
+**RD never yields RA.** A query with the recursion-desired bit set still gets the
+authoritative answer, and the recursion-available bit stays clear. `RA` is the
+flag scanners look for when cataloguing open resolvers, and it is never set.
+
+**Minimal ANY responses (RFC 8482).** `QTYPE=ANY` is the classic amplification
+lever: a small query soliciting a large response. ForgeDNS does not expand it
+into every record it holds and does not refuse it either — it returns the single
+synthesised `HINFO` record RFC 8482 prescribes, which is both standards-compliant
+and useless as amplification.
 
 **Rate limiting, per source IP and per session.** Two independent limiters. The
 per-IP limiter bounds what a single source can extract regardless of session
@@ -360,9 +453,22 @@ per identity and prevents a single credential from being shared across an
 unbounded number of clients.
 
 **Response size discipline.** Responses never exceed the negotiated EDNS0 buffer,
-and the default of 1232 bytes keeps them below common path MTUs so they are not
-fragmented. Beyond avoiding middlebox fragment drops, this caps the amplification
-factor achievable through the server.
+and the advertised buffer is itself capped at 1232 bytes — a client asking for
+4096 does not get 4096 echoed back, because a large advertised buffer is exactly
+what makes a nameserver worth reflecting off. 1232 also keeps responses below
+common path MTUs so they are not fragmented. An answer that will not fit is
+returned truncated, with `TC` set and the oversized records removed, so the
+client retries over TCP instead of the server emitting a large UDP datagram at a
+possibly-spoofed source.
+
+**Response rate limiting, per client prefix.** Budgets are keyed on the client
+*network* (IPv4 /24, IPv6 /64) rather than the exact address, so rotating the low
+bits of a spoofed source does not buy a fresh allowance. Identical responses and
+error responses (`NXDOMAIN`/`REFUSED`/`SERVFAIL`) get separate budgets, because
+they are abused differently: repeated identical answers are the amplification
+lever, while an error flood is the classic reflection pattern. A rate-limited
+response is not sent at all. Counters for rate-limited, truncated, refused and
+malformed queries are exported so an operator can see the limiter working.
 
 **Adapter parsers must be total.** `Decode` receives attacker-controlled bytes on
 a public port. Every adapter returns an error for malformed input rather than

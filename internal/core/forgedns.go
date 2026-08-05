@@ -210,7 +210,10 @@ func (c *ForgeDNSController) UpstreamTag(zone string) string {
 	return up.Tag(zone)
 }
 
-// EvictIdle sweeps idle sessions across all zones (called by the scheduler).
+// EvictIdle sweeps idle sessions across all zones and expires downstream chunks
+// the client never acknowledged (called by the scheduler). Expiring an in-flight
+// chunk does not discard it — the bytes stay queued and the next poll re-sends
+// them; it only releases the retransmission copy for an abandoned session.
 func (c *ForgeDNSController) EvictIdle() int {
 	c.mu.Lock()
 	mgrs := make([]*session.Manager, 0, len(c.sessions))
@@ -220,9 +223,28 @@ func (c *ForgeDNSController) EvictIdle() int {
 	c.mu.Unlock()
 	n := 0
 	for _, m := range mgrs {
+		m.ExpireInFlight()
 		n += m.EvictIdle()
 	}
 	return n
+}
+
+// SessionCounters returns the transport's failure-mode counters per zone
+// (retransmissions, duplicate queries, invalid sequences, expired frames,
+// authentication failures and session-table pressure), so the panel can show
+// whether the tunnel is healthy rather than only that it is running.
+func (c *ForgeDNSController) SessionCounters() map[string]session.Counters {
+	c.mu.Lock()
+	mgrs := make(map[string]*session.Manager, len(c.sessions))
+	for z, m := range c.sessions {
+		mgrs[z] = m
+	}
+	c.mu.Unlock()
+	out := make(map[string]session.Counters, len(mgrs))
+	for z, m := range mgrs {
+		out[z] = m.Counters()
+	}
+	return out
 }
 
 var _ = fmt.Sprintf

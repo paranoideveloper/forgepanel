@@ -95,15 +95,24 @@ func TestServerRefusesForeignZoneAndANY(t *testing.T) {
 	srv := New()
 	srv.AddZone(&Zone{Name: "t.example.com", Adapter: adapter.Forge{}})
 
+	// A name outside our zones gets REFUSED rather than NXDOMAIN: we hold no
+	// authority over it, so claiming it does not exist would be a lie, and
+	// REFUSED is the smaller answer for an unsolicited spoofed query.
 	foreign := new(dns.Msg)
 	foreign.SetQuestion("google.com.", dns.TypeTXT)
-	if r := srv.Handle(foreign); r == nil || r.Rcode != dns.RcodeNameError {
-		t.Fatalf("foreign zone must get NXDOMAIN, got %+v", r)
+	if r := srv.Handle(foreign); r == nil || r.Rcode != dns.RcodeRefused {
+		t.Fatalf("foreign zone must get REFUSED, got %+v", r)
 	}
+	// ANY is answered minimally per RFC 8482 instead of being expanded, which is
+	// what stops it being an amplification lever.
 	any := new(dns.Msg)
 	any.SetQuestion("t.example.com.", dns.TypeANY)
-	if r := srv.Handle(any); r == nil || r.Rcode != dns.RcodeRefused {
-		t.Fatalf("ANY query must be refused, got %+v", r)
+	r := srv.Handle(any)
+	if r == nil || r.Rcode != dns.RcodeSuccess || len(r.Answer) != 1 {
+		t.Fatalf("ANY query must get a minimal RFC 8482 answer, got %+v", r)
+	}
+	if _, ok := r.Answer[0].(*dns.HINFO); !ok {
+		t.Fatalf("ANY answer is %T, want *dns.HINFO", r.Answer[0])
 	}
 }
 

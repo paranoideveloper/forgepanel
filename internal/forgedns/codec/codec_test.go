@@ -54,9 +54,12 @@ func TestChunkQNameRoundTrip(t *testing.T) {
 			t.Fatalf("label %q exceeds %d", label, MaxLabel)
 		}
 	}
-	recovered, err := SplitQName(name, zone)
+	recovered, hasPayload, err := SplitQName(name, zone)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !hasPayload {
+		t.Fatalf("qname %q should carry an encoded payload", name)
 	}
 	back, err := Base32Decode(recovered)
 	if err != nil {

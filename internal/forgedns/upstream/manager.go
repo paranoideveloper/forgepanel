@@ -33,10 +33,12 @@ import (
 type State string
 
 const (
-	StateStopped State = "stopped"
-	StateRunning State = "running"
-	StateCrashed State = "crashed"
-	StateError   State = "error" // could not install/render/bind — never started
+	StateStopped  State = "stopped"
+	StateStarting State = "starting" // launched, not yet observed running
+	StateRunning  State = "running"
+	StateStopping State = "stopping" // shutdown requested, process not yet reaped
+	StateCrashed  State = "crashed"
+	StateError    State = "error" // could not install/render/bind — never started
 )
 
 // Spec is one zone the manager should be running.
@@ -100,11 +102,13 @@ type proc struct {
 	listen        string
 	healthURL     string
 
-	cancel context.CancelFunc
-
 	mu       sync.Mutex
+	cancel   context.CancelFunc
+	done     chan struct{} // closed when supervise() returns; stop() waits on it
+	stopping bool
 	state    State
 	pid      int
+	pgid     int
 	restarts int
 	lastErr  string
 	logs     *ring
@@ -151,7 +155,9 @@ func (m *Manager) Sync(specs []Spec) error {
 	}
 	for zone, p := range m.procs {
 		if !want[zone] {
-			p.stop()
+			if err := p.stop(defaultStopTimeout); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", zone, err))
+			}
 			delete(m.procs, zone)
 		}
 	}
@@ -201,6 +207,9 @@ func (m *Manager) apply(pl plan) error {
 		return m.fail(z, d, err)
 	}
 	cfgPath := filepath.Join(dir, "server_config.toml")
+	// Keep the currently-installed config so a replacement that fails to start
+	// can be rolled back to it rather than leaving the zone down.
+	prevCfg, _ := os.ReadFile(cfgPath)
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		return m.fail(z, d, err)
 	}
@@ -215,26 +224,71 @@ func (m *Manager) apply(pl plan) error {
 	if cur != nil && cur.sig == sig && cur.snapshotState() == StateRunning {
 		return nil // already running exactly this
 	}
+
+	// Stop the old process and WAIT for it. Starting a replacement while the
+	// previous one still owns the zone's UDP port is what produced "address
+	// already in use" crash-loops and orphaned children.
 	if cur != nil {
-		cur.stop()
+		if err := cur.stop(defaultStopTimeout); err != nil {
+			// Unclean, but the process is gone; record it and carry on.
+			cur.logf("zone=%s unclean shutdown: %v", z.Zone, err)
+		}
 		delete(m.procs, z.Zone)
 	}
 
-	listen := net.JoinHostPort(z.BindHost, strconv.Itoa(z.BindPort))
+	// Anything still holding the port now is not ours.
 	if err := waitPortFree(z.BindHost, z.BindPort, 5, 200*time.Millisecond); err != nil {
+		if hint := portHolderHint(z.BindPort); hint != "" {
+			err = fmt.Errorf("%w%s", err, hint)
+		}
+		m.rollback(dir, cfgPath, prevCfg, cur, "port unavailable")
 		return m.fail(z, d, err)
 	}
 
+	listen := net.JoinHostPort(z.BindHost, strconv.Itoa(z.BindPort))
 	p := &proc{
 		zone: z.Zone, adapter: d.Adapter, sig: sig, tag: install.Tag, exe: install.Exe,
 		cfgPath: cfgPath, domains: z.Domains, listen: listen, healthURL: d.HealthURL,
 		state: StateStopped, logs: newRing(200),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel = cancel
 	m.procs[z.Zone] = p
-	go p.supervise(ctx, dir)
+	p.start(dir)
+
+	// A replacement that dies immediately (bad config, missing key, wrong
+	// version) must not leave the zone crash-looping on the new settings: put
+	// the previous working config back and run that instead.
+	if err := p.waitSettled(settleWindow); err != nil {
+		_ = p.stop(defaultStopTimeout)
+		delete(m.procs, z.Zone)
+		restored := m.rollback(dir, cfgPath, prevCfg, cur, err.Error())
+		wrapped := fmt.Errorf("new config failed to start: %w", err)
+		if restored {
+			wrapped = fmt.Errorf("%w (rolled back to the previous working config)", wrapped)
+		}
+		return m.fail(z, d, wrapped)
+	}
 	return nil
+}
+
+// rollback restores the previous config and relaunches the previous binary after
+// a failed replacement, so a bad edit degrades to "still running the old
+// settings" rather than "zone down". It reports whether it restored anything.
+func (m *Manager) rollback(dir, cfgPath string, prevCfg []byte, prev *proc, reason string) bool {
+	if prev == nil || len(prevCfg) == 0 || prev.exe == "" {
+		return false
+	}
+	if err := os.WriteFile(cfgPath, prevCfg, 0o600); err != nil {
+		return false
+	}
+	p := &proc{
+		zone: prev.zone, adapter: prev.adapter, sig: prev.sig, tag: prev.tag, exe: prev.exe,
+		cfgPath: cfgPath, domains: prev.domains, listen: prev.listen, healthURL: prev.healthURL,
+		state: StateStopped, logs: newRing(200),
+	}
+	p.logf("zone=%s rolled back to the previous working config: %s", p.zone, reason)
+	m.procs[p.zone] = p
+	p.start(dir)
+	return true
 }
 
 // fail records a zone-level error as a status entry so the UI can show WHY a
@@ -294,12 +348,13 @@ func (m *Manager) Tag(zone string) string {
 	return ""
 }
 
-// StopAll terminates every supervised zone (panel shutdown).
+// StopAll terminates every supervised zone (panel shutdown) and does not return
+// until each process has exited, so the panel does not outlive its children.
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for zone, p := range m.procs {
-		p.stop()
+		_ = p.stop(defaultStopTimeout)
 		delete(m.procs, zone)
 	}
 }

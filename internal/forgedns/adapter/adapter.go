@@ -10,6 +10,7 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -55,25 +56,36 @@ func (Forge) Caps() Capabilities {
 	}
 }
 
-// Match reports whether the query's QNAME is under zone and looks like tunnel
-// traffic (a data label prefix). It never claims queries it cannot decode.
+// ErrNoPayload reports that a query is under the zone but carries no encoded
+// tunnel payload — the zone apex, or a bare label. It is not a malformed frame:
+// the caller should answer it as ordinary authoritative DNS.
+var ErrNoPayload = errors.New("adapter: query carries no encoded payload")
+
+// Match reports whether the query looks like tunnel traffic: a name under the
+// zone that actually carries an encoded payload. It deliberately does NOT claim
+// the zone apex, which is an ordinary DNS question (SOA, NS, delegation and
+// health checks) and belongs to the authoritative path.
 func (Forge) Match(zone string, m *dns.Msg) bool {
 	if len(m.Question) == 0 {
 		return false
 	}
-	q := strings.ToLower(strings.TrimSuffix(m.Question[0].Name, "."))
-	z := strings.ToLower(strings.TrimSuffix(zone, "."))
-	return q == z || strings.HasSuffix(q, "."+z)
+	_, hasPayload, err := codec.SplitQName(m.Question[0].Name, zone)
+	return err == nil && hasPayload
 }
 
-// Decode extracts the frame carried in the QNAME.
+// Decode extracts the frame carried in the QNAME. It returns ErrNoPayload for a
+// name with nothing encoded in it, so the caller can tell "this is not tunnel
+// traffic" apart from "this is a broken frame".
 func (Forge) Decode(zone string, m *dns.Msg) (codec.Frame, error) {
 	if len(m.Question) == 0 {
 		return codec.Frame{}, fmt.Errorf("forge: no question")
 	}
-	enc, err := codec.SplitQName(m.Question[0].Name, zone)
+	enc, hasPayload, err := codec.SplitQName(m.Question[0].Name, zone)
 	if err != nil {
 		return codec.Frame{}, err
+	}
+	if !hasPayload {
+		return codec.Frame{}, ErrNoPayload
 	}
 	raw, err := codec.Base32Decode(enc)
 	if err != nil {

@@ -13,6 +13,9 @@
 package codec
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
@@ -96,18 +99,29 @@ func ChunkQName(encoded, zone string, maxLabel int) (string, error) {
 // SplitQName recovers the encoded payload from a QNAME by stripping the zone
 // suffix and concatenating the remaining labels. It is the inverse of
 // ChunkQName (label boundaries are not significant to the payload).
-func SplitQName(qname, zone string) (string, error) {
-	qname = strings.TrimSuffix(strings.ToLower(qname), ".")
-	zone = strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(zone), "."), ".")
+//
+// The second return value reports whether the name actually carried an encoded
+// payload. A query for the zone apex ("tunnel.example.com" itself) carries none:
+// it is an ordinary DNS question — SOA, NS, a delegation check, a health probe —
+// and must be answered as authoritative DNS rather than pushed through the frame
+// decoder, where an empty payload would fail the header-length check and be
+// mistaken for a malformed frame. Deciding what to do with that answer is the
+// adapter's job; this function only reports the fact.
+func SplitQName(qname, zone string) (string, bool, error) {
+	qname = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(qname)), ".")
+	zone = strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(zone)), "."), ".")
+	if qname == zone {
+		return "", false, nil
+	}
 	suffix := "." + zone
 	if !strings.HasSuffix(qname, suffix) {
-		if qname == zone {
-			return "", nil
-		}
-		return "", fmt.Errorf("codec: %q is not under zone %q", qname, zone)
+		return "", false, fmt.Errorf("codec: %q is not under zone %q", qname, zone)
 	}
 	prefix := strings.TrimSuffix(qname, suffix)
-	return strings.ReplaceAll(prefix, ".", ""), nil
+	if prefix == "" {
+		return "", false, nil
+	}
+	return strings.ReplaceAll(prefix, ".", ""), true, nil
 }
 
 // wireLen returns the on-the-wire octet length of a domain name: each label
@@ -165,25 +179,89 @@ const (
 	FlagDATA uint8 = 1 << 2 // carries payload
 	FlagFIN  uint8 = 1 << 3 // session teardown
 	FlagKA   uint8 = 1 << 4 // keepalive (empty data-pool poll)
+	// FlagEXT marks a version-2 frame carrying the extension block described by
+	// FrameExt: a wide session id, an explicit downstream acknowledgement, and a
+	// per-session authenticator. Frames without it parse exactly as before, so a
+	// v1 peer keeps working (see the AllowLegacy note in package session).
+	FlagEXT uint8 = 1 << 5
 )
 
-// Frame is one unit exchanged over the tunnel: a 5-byte big-endian header
-// followed by an opaque payload. Adapters translate between Frames and concrete
-// DNS messages; the session manager sequences and reorders them.
+// Extension-block layout constants (v2 frames, FlagEXT set). The block sits
+// between the 5-byte base header and the payload.
+const (
+	// ExtSize is the total extension-block length: 8 (session) + 2 (ack seq) +
+	// 1 (ext flags) + 8 (MAC).
+	ExtSize = 19
+	// MACSize is the truncated-HMAC length. 64 bits of forgery resistance, which
+	// together with the manager's rate limiting is ample for a transport whose
+	// frames are already bounded by the DNS QNAME budget.
+	MACSize = 8
+	// KeySize is the per-session HMAC key length handed out at handshake.
+	KeySize = 32
+	// extFlagAck marks FrameExt.AckSeq as meaningful.
+	extFlagAck uint8 = 1 << 0
+)
+
+// FrameExt is the v2 extension block.
+//
+// SessionID replaces the 16-bit field for authenticated sessions: 16 bits is
+// trivially enumerable, and because the session manager replays a buffered
+// chunk to whoever asks for a given (session, sequence), a guessable id is a
+// data-disclosure bug on a source-spoofable transport. Authenticated ids are
+// always >= 1<<16 so they cannot collide with the legacy id space.
+//
+// MAC authenticates (SessionID, Seq, Flags, AckSeq, extFlags, Payload) under the
+// per-session key established at handshake, so a third party can neither fetch
+// another session's buffered chunk nor forge an acknowledgement that discards it.
+type FrameExt struct {
+	SessionID uint64
+	AckSeq    uint16
+	HasAck    bool
+	MAC       [MACSize]byte
+}
+
+// Frame is one unit exchanged over the tunnel: a 5-byte big-endian header,
+// optionally a 19-byte extension block, then an opaque payload. Adapters
+// translate between Frames and concrete DNS messages; the session manager
+// sequences and reorders them.
 type Frame struct {
 	SessionID uint16
 	Seq       uint16
 	Flags     uint8
 	Payload   []byte
+
+	// Ext is non-nil exactly when Flags has FlagEXT set.
+	Ext *FrameExt
+}
+
+// HeaderLen returns this frame's total header length including any extension.
+func (f Frame) HeaderLen() int {
+	if f.Has(FlagEXT) {
+		return FrameHeaderSize + ExtSize
+	}
+	return FrameHeaderSize
 }
 
 // Marshal serialises the frame to bytes.
 func (f Frame) Marshal() []byte {
-	out := make([]byte, FrameHeaderSize+len(f.Payload))
+	hdr := f.HeaderLen()
+	out := make([]byte, hdr+len(f.Payload))
 	binary.BigEndian.PutUint16(out[0:2], f.SessionID)
 	binary.BigEndian.PutUint16(out[2:4], f.Seq)
 	out[4] = f.Flags
-	copy(out[FrameHeaderSize:], f.Payload)
+	if f.Has(FlagEXT) {
+		e := f.Ext
+		if e == nil {
+			e = &FrameExt{}
+		}
+		binary.BigEndian.PutUint64(out[5:13], e.SessionID)
+		binary.BigEndian.PutUint16(out[13:15], e.AckSeq)
+		if e.HasAck {
+			out[15] = extFlagAck
+		}
+		copy(out[16:24], e.MAC[:])
+	}
+	copy(out[hdr:], f.Payload)
 	return out
 }
 
@@ -198,12 +276,128 @@ func ParseFrame(b []byte) (Frame, error) {
 		Seq:       binary.BigEndian.Uint16(b[2:4]),
 		Flags:     b[4],
 	}
-	if n := len(b) - FrameHeaderSize; n > 0 {
+	hdr := FrameHeaderSize
+	if f.Has(FlagEXT) {
+		if len(b) < FrameHeaderSize+ExtSize {
+			return Frame{}, fmt.Errorf("codec: extended frame too short: %d < %d",
+				len(b), FrameHeaderSize+ExtSize)
+		}
+		e := &FrameExt{
+			SessionID: binary.BigEndian.Uint64(b[5:13]),
+			AckSeq:    binary.BigEndian.Uint16(b[13:15]),
+			HasAck:    b[15]&extFlagAck != 0,
+		}
+		copy(e.MAC[:], b[16:24])
+		f.Ext = e
+		hdr = FrameHeaderSize + ExtSize
+	}
+	if n := len(b) - hdr; n > 0 {
 		f.Payload = make([]byte, n)
-		copy(f.Payload, b[FrameHeaderSize:])
+		copy(f.Payload, b[hdr:])
 	}
 	return f, nil
 }
 
 // Has reports whether a flag bit is set.
 func (f Frame) Has(flag uint8) bool { return f.Flags&flag != 0 }
+
+// --- frame authentication -------------------------------------------------
+
+// macInput builds the canonical authenticated byte string for a frame. The
+// length-prefixed layout is unambiguous, so no two distinct frames share an
+// input.
+func macInput(f Frame) []byte {
+	e := f.Ext
+	if e == nil {
+		e = &FrameExt{}
+	}
+	buf := make([]byte, 0, 8+2+1+2+1+len(f.Payload))
+	var scratch [8]byte
+	binary.BigEndian.PutUint64(scratch[:], e.SessionID)
+	buf = append(buf, scratch[:]...)
+	binary.BigEndian.PutUint16(scratch[:2], f.Seq)
+	buf = append(buf, scratch[:2]...)
+	buf = append(buf, f.Flags)
+	binary.BigEndian.PutUint16(scratch[:2], e.AckSeq)
+	buf = append(buf, scratch[:2]...)
+	var af uint8
+	if e.HasAck {
+		af = extFlagAck
+	}
+	buf = append(buf, af)
+	return append(buf, f.Payload...)
+}
+
+// SignFrame computes and stores the frame's authenticator. The frame must
+// already have FlagEXT set and a non-nil Ext.
+func SignFrame(f *Frame, key []byte) {
+	if f.Ext == nil {
+		f.Ext = &FrameExt{}
+	}
+	f.Flags |= FlagEXT
+	mac := hmac.New(sha256.New, key)
+	mac.Write(macInput(*f))
+	copy(f.Ext.MAC[:], mac.Sum(nil)[:MACSize])
+}
+
+// VerifyFrame reports whether the frame carries a valid authenticator for key,
+// comparing in constant time.
+func VerifyFrame(f Frame, key []byte) bool {
+	if f.Ext == nil || len(key) == 0 {
+		return false
+	}
+	probe := f
+	probe.Ext = &FrameExt{SessionID: f.Ext.SessionID, AckSeq: f.Ext.AckSeq, HasAck: f.Ext.HasAck}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(macInput(probe))
+	return hmac.Equal(mac.Sum(nil)[:MACSize], f.Ext.MAC[:])
+}
+
+// --- handshake ------------------------------------------------------------
+
+// handshakeLen is the SYN response payload: session id followed by the key.
+const handshakeLen = 8 + KeySize
+
+// NewSessionSecret mints a session id with at least 64 bits of entropy and its
+// per-session key, both from the system CSPRNG. Ids are forced above the legacy
+// 16-bit space so authenticated and legacy sessions can never collide.
+func NewSessionSecret() (uint64, []byte, error) {
+	var idb [8]byte
+	key := make([]byte, KeySize)
+	for {
+		if _, err := rand.Read(idb[:]); err != nil {
+			return 0, nil, fmt.Errorf("codec: session id: %w", err)
+		}
+		id := binary.BigEndian.Uint64(idb[:])
+		if id < 1<<16 {
+			continue // reserved for legacy sessions
+		}
+		if _, err := rand.Read(key); err != nil {
+			return 0, nil, fmt.Errorf("codec: session key: %w", err)
+		}
+		return id, key, nil
+	}
+}
+
+// MakeHandshake builds the SYN response payload carrying the session id and key.
+func MakeHandshake(id uint64, key []byte) []byte {
+	out := make([]byte, handshakeLen)
+	binary.BigEndian.PutUint64(out[0:8], id)
+	copy(out[8:], key)
+	return out
+}
+
+// ParseHandshake is the client side of MakeHandshake: recover the session id and
+// key from a SYN response frame.
+func ParseHandshake(f Frame) (uint64, []byte, error) {
+	if !f.Has(FlagSYN) || !f.Has(FlagACK) {
+		return 0, nil, errors.New("codec: not a handshake response")
+	}
+	if len(f.Payload) < handshakeLen {
+		return 0, nil, fmt.Errorf("codec: short handshake: %d < %d", len(f.Payload), handshakeLen)
+	}
+	id := binary.BigEndian.Uint64(f.Payload[0:8])
+	key := make([]byte, KeySize)
+	copy(key, f.Payload[8:handshakeLen])
+	return id, key, nil
+}

@@ -3,6 +3,27 @@
 // control, a sequence/reorder buffer, idle eviction, and per-session traffic
 // accounting. It is transport-agnostic — it consumes decoded codec.Frames and
 // produces response Frames, so any adapter can drive it.
+//
+// # Downstream delivery is stop-and-wait
+//
+// DNS over UDP is unreliable and a dropped answer is invisible to the server, so
+// downstream bytes are NOT removed from the queue when they are sent. One chunk
+// is held in flight; a repeat of the same query replays it byte-for-byte, and
+// the queue only advances once the client has acknowledged it. Acknowledgement
+// is explicit for v2 (codec.FlagEXT) peers, which carry FrameExt.AckSeq, and
+// implicit for v1 peers, for which a *new* request sequence means the previous
+// answer arrived. Without this, one lost packet silently deletes bytes from the
+// tunnelled stream.
+//
+// # Session identity
+//
+// A v2 session id is a 64-bit CSPRNG value and every frame carries a truncated
+// HMAC under a per-session key established at handshake. Both matter because the
+// replay buffer above hands a stored chunk to whoever asks for a given
+// (session, sequence): with a 16-bit guessable id and no authenticator, a third
+// party could read another session's downstream data or forge an
+// acknowledgement that discards it. v1 sessions have neither property; they stay
+// accepted for compatibility and can be turned off with Options.AllowLegacy.
 package session
 
 import (
@@ -35,9 +56,65 @@ func (a *AIMD) OnLoss() {
 	}
 }
 
+// Options bounds the manager. Every limit exists so that forged or abandoned
+// sessions cannot pin unbounded memory; zero values take the defaults below.
+type Options struct {
+	IdleTTL          time.Duration // evict a session idle this long
+	InFlightTTL      time.Duration // drop an unacknowledged chunk after this long
+	MaxSessions      int           // hard cap on live sessions
+	MaxOutboundBytes int           // per-session downstream queue cap
+	MaxReorderFrames int           // per-session out-of-order upstream frames held
+	ChunkSize        int           // downstream bytes per answer
+	AllowLegacy      bool          // accept unauthenticated v1 frames
+
+	// legacySet records whether AllowLegacy was set explicitly, so the zero
+	// Options value can still default it to true.
+	legacySet bool
+}
+
+func (o *Options) withDefaults() {
+	if o.IdleTTL <= 0 {
+		o.IdleTTL = 60 * time.Second
+	}
+	if o.InFlightTTL <= 0 {
+		o.InFlightTTL = 30 * time.Second
+	}
+	if o.MaxSessions <= 0 {
+		o.MaxSessions = 4096
+	}
+	if o.MaxOutboundBytes <= 0 {
+		o.MaxOutboundBytes = 1 << 20
+	}
+	if o.MaxReorderFrames <= 0 {
+		o.MaxReorderFrames = 256
+	}
+	if o.ChunkSize <= 0 {
+		o.ChunkSize = 220 // fits a TXT-based downstream comfortably
+	}
+	if !o.legacySet {
+		o.AllowLegacy = true
+	}
+}
+
+// Counters are manager-wide observability counters for the transport's failure
+// modes. They are snapshots; read them with Counters.
+type Counters struct {
+	Retransmits      uint64 `json:"retransmits"`
+	DuplicateQueries uint64 `json:"duplicate_queries"`
+	InvalidSequence  uint64 `json:"invalid_sequence"`
+	ExpiredFrames    uint64 `json:"expired_frames"`
+	AuthFailures     uint64 `json:"auth_failures"`
+	SessionsRejected uint64 `json:"sessions_rejected"`
+	OutboundDropped  uint64 `json:"outbound_dropped"`
+	StaleUpstream    uint64 `json:"stale_upstream"`
+	LegacyRejected   uint64 `json:"legacy_rejected"`
+}
+
 // Session is one client's tunnel state.
 type Session struct {
-	ID       uint16
+	ID  uint64
+	key []byte // per-session MAC key; nil for legacy (v1) sessions
+
 	created  time.Time
 	lastSeen time.Time
 
@@ -45,8 +122,15 @@ type Session struct {
 	reorder   map[uint16][]byte
 	inbound   []byte // reassembled upstream bytes ready for egress
 
-	outbound []byte // downstream bytes waiting to be sent to the client
-	seqOut   uint16
+	// outbound holds downstream bytes not yet acknowledged. Its head is the
+	// in-flight chunk, which is only removed once the client confirms receipt.
+	outbound   []byte
+	seqOut     uint16    // sequence of the chunk in flight / next to send
+	inflight   []byte    // immutable copy of the unacknowledged chunk, nil if none
+	inflightAt time.Time // when it was first sent
+
+	lastReqSeq  uint16
+	haveLastReq bool
 
 	aimd AIMD
 
@@ -57,89 +141,253 @@ type Session struct {
 // Manager owns all sessions with rate limits and idle eviction.
 type Manager struct {
 	mu       sync.Mutex
-	sessions map[uint16]*Session
-	idleTTL  time.Duration
-	maxPerIP int
+	sessions map[uint64]*Session
+	opts     Options
+	counters Counters
 	now      func() time.Time
 }
 
-// NewManager builds a session manager.
+// NewManager builds a session manager with default bounds.
 func NewManager(idleTTL time.Duration) *Manager {
-	if idleTTL == 0 {
-		idleTTL = 60 * time.Second
-	}
-	return &Manager{
-		sessions: map[uint16]*Session{}, idleTTL: idleTTL, maxPerIP: 8, now: time.Now,
-	}
+	return NewManagerWithOptions(Options{IdleTTL: idleTTL})
 }
 
-// get returns (creating if needed) the session for id.
-func (m *Manager) get(id uint16) *Session {
-	s := m.sessions[id]
-	if s == nil {
-		now := m.now()
-		s = &Session{
-			ID: id, created: now, lastSeen: now,
-			reorder: map[uint16][]byte{},
-			aimd:    AIMD{Window: 4, Min: 1, Max: 64},
-		}
-		m.sessions[id] = s
+// NewManagerWithOptions builds a session manager with explicit bounds.
+func NewManagerWithOptions(o Options) *Manager {
+	o.withDefaults()
+	return &Manager{sessions: map[uint64]*Session{}, opts: o, now: time.Now}
+}
+
+// AllowLegacy returns an Options value with AllowLegacy explicitly set, so that
+// callers can disable unauthenticated v1 frames (which the zero value permits
+// for compatibility).
+func (o Options) WithLegacy(allow bool) Options {
+	o.AllowLegacy = allow
+	o.legacySet = true
+	return o
+}
+
+// SetClock overrides the time source (tests).
+func (m *Manager) SetClock(f func() time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.now = f
+}
+
+// Counters returns a snapshot of the manager's counters.
+func (m *Manager) Counters() Counters {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.counters
+}
+
+// lookup returns an existing session without creating one.
+func (m *Manager) lookup(id uint64) *Session { return m.sessions[id] }
+
+// create allocates a session, honouring the table cap. It returns nil when the
+// manager is full.
+func (m *Manager) create(id uint64, key []byte) *Session {
+	if len(m.sessions) >= m.opts.MaxSessions {
+		m.counters.SessionsRejected++
+		return nil
 	}
+	now := m.now()
+	s := &Session{
+		ID: id, key: key, created: now, lastSeen: now,
+		reorder: map[uint16][]byte{},
+		aimd:    AIMD{Window: 4, Min: 1, Max: 64},
+	}
+	m.sessions[id] = s
 	return s
 }
 
+// getOrCreate is the legacy (v1) path: any 16-bit id may materialise a session.
+func (m *Manager) getOrCreate(id uint64) *Session {
+	if s := m.sessions[id]; s != nil {
+		return s
+	}
+	return m.create(id, nil)
+}
+
 // Ingest processes one upstream frame and returns the response frame to send
-// back (carrying any queued downstream bytes + an ACK). Egress bytes accepted
-// from the client are appended to the session's inbound buffer, which the caller
-// drains via TakeInbound and feeds to the upstream connection.
+// back (carrying any unacknowledged downstream bytes + an ACK). Egress bytes
+// accepted from the client are appended to the session's inbound buffer, which
+// the caller drains via TakeInbound and feeds to the upstream connection.
+//
+// A frame that fails authentication is dropped before any session state is
+// touched or created, and yields an empty response.
 func (m *Manager) Ingest(f codec.Frame) codec.Frame {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := m.get(f.SessionID)
-	s.lastSeen = m.now()
+
+	if f.Has(codec.FlagEXT) {
+		return m.ingestExt(f)
+	}
+	if !m.opts.AllowLegacy {
+		m.counters.LegacyRejected++
+		return codec.Frame{}
+	}
+	s := m.getOrCreate(uint64(f.SessionID))
+	if s == nil {
+		return codec.Frame{}
+	}
+	return m.advance(s, f, 0, false)
+}
+
+// ingestExt handles authenticated v2 frames: handshake, then MAC-verified
+// traffic. The caller holds m.mu.
+func (m *Manager) ingestExt(f codec.Frame) codec.Frame {
+	ext := f.Ext
+	if ext == nil {
+		m.counters.AuthFailures++
+		return codec.Frame{}
+	}
+
+	// Handshake: a SYN with no session id asks the server to mint one.
+	if f.Has(codec.FlagSYN) && ext.SessionID == 0 {
+		id, key, err := codec.NewSessionSecret()
+		if err != nil {
+			return codec.Frame{}
+		}
+		s := m.create(id, key)
+		if s == nil {
+			return codec.Frame{}
+		}
+		resp := codec.Frame{
+			Flags:   codec.FlagSYN | codec.FlagACK | codec.FlagEXT,
+			Payload: codec.MakeHandshake(id, key),
+			Ext:     &codec.FrameExt{SessionID: id},
+		}
+		codec.SignFrame(&resp, key)
+		return resp
+	}
+
+	// Everything else must name a live session and prove it holds the key
+	// before any state is read or written.
+	s := m.lookup(ext.SessionID)
+	if s == nil || s.key == nil || !codec.VerifyFrame(f, s.key) {
+		m.counters.AuthFailures++
+		return codec.Frame{}
+	}
+	return m.advance(s, f, ext.AckSeq, ext.HasAck)
+}
+
+// advance runs the common per-frame state machine. The caller holds m.mu and has
+// already authenticated the frame.
+func (m *Manager) advance(s *Session, f codec.Frame, ackSeq uint16, hasAck bool) codec.Frame {
+	now := m.now()
+	s.lastSeen = now
+
+	isDup := s.haveLastReq && f.Seq == s.lastReqSeq
+	if isDup {
+		m.counters.DuplicateQueries++
+	}
+
+	// --- acknowledgement of the in-flight downstream chunk ------------------
+	acked := false
+	switch {
+	case hasAck:
+		// Explicit (v2). Only the sequence actually in flight may commit.
+		if s.inflight != nil && ackSeq == s.seqOut {
+			acked = true
+		} else if s.inflight != nil {
+			m.counters.InvalidSequence++
+		}
+	case s.inflight != nil && s.haveLastReq && f.Seq != s.lastReqSeq:
+		// Implicit (v1): the client moved to a new request, so the previous
+		// answer reached it. A repeat of the same request does not commit.
+		acked = true
+	}
+	if acked {
+		n := len(s.inflight)
+		if n <= len(s.outbound) {
+			s.outbound = s.outbound[n:]
+		} else {
+			s.outbound = nil
+		}
+		s.inflight = nil
+		s.seqOut++
+		s.aimd.OnACK()
+	}
+
+	s.lastReqSeq = f.Seq
+	s.haveLastReq = true
 
 	if f.Has(codec.FlagSYN) {
-		// (re)establish
+		// (re)establish the upstream reassembly state
 		s.nextSeqIn = 0
 		s.reorder = map[uint16][]byte{}
 	}
 
+	// --- upstream data ------------------------------------------------------
 	if f.Has(codec.FlagDATA) && len(f.Payload) > 0 {
-		s.UpBytes += int64(len(f.Payload))
-		s.reorder[f.Seq] = append([]byte(nil), f.Payload...)
-		// drain in-order
-		for {
-			b, ok := s.reorder[s.nextSeqIn]
-			if !ok {
-				break
+		switch {
+		case seqBefore(f.Seq, s.nextSeqIn):
+			// Already consumed: a retransmission. Dropping it keeps accounting
+			// honest and stops the reorder buffer filling with dead entries.
+			m.counters.StaleUpstream++
+		case s.reorder[f.Seq] != nil:
+			m.counters.StaleUpstream++
+		case len(s.reorder) >= m.opts.MaxReorderFrames:
+			m.counters.InvalidSequence++
+		default:
+			s.UpBytes += int64(len(f.Payload))
+			s.reorder[f.Seq] = append([]byte(nil), f.Payload...)
+			for {
+				b, ok := s.reorder[s.nextSeqIn]
+				if !ok {
+					break
+				}
+				s.inbound = append(s.inbound, b...)
+				delete(s.reorder, s.nextSeqIn)
+				s.nextSeqIn++
 			}
-			s.inbound = append(s.inbound, b...)
-			delete(s.reorder, s.nextSeqIn)
-			s.nextSeqIn++
+			s.aimd.OnACK()
 		}
-		s.aimd.OnACK()
 	}
 
-	// Build response: ACK + up to window's worth of downstream bytes.
-	resp := codec.Frame{SessionID: s.ID, Seq: s.seqOut, Flags: codec.FlagACK}
-	if n := len(s.outbound); n > 0 {
-		chunk := 220 // fits a TXT-based downstream comfortably
-		if chunk > n {
-			chunk = n
-		}
-		resp.Payload = s.outbound[:chunk]
+	// --- build the response -------------------------------------------------
+	resp := codec.Frame{Seq: s.seqOut, Flags: codec.FlagACK}
+	if s.key != nil {
+		resp.Flags |= codec.FlagEXT
+		resp.Ext = &codec.FrameExt{SessionID: s.ID}
+	} else {
+		resp.SessionID = uint16(s.ID)
+	}
+
+	switch {
+	case s.inflight != nil:
+		// Replay the unacknowledged chunk byte-for-byte. Not re-billed.
+		resp.Payload = s.inflight
 		resp.Flags |= codec.FlagDATA
-		s.outbound = s.outbound[chunk:]
-		s.DownBytes += int64(chunk)
-		s.seqOut++
-	} else if f.Has(codec.FlagKA) {
+		m.counters.Retransmits++
+	case len(s.outbound) > 0:
+		n := m.opts.ChunkSize
+		if n > len(s.outbound) {
+			n = len(s.outbound)
+		}
+		// Copy, and leave the bytes queued: they are only dropped on ack.
+		s.inflight = append([]byte(nil), s.outbound[:n]...)
+		s.inflightAt = now
+		s.DownBytes += int64(n)
+		resp.Payload = s.inflight
+		resp.Flags |= codec.FlagDATA
+	case f.Has(codec.FlagKA):
 		resp.Flags |= codec.FlagKA
+	}
+
+	if s.key != nil {
+		codec.SignFrame(&resp, s.key)
 	}
 	return resp
 }
 
+// seqBefore reports whether a precedes b in the 16-bit sequence space, using
+// wrap-around-safe comparison over half the space.
+func seqBefore(a, b uint16) bool { return b != a && b-a < 1<<15 }
+
 // TakeInbound drains and returns reassembled upstream bytes for a session.
-func (m *Manager) TakeInbound(id uint16) []byte {
+func (m *Manager) TakeInbound(id uint64) []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.sessions[id]
@@ -152,23 +400,80 @@ func (m *Manager) TakeInbound(id uint16) []byte {
 }
 
 // QueueOutbound queues downstream bytes to be delivered to the client on
-// subsequent polls.
-func (m *Manager) QueueOutbound(id uint16, b []byte) {
+// subsequent polls. Bytes beyond the per-session cap are dropped and counted
+// rather than growing the queue without bound.
+func (m *Manager) QueueOutbound(id uint64, b []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := m.get(id)
+	s := m.sessions[id]
+	if s == nil {
+		if s = m.create(id, nil); s == nil {
+			m.counters.OutboundDropped += uint64(len(b))
+			return
+		}
+	}
+	room := m.opts.MaxOutboundBytes - len(s.outbound)
+	if room <= 0 {
+		m.counters.OutboundDropped += uint64(len(b))
+		return
+	}
+	if len(b) > room {
+		m.counters.OutboundDropped += uint64(len(b) - room)
+		b = b[:room]
+	}
 	s.outbound = append(s.outbound, b...)
+}
+
+// PendingOutbound returns the queued (unacknowledged) downstream byte count.
+func (m *Manager) PendingOutbound(id uint64) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.sessions[id]; s != nil {
+		return len(s.outbound)
+	}
+	return 0
+}
+
+// PendingReorder returns how many out-of-order upstream frames are held.
+func (m *Manager) PendingReorder(id uint64) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.sessions[id]; s != nil {
+		return len(s.reorder)
+	}
+	return 0
+}
+
+// ExpireInFlight drops in-flight chunks the client never acknowledged, so an
+// abandoned session does not pin them until idle eviction. The bytes stay
+// queued; the next poll re-sends them. Returns how many were expired.
+func (m *Manager) ExpireInFlight() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	n := 0
+	for _, s := range m.sessions {
+		if s.inflight != nil && now.Sub(s.inflightAt) > m.opts.InFlightTTL {
+			s.inflight = nil
+			s.aimd.OnLoss()
+			n++
+		}
+	}
+	m.counters.ExpiredFrames += uint64(n)
+	return n
 }
 
 // Metrics is a per-session snapshot (streamed to the UI over WebSocket, §5.3).
 type Metrics struct {
-	ID        uint16 `json:"id"`
+	ID        uint64 `json:"id"`
 	AgeMs     int64  `json:"age_ms"`
 	IdleMs    int64  `json:"idle_ms"`
 	Window    int    `json:"window"`
 	UpBytes   int64  `json:"up_bytes"`
 	DownBytes int64  `json:"down_bytes"`
 	Pending   int    `json:"pending_down"`
+	InFlight  int    `json:"in_flight"`
+	Auth      bool   `json:"authenticated"`
 }
 
 // Snapshot returns metrics for all live sessions, sorted by id.
@@ -180,7 +485,8 @@ func (m *Manager) Snapshot() []Metrics {
 	for _, s := range m.sessions {
 		out = append(out, Metrics{
 			ID: s.ID, AgeMs: now.Sub(s.created).Milliseconds(), IdleMs: now.Sub(s.lastSeen).Milliseconds(),
-			Window: s.aimd.Window, UpBytes: s.UpBytes, DownBytes: s.DownBytes, Pending: len(s.outbound),
+			Window: s.aimd.Window, UpBytes: s.UpBytes, DownBytes: s.DownBytes,
+			Pending: len(s.outbound), InFlight: len(s.inflight), Auth: s.key != nil,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -195,7 +501,7 @@ func (m *Manager) EvictIdle() int {
 	now := m.now()
 	n := 0
 	for id, s := range m.sessions {
-		if now.Sub(s.lastSeen) > m.idleTTL {
+		if now.Sub(s.lastSeen) > m.opts.IdleTTL {
 			delete(m.sessions, id)
 			n++
 		}
