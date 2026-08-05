@@ -64,9 +64,12 @@ func NewStore(cacheDir string, staging bool, allow func(domain string) bool) *St
 // from a status endpoint. ok is false when no certificate is available yet.
 func (s *Store) CachedInfo(domain string) (*Imported, bool) {
 	s.mu.RLock()
+	q := normalizeSNI(domain)
 	for _, imp := range s.imported {
 		for _, d := range imp.Domains {
-			if strings.EqualFold(d, domain) {
+			// Match exactly OR via a wildcard SAN, so cert status is reported for
+			// every name an imported (possibly wildcard) cert actually serves.
+			if hostMatches(normalizeSNI(d), q) {
 				cp := *imp
 				s.mu.RUnlock()
 				return &cp, true

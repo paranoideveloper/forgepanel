@@ -47,7 +47,7 @@ func TestApplySingboxUsersNameTags(t *testing.T) {
 	}
 	// Missing email => stable non-empty fallback; duplicates de-duplicated.
 	arr := users(model.ProtoHysteria2, []ClientCred{
-		{Password: "p", UUID: "abc"}, // no email -> user-abc
+		{Password: "p", UUID: "abc"}, // no email -> hashed "user-<digest>", NOT the raw uuid
 		{Email: "dup", Password: "p"},
 		{Email: "dup", Password: "p"}, // collision -> dup-1
 	})
@@ -57,12 +57,15 @@ func TestApplySingboxUsersNameTags(t *testing.T) {
 		if n == "" {
 			t.Fatal("blank name emitted")
 		}
+		if n == "user-abc" || strings.Contains(n, "abc") {
+			t.Fatalf("fallback name must not expose the raw uuid: %q", n)
+		}
 		if names[n] {
 			t.Fatalf("duplicate name %q", n)
 		}
 		names[n] = true
 	}
-	if !names["user-abc"] || !names["dup"] || !names["dup-1"] {
-		t.Fatalf("unexpected names: %v", names)
+	if !names["dup"] || !names["dup-1"] {
+		t.Fatalf("email collision de-dup wrong: %v", names)
 	}
 }

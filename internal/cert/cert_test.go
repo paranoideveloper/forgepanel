@@ -79,3 +79,19 @@ func TestHostMatchesWildcard(t *testing.T) {
 		t.Fatal("normalized wildcard match failed")
 	}
 }
+
+func TestCachedInfoWildcard(t *testing.T) {
+	// An imported wildcard cert must be found (status-wise) for a covered
+	// subdomain, not just its exact SANs.
+	s := NewStore(t.TempDir(), false, nil)
+	s.imported["*.example.com"] = &Imported{Domains: []string{"*.example.com"}}
+	if _, ok := s.CachedInfo("api.example.com"); !ok {
+		t.Fatal("wildcard cert should be reported for api.example.com")
+	}
+	if _, ok := s.CachedInfo("example.com"); ok {
+		t.Fatal("wildcard must NOT match the apex")
+	}
+	if _, ok := s.CachedInfo("nope.other.com"); ok {
+		t.Fatal("unrelated name must not match")
+	}
+}

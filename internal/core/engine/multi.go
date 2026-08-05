@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -188,8 +190,12 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 func singboxUserName(cl ClientCred, i int, seen map[string]int) string {
 	name := strings.TrimSpace(cl.Email)
 	if name == "" {
-		if cl.UUID != "" {
-			name = "user-" + cl.UUID
+		// Derive a stable tag from a DIGEST of the UUID/password rather than the
+		// raw UUID: the name appears in sing-box logs/stats, and the UUID is the
+		// client's auth secret — it must not leak there.
+		if cl.UUID != "" || cl.Password != "" {
+			sum := sha256.Sum256([]byte(cl.UUID + "\x00" + cl.Password))
+			name = "user-" + hex.EncodeToString(sum[:4])
 		} else {
 			name = fmt.Sprintf("user-%d", i)
 		}
