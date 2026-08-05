@@ -226,6 +226,15 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 		c.JSON(200, gin.H{"kind": "wireguard", "filename": safeName(n.Remark, n.Port) + ".conf", "config": conf})
 		return
 	}
+	if n.Protocol == model.ProtoAmneziaWG {
+		conf, err := export.AmneziaWGConf(n, n.Address)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"kind": "amneziawg", "filename": safeName(n.Remark, n.Port) + ".conf", "config": conf})
+		return
+	}
 	uri, err := export.URI(n)
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})

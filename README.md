@@ -12,7 +12,7 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 
 ## Features
 
-- **12 protocols, one panel** — VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP, Hysteria2, TUIC, AnyTLS, ShadowTLS, WireGuard, Brook.
+- **13 protocols, one panel** — VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP, Hysteria2, TUIC, AnyTLS, ShadowTLS, WireGuard, AmneziaWG (kernel mode), Brook.
 - **Zero-config creation** — pick a protocol and a port; the panel fills in keys, UUIDs, passwords, REALITY key-pairs and a working steal-site so every config just works.
 - **Engines managed for you** — it downloads, pins, verifies and supervises `xray`, `sing-box` and `brook` automatically. Configs are validated before they're applied, so a bad edit can never take your traffic down.
 - **Clean web UI** — dark/light themes, live config preview, one-click copy/QR, and a schema-driven form that exposes every option of every protocol.
@@ -57,7 +57,7 @@ Requires Go 1.24+.
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 make build          # -> bin/forgepanel (server) + bin/forgectl (CLI)
-./bin/forgepanel    # first boot prints the admin path + password once
+./bin/forgepanel    # first boot prints the panel URL + a one-time setup token
 ```
 
 ## How it works
@@ -69,6 +69,17 @@ There is exactly one canonical representation of a proxy config — the panel re
 | xray | VLESS · VMess · Trojan · Shadowsocks · SOCKS · HTTP |
 | sing-box | Hysteria2 · TUIC · AnyTLS · ShadowTLS · WireGuard |
 | brook | Brook (all modes) |
+| amneziawg | AmneziaWG (kernel mode) |
+
+**AmneziaWG (kernel mode).** ForgePanel runs AmneziaWG through the real
+[`amneziawg` kernel module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module)
++ `awg-quick` — not a userspace shim — so tunnels run at full kernel-WireGuard
+speed with the obfuscation (`Jc/Jmin/Jmax/S1/S2/H1..H4`) that evades WireGuard
+DPI blocks. Create an AmneziaWG inbound and the panel provisions the keys,
+writes the server `awg-quick` config, and brings the interface up; the client
+config downloads as a ready-to-import `.conf`. The server needs the `amneziawg`
+module + `amneziawg-tools` installed (`modprobe amneziawg`); until then the panel
+still generates the configs and reports kernel-mode readiness in engine status.
 
 Full docs are in [`docs/`](docs/) — [Install](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md), [Protocols](docs/PROTOCOLS.md), [API](docs/API.md), [Security](docs/SECURITY.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
 

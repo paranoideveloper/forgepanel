@@ -118,6 +118,23 @@ func protocolSchemas(transports, securities []string) []ProtoSchema {
 			{Key: "wireguard.mtu", Label: "MTU", Type: "number", Default: 1420},
 			{Key: "wireguard.reserved", Label: "Reserved (WARP)", Type: "csvint", Ph: "0,0,0"},
 		}},
+		// AmneziaWG runs in KERNEL mode (amneziawg module + awg-quick). Keys and
+		// tunnel addresses are auto-provisioned; the fields below are the shared
+		// obfuscation parameters (identical on client and server).
+		{Proto: "amneziawg", Label: "AmneziaWG (kernel)", Engine: "amneziawg", Fields: []Field{
+			{Key: "amneziawg.private_key", Label: "Server private key (auto)", Type: "text", Keygen: "wireguard"},
+			{Key: "amneziawg.public_key", Label: "Peer public key (auto)", Type: "text"},
+			{Key: "amneziawg.mtu", Label: "MTU", Type: "number", Default: 1420},
+			{Key: "amneziawg.jc", Label: "Jc (junk packet count)", Type: "number", Default: 8},
+			{Key: "amneziawg.jmin", Label: "Jmin (junk min size)", Type: "number", Default: 50},
+			{Key: "amneziawg.jmax", Label: "Jmax (junk max size)", Type: "number", Default: 1000},
+			{Key: "amneziawg.s1", Label: "S1 (init junk)", Type: "number", Default: 86},
+			{Key: "amneziawg.s2", Label: "S2 (response junk)", Type: "number", Default: 574},
+			{Key: "amneziawg.h1", Label: "H1 (header magic)", Type: "number", Default: 1234567},
+			{Key: "amneziawg.h2", Label: "H2 (header magic)", Type: "number", Default: 2345678},
+			{Key: "amneziawg.h3", Label: "H3 (header magic)", Type: "number", Default: 3456789},
+			{Key: "amneziawg.h4", Label: "H4 (header magic)", Type: "number", Default: 4567890},
+		}},
 		// NOTE: SSH is intentionally NOT a creatable inbound. sing-box implements
 		// SSH only as an OUTBOUND (routing THROUGH an SSH server); there is no SSH
 		// inbound/server in sing-box (that role belongs to sshd). SSH stays in the

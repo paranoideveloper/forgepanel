@@ -31,6 +31,7 @@ type Controller struct {
 	xray           *supervisor.Process
 	singbox        *supervisor.Process
 	brook          *BrookManager
+	awg            *AWGManager
 	porthop        *porthop.Manager
 	lastPortHopErr string
 	lastBundle     *engine.Bundle
@@ -45,7 +46,7 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	// bind ("address already in use"). Safe at startup — none of our engines are
 	// running yet, so anything under our bin dir is a stray.
 	reapStrayEngines(bins.BinDir)
-	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins), porthop: porthop.New()}
+	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New()}
 }
 
 // reapStrayEngines SIGKILLs any process whose executable lives under binDir.
@@ -171,6 +172,16 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 		return bundle, err
 	}
 
+	// AmneziaWG (kernel mode): reconcile awg-quick interfaces. Best-effort — a
+	// missing kernel module surfaces via AWGStatus, never as a reload failure.
+	var awgNodes []*model.Node
+	for _, sp := range specs {
+		if engineFor(sp.Node) == "amneziawg" {
+			awgNodes = append(awgNodes, sp.Node)
+		}
+	}
+	_ = c.awg.Sync(awgNodes)
+
 	// Hysteria2 port-hopping: install/refresh the UDP-range firewall redirects for
 	// every hy2 inbound that requested one, and tear down rules for those removed.
 	// Best-effort — a missing CAP_NET_ADMIN surfaces via PortHopStatus, not a reload
@@ -264,6 +275,16 @@ func (c *Controller) BrookStatus() []map[string]any {
 	return c.brook.Status()
 }
 
+// AWGStatus returns the managed AmneziaWG interfaces.
+func (c *Controller) AWGStatus() []map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.awg.Status()
+}
+
+// AWGKernelStatus reports AmneziaWG kernel-mode readiness (tools + module).
+func (c *Controller) AWGKernelStatus() map[string]any { return c.awg.KernelStatus() }
+
 // LastBundle returns the most recently generated engine bundle (for the "show
 // generated config" drawer, spec §6).
 func (c *Controller) LastBundle() *engine.Bundle {
@@ -283,6 +304,7 @@ func (c *Controller) StopAll() {
 		c.singbox.Stop()
 	}
 	c.brook.StopAll()
+	c.awg.StopAll()
 }
 
 func (c *Controller) xraySpec() supervisor.EngineSpec {
@@ -312,6 +334,8 @@ func engineFor(n *model.Node) string {
 		return "sing-box"
 	case model.ProtoBrook:
 		return "brook"
+	case model.ProtoAmneziaWG:
+		return "amneziawg"
 	default:
 		return ""
 	}
