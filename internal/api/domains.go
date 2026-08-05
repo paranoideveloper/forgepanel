@@ -22,7 +22,11 @@ func (s *Server) handleDomainCheck(c *gin.Context) {
 func (s *Server) handleNSWizard(c *gin.Context) {
 	zone := c.Query("zone")
 	ip := c.Query("ip")
-	records := domain.NSDelegation(zone, ip)
+	records, err := domain.NSDelegation(zone, ip)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
 	nsHost := ""
 	if len(records) > 0 {
 		nsHost = records[0].Name

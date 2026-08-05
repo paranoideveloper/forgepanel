@@ -33,6 +33,7 @@ type Scheduler struct {
 	reloadHook  func()                                     // called after a mutation to reapply engine configs
 	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
 	cancel      context.CancelFunc
+	now         func() time.Time // injectable clock (tests use a controllable one)
 }
 
 // Config configures a Scheduler.
@@ -55,6 +56,7 @@ func New(cfg Config) *Scheduler {
 	return &Scheduler{
 		db: cfg.DB, pollEvery: cfg.PollEvery, sweepEvery: cfg.SweepEvery,
 		reloadHook: cfg.ReloadHook, pollTraffic: cfg.PollTraffic,
+		now: time.Now,
 	}
 }
 
@@ -119,7 +121,18 @@ func (s *Scheduler) pollAndAccount() {
 
 // sweep expires users past their expiry, activates on-hold users on first use,
 // and resets traffic per strategy.
-func (s *Scheduler) sweep() {
+func (s *Scheduler) sweep() { s.sweepAt(s.now()) }
+
+// sweepAt runs the full scheduled user-lifecycle pass at a given instant (split
+// out so tests drive it with a controllable clock). For each user it, in order:
+//
+//  1. transitions an on-hold user whose hold has started (FirstConnectAt set) to
+//     active, materializing ExpireAt = FirstConnectAt + OnHoldDuration;
+//  2. expires an active user past its ExpireAt;
+//  3. applies the periodic data-limit reset (day/week/month/year) exactly once
+//     per period via a compare-and-set, catching up after downtime, never
+//     double-resetting, and safe across concurrent panel instances.
+func (s *Scheduler) sweepAt(now time.Time) {
 	if s.db == nil {
 		return
 	}
@@ -127,18 +140,60 @@ func (s *Scheduler) sweep() {
 	if err != nil {
 		return
 	}
-	now := time.Now()
 	changed := false
 	for i := range users {
 		u := &users[i]
+
+		// 1. On-hold -> active once the hold has actually started.
+		if u.Status == store.StatusOnHold && u.FirstConnectAt != nil {
+			if u.OnHoldDuration > 0 && u.ExpireAt == nil {
+				exp := u.FirstConnectAt.Add(time.Duration(u.OnHoldDuration) * time.Second)
+				u.ExpireAt = &exp
+			}
+			u.Status = store.StatusActive
+			_ = s.db.SaveUser(u)
+			changed = true
+		}
+
+		// 2. Expiry (an expired user must never be revived by a reset below).
 		if u.Status == store.StatusActive && u.ExpireAt != nil && now.After(*u.ExpireAt) {
 			u.Status = store.StatusExpired
 			_ = s.db.SaveUser(u)
 			changed = true
+			continue
+		}
+
+		// 3. Periodic usage reset, idempotent + multi-instance-safe.
+		if ps, ok := periodStart(now, u.ResetStrategy); ok {
+			if applied, _ := s.db.ResetUserUsageCAS(u.ID, ps, now); applied {
+				changed = true
+			}
 		}
 	}
 	if changed && s.reloadHook != nil {
 		s.reloadHook()
+	}
+}
+
+// periodStart returns the UTC start of the current reset period for a strategy,
+// and whether the strategy resets at all. Boundaries: day = 00:00 UTC; week =
+// Monday 00:00 UTC (ISO); month = the 1st 00:00 UTC; year = Jan 1 00:00 UTC.
+// time.Date normalization makes leap years and month-length differences correct.
+func periodStart(now time.Time, st store.ResetStrategy) (time.Time, bool) {
+	n := now.UTC()
+	y, m, d := n.Date()
+	switch st {
+	case store.ResetDay:
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true
+	case store.ResetWeek:
+		delta := (int(n.Weekday()) + 6) % 7
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -delta), true
+	case store.ResetMonth:
+		return time.Date(y, m, 1, 0, 0, 0, 0, time.UTC), true
+	case store.ResetYear:
+		return time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC), true
+	default:
+		return time.Time{}, false
 	}
 }
 

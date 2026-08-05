@@ -25,3 +25,44 @@ func TestBuildMultiExpandsClients(t *testing.T) {
 		t.Fatal("per-user stats policy must be enabled")
 	}
 }
+
+func TestApplySingboxUsersNameTags(t *testing.T) {
+	users := func(proto model.Protocol, clients []ClientCred) []any {
+		in := jobj{}
+		applySingboxUsers(in, &model.Node{Protocol: proto}, clients)
+		arr, _ := in["users"].([]any)
+		return arr
+	}
+	// Hysteria2 + TUIC must now carry a "name" (regression: they had none, so
+	// sing-box could not attribute per-user traffic).
+	for _, proto := range []model.Protocol{model.ProtoHysteria2, model.ProtoTUIC} {
+		arr := users(proto, []ClientCred{{Email: "alice@x", Password: "p", UUID: "u1"}})
+		if len(arr) != 1 {
+			t.Fatalf("%s: want 1 user", proto)
+		}
+		m := arr[0].(jobj)
+		if m["name"] != "alice@x" {
+			t.Fatalf("%s: name=%v want alice@x", proto, m["name"])
+		}
+	}
+	// Missing email => stable non-empty fallback; duplicates de-duplicated.
+	arr := users(model.ProtoHysteria2, []ClientCred{
+		{Password: "p", UUID: "abc"}, // no email -> user-abc
+		{Email: "dup", Password: "p"},
+		{Email: "dup", Password: "p"}, // collision -> dup-1
+	})
+	names := map[string]bool{}
+	for _, u := range arr {
+		n, _ := u.(jobj)["name"].(string)
+		if n == "" {
+			t.Fatal("blank name emitted")
+		}
+		if names[n] {
+			t.Fatalf("duplicate name %q", n)
+		}
+		names[n] = true
+	}
+	if !names["user-abc"] || !names["dup"] || !names["dup-1"] {
+		t.Fatalf("unexpected names: %v", names)
+	}
+}

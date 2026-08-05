@@ -486,5 +486,9 @@ func (s *Server) handleForgeDNSClientConfig(c *gin.Context) {
 
 // nsRecords returns the delegation records for a zone (reuses the domain wizard).
 func nsRecords(zone, ip string) any {
-	return domain.NSDelegation(zone, ip)
+	records, err := domain.NSDelegation(zone, ip)
+	if err != nil {
+		return []domain.Record{}
+	}
+	return records
 }

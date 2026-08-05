@@ -65,3 +65,78 @@ func TestUserEmailRoundTrip(t *testing.T) {
 		t.Fatal("non-user email should parse to 0")
 	}
 }
+
+func TestPeriodStart(t *testing.T) {
+	// A Wednesday: 2026-08-05 12:34:56 UTC.
+	now := time.Date(2026, 8, 5, 12, 34, 56, 0, time.UTC)
+	check := func(st store.ResetStrategy, want time.Time) {
+		got, ok := periodStart(now, st)
+		if !ok || !got.Equal(want) {
+			t.Fatalf("%s: got %v ok=%v want %v", st, got, ok, want)
+		}
+	}
+	check(store.ResetDay, time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC))
+	check(store.ResetWeek, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)) // Monday
+	check(store.ResetMonth, time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC))
+	check(store.ResetYear, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	if _, ok := periodStart(now, store.ResetNo); ok {
+		t.Fatal("no_reset should not have a period")
+	}
+}
+
+func TestPeriodicResetIdempotent(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "d", Status: store.StatusActive, ResetStrategy: store.ResetDay, UsedTraffic: 100, SubToken: "rt"}
+	_ = db.CreateUser(u)
+	s := New(Config{DB: db})
+	day1 := time.Date(2026, 8, 5, 8, 0, 0, 0, time.UTC)
+	s.sweepAt(day1)
+	got, _ := db.UserByID(u.ID)
+	if got.UsedTraffic != 0 || got.LifetimeTraffic != 100 {
+		t.Fatalf("first reset wrong: used=%d lifetime=%d", got.UsedTraffic, got.LifetimeTraffic)
+	}
+	// Same day, more usage, sweep again -> NOT reset again (idempotent).
+	got.UsedTraffic = 50
+	_ = db.SaveUser(got)
+	s.sweepAt(day1.Add(6 * time.Hour))
+	got, _ = db.UserByID(u.ID)
+	if got.UsedTraffic != 50 {
+		t.Fatalf("double reset within period: used=%d", got.UsedTraffic)
+	}
+	// Next day -> reset again, lifetime accumulates. (Also proves missed-run
+	// recovery: a single sweep on day 2 catches up regardless of gaps.)
+	s.sweepAt(day1.AddDate(0, 0, 1))
+	got, _ = db.UserByID(u.ID)
+	if got.UsedTraffic != 0 || got.LifetimeTraffic != 150 {
+		t.Fatalf("second period reset wrong: used=%d lifetime=%d", got.UsedTraffic, got.LifetimeTraffic)
+	}
+}
+
+func TestOnHoldTransition(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	fc := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	u := &store.User{Username: "h", Status: store.StatusOnHold, OnHoldDuration: 3600, FirstConnectAt: &fc, SubToken: "ht"}
+	_ = db.CreateUser(u)
+	s := New(Config{DB: db})
+	s.sweepAt(fc.Add(time.Minute))
+	got, _ := db.UserByID(u.ID)
+	if got.Status != store.StatusActive {
+		t.Fatalf("on_hold should transition to active, got %s", got.Status)
+	}
+	if got.ExpireAt == nil || !got.ExpireAt.Equal(fc.Add(time.Hour)) {
+		t.Fatalf("expire not set to firstconnect+duration: %v", got.ExpireAt)
+	}
+}
+
+func TestResetDoesNotReviveExpired(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	past := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	u := &store.User{Username: "e", Status: store.StatusExpired, ResetStrategy: store.ResetDay, ExpireAt: &past, SubToken: "et"}
+	_ = db.CreateUser(u)
+	s := New(Config{DB: db})
+	s.sweepAt(time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC))
+	got, _ := db.UserByID(u.ID)
+	if got.Status != store.StatusExpired {
+		t.Fatalf("expired user must stay expired, got %s", got.Status)
+	}
+}

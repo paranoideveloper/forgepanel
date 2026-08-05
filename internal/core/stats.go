@@ -2,12 +2,47 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 )
+
+// statValue decodes an Xray statsquery counter that may be a JSON number
+// (modern Xray emits "value": 12345), a numeric string ("value": "12345", older
+// builds), or null/missing (→ 0). Fractional or out-of-int64-range values are
+// errors so a single malformed counter is skipped rather than silently
+// corrupting usage accounting. Exact int64 values are preserved without float
+// rounding.
+type statValue int64
+
+func (v *statValue) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" {
+		*v = 0
+		return nil
+	}
+	s = strings.Trim(s, `"`)
+	if s == "" {
+		*v = 0
+		return nil
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		*v = statValue(n)
+		return nil
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f != math.Trunc(f) || f < math.MinInt64 || f >= math.MaxInt64 {
+			return fmt.Errorf("stats: value %q is not an exact int64", s)
+		}
+		*v = statValue(int64(f))
+		return nil
+	}
+	return fmt.Errorf("stats: unparseable counter %q", s)
+}
 
 // UserTraffic is a per-user traffic sample keyed by the stats email tag.
 type UserTraffic struct {
@@ -38,21 +73,26 @@ func (c *Controller) QueryUserStats(reset bool) (map[string]*UserTraffic, error)
 func parseStatsQuery(out []byte) map[string]*UserTraffic {
 	res := map[string]*UserTraffic{}
 	var doc struct {
-		Stat []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"stat"`
+		Stat []json.RawMessage `json:"stat"`
 	}
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return res
 	}
-	for _, s := range doc.Stat {
-		parts := strings.Split(s.Name, ">>>")
+	for _, raw := range doc.Stat {
+		var e struct {
+			Name  string    `json:"name"`
+			Value statValue `json:"value"`
+		}
+		// Decode each stat independently so one malformed counter (bad value type
+		// or overflow) never discards the whole document.
+		if err := json.Unmarshal(raw, &e); err != nil {
+			continue
+		}
+		parts := strings.Split(e.Name, ">>>")
 		if len(parts) != 4 || parts[0] != "user" {
 			continue
 		}
 		email, dir := parts[1], parts[3]
-		v, _ := strconv.ParseInt(s.Value, 10, 64)
 		ut := res[email]
 		if ut == nil {
 			ut = &UserTraffic{Email: email}
@@ -60,9 +100,9 @@ func parseStatsQuery(out []byte) map[string]*UserTraffic {
 		}
 		switch dir {
 		case "uplink":
-			ut.Uplink = v
+			ut.Uplink = int64(e.Value)
 		case "downlink":
-			ut.Downlink = v
+			ut.Downlink = int64(e.Value)
 		}
 	}
 	return res

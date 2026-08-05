@@ -118,22 +118,72 @@ func (s *Store) CachedInfo(domain string) (*Imported, bool) {
 func (s *Store) TLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			sni := normalizeSNI(hello.ServerName)
 			s.mu.RLock()
+			var exact, wild *tls.Certificate
 			for _, imp := range s.imported {
 				for _, d := range imp.Domains {
-					if d == hello.ServerName {
+					cd := normalizeSNI(d)
+					if sni != "" && cd == sni {
 						c := imp.cert
-						s.mu.RUnlock()
-						return &c, nil
+						exact = &c
+					} else if wildcardMatch(cd, sni) {
+						c := imp.cert
+						wild = &c
 					}
+				}
+				if exact != nil {
+					break
 				}
 			}
 			s.mu.RUnlock()
+			// Exact SAN wins over a wildcard; an empty or unmatched SNI falls
+			// through to ACME (which handles the panel domain / default path).
+			if exact != nil {
+				return exact, nil
+			}
+			if wild != nil {
+				return wild, nil
+			}
 			return s.acme.GetCertificate(hello)
 		},
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"h2", "http/1.1", acme.ALPNProto},
 	}
+}
+
+// normalizeSNI lowercases and strips a trailing dot so SNI matching is
+// case-insensitive and dot-insensitive (SNI hostnames are already A-label form).
+func normalizeSNI(h string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+}
+
+// hostMatches reports whether a normalized certificate SAN matches a normalized
+// SNI: exact match, or a single left-most wildcard. Exposed for direct testing.
+func hostMatches(certName, sni string) bool {
+	if certName == "" || sni == "" {
+		return false
+	}
+	if certName == sni {
+		return true
+	}
+	return wildcardMatch(certName, sni)
+}
+
+// wildcardMatch implements TLS wildcard rules: "*.example.com" matches exactly
+// one left-most label — "api.example.com" yes; the apex "example.com" no; a
+// deeper "deep.api.example.com" no. Only the leftmost label may be the wildcard;
+// no unsafe suffix-only matching.
+func wildcardMatch(certName, sni string) bool {
+	if sni == "" || !strings.HasPrefix(certName, "*.") {
+		return false
+	}
+	suffix := certName[1:] // ".example.com"
+	if !strings.HasSuffix(sni, suffix) {
+		return false
+	}
+	label := sni[:len(sni)-len(suffix)] // the single left-most label
+	return label != "" && !strings.Contains(label, ".")
 }
 
 // ACMEManager exposes the autocert manager (for mounting its HTTP-01 handler).

@@ -77,6 +77,14 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 	return specs
 }
 
+// engineUnavailable writes the one consistent response used whenever a request
+// needs the local proxy engine but none is attached (control-plane-only panel,
+// light-server mode, or tests). Every engine-dependent route uses this shape so
+// callers can branch on the code, and nothing ever dereferences a nil engine.
+func (s *Server) engineUnavailable(c *gin.Context) {
+	c.JSON(503, gin.H{"error": "proxy engine is not available on this server", "code": "engine_unavailable"})
+}
+
 // reloadEngines regenerates and hot-applies the engine configs for all enabled
 // inbounds + their users. Called after any inbound/user mutation and at boot.
 // Errors are non-fatal (surfaced via /api/admin/engines): a panel must not crash

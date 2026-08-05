@@ -38,6 +38,10 @@ type Admin struct {
 	Role         Role   `gorm:"default:owner" json:"role"`
 	TOTPSecret   string `json:"-"`
 	Disabled     bool   `json:"disabled"`
+	// RecoveryCodes is a JSON array of SHA-256 hashes of the UNUSED 2FA recovery
+	// codes. Never plaintext. Empty when 2FA is off or codes were never generated
+	// (existing 2FA admins migrate here with an empty set and can regenerate).
+	RecoveryCodes string `json:"-"`
 	// Reseller quotas (enforced at the repository layer, spec §4).
 	UserQuota     int   `json:"user_quota"`
 	TrafficCredit int64 `json:"traffic_credit"`
@@ -91,6 +95,11 @@ type User struct {
 	DataLimit     int64         `json:"data_limit"` // bytes; 0 = unlimited
 	UsedTraffic   int64         `json:"used_traffic"`
 	ResetStrategy ResetStrategy `gorm:"default:no_reset" json:"reset_strategy"`
+	// LifetimeTraffic accumulates all bytes ever used, preserved across periodic
+	// resets. LastResetAt records the start of the period whose usage is currently
+	// counted, making scheduled resets idempotent and recoverable after downtime.
+	LifetimeTraffic int64      `json:"lifetime_traffic"`
+	LastResetAt     *time.Time `json:"last_reset_at"`
 
 	// Expiry: absolute time, OR an on-first-use duration in seconds that starts
 	// counting on first connection.

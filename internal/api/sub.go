@@ -2,12 +2,15 @@ package api
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
 )
 
 // handleSub serves a subscription (spec §9). Format is chosen by explicit
@@ -43,10 +46,51 @@ func (s *Server) handleSub(c *gin.Context) {
 		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinks(nodes)))
 	case "json":
 		c.JSON(200, nodes)
+	case "sing-box", "singbox", "sb":
+		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes))
 	default: // v2ray/base64 subscription
 		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))
 		c.Data(200, "text/plain; charset=utf-8", []byte(b64))
 	}
+}
+
+// singboxSubscription renders a minimal, valid sing-box CLIENT config whose
+// outbounds are the canonical per-node renderings (render.SingboxOutbound), so a
+// sing-box client receives real sing-box JSON instead of the base64 V2Ray list.
+// Tags are de-duplicated so the selector references distinct outbounds.
+func singboxSubscription(nodes []*model.Node) []byte {
+	outs := make([]any, 0, len(nodes)+2)
+	seen := map[string]int{}
+	var tags []string
+	for i, n := range nodes {
+		o, err := render.SingboxOutbound(n)
+		if err != nil {
+			continue
+		}
+		tag, _ := o["tag"].(string)
+		if tag == "" {
+			tag = fmt.Sprintf("node-%d", i)
+		}
+		if k, dup := seen[tag]; dup {
+			seen[tag] = k + 1
+			tag = fmt.Sprintf("%s-%d", tag, k+1)
+		} else {
+			seen[tag] = 1
+		}
+		o["tag"] = tag
+		tags = append(tags, tag)
+		outs = append(outs, o)
+	}
+	if len(tags) > 0 {
+		outs = append(outs, map[string]any{"type": "selector", "tag": "proxy", "outbounds": append(append([]string{}, tags...), "direct"), "default": tags[0]})
+	}
+	outs = append(outs, map[string]any{"type": "direct", "tag": "direct"})
+	doc := map[string]any{
+		"log":       map[string]any{"level": "warn"},
+		"outbounds": outs,
+	}
+	b, _ := json.MarshalIndent(doc, "", "  ")
+	return b
 }
 
 func plainLinks(nodes []*model.Node) string {

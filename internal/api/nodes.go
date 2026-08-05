@@ -91,9 +91,13 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
 	// Return the current xray config bundle so the node runs the same inbounds.
+	// A control-plane-only panel has no local engine; the heartbeat still
+	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
 	var xrayCfg string
-	if b := s.engine.LastBundle(); b != nil {
-		xrayCfg = string(b.Xray)
+	if s.engine != nil {
+		if b := s.engine.LastBundle(); b != nil {
+			xrayCfg = string(b.Xray)
+		}
 	}
 	c.JSON(200, gin.H{"xray_config": xrayCfg})
 }

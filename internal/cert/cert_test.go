@@ -51,3 +51,31 @@ func TestImportAndExpiry(t *testing.T) {
 		t.Fatal("expected import error")
 	}
 }
+
+func TestHostMatchesWildcard(t *testing.T) {
+	cases := []struct {
+		cert, sni string
+		want      bool
+	}{
+		{"example.com", "example.com", true},
+		{"example.com", "EXAMPLE.com", false}, // caller normalizes; hostMatches is exact on normalized
+		{"api.example.com", "api.example.com", true},
+		{"*.example.com", "api.example.com", true},
+		{"*.example.com", "example.com", false},          // apex not matched
+		{"*.example.com", "deep.api.example.com", false}, // multi-level not matched
+		{"*.example.com", "", false},
+		{"", "api.example.com", false},
+	}
+	for _, c := range cases {
+		if got := hostMatches(c.cert, c.sni); got != c.want {
+			t.Errorf("hostMatches(%q,%q)=%v want %v", c.cert, c.sni, got, c.want)
+		}
+	}
+	// normalizeSNI makes matching case/dot-insensitive at the boundary.
+	if normalizeSNI("API.Example.COM.") != "api.example.com" {
+		t.Fatal("normalizeSNI failed")
+	}
+	if !hostMatches(normalizeSNI("*.Example.com"), normalizeSNI("API.example.com.")) {
+		t.Fatal("normalized wildcard match failed")
+	}
+}

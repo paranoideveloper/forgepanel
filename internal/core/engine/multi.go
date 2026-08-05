@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
@@ -147,10 +148,12 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 // applySingboxUsers rewrites a sing-box inbound's users array per user.
 func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 	var arr []any
-	for _, cl := range clients {
+	seen := map[string]int{}
+	for i, cl := range clients {
+		name := singboxUserName(cl, i, seen)
 		switch n.Protocol {
 		case model.ProtoVLESS:
-			e := jobj{"uuid": cl.UUID, "name": cl.Email}
+			e := jobj{"uuid": cl.UUID, "name": name}
 			if cl.Flow != "" {
 				e["flow"] = cl.Flow
 			} else if n.Flow != "" {
@@ -158,11 +161,13 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 			}
 			arr = append(arr, e)
 		case model.ProtoVMess:
-			arr = append(arr, jobj{"uuid": cl.UUID, "name": cl.Email, "alterId": 0})
+			arr = append(arr, jobj{"uuid": cl.UUID, "name": name, "alterId": 0})
 		case model.ProtoTrojan:
-			arr = append(arr, jobj{"password": cl.Password, "name": cl.Email})
+			arr = append(arr, jobj{"password": cl.Password, "name": name})
 		case model.ProtoHysteria2, model.ProtoTUIC:
-			e := jobj{"password": cl.Password}
+			// Hysteria2/TUIC also carry a name so sing-box can attribute per-user
+			// traffic stats — without it these protocols reported no per-user data.
+			e := jobj{"password": cl.Password, "name": name}
 			if cl.UUID != "" {
 				e["uuid"] = cl.UUID
 			}
@@ -174,6 +179,27 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 	if len(arr) > 0 {
 		in["users"] = arr
 	}
+}
+
+// singboxUserName returns a stable, non-empty, inbound-unique name used as the
+// per-user stats tag: the client email when set, else a deterministic fallback
+// derived from the UUID or index. Collisions within an inbound are de-duplicated
+// with a numeric suffix, and no secret is exposed as the visible name.
+func singboxUserName(cl ClientCred, i int, seen map[string]int) string {
+	name := strings.TrimSpace(cl.Email)
+	if name == "" {
+		if cl.UUID != "" {
+			name = "user-" + cl.UUID
+		} else {
+			name = fmt.Sprintf("user-%d", i)
+		}
+	}
+	k := seen[name]
+	seen[name] = k + 1
+	if k > 0 {
+		name = fmt.Sprintf("%s-%d", name, k)
+	}
+	return name
 }
 
 // injectCert gives a TLS/QUIC/AnyTLS inbound a server certificate if it lacks one,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -107,6 +108,92 @@ func (s *Store) GroupByID(id uint) (*Group, error) {
 
 // CreateUser persists a user. OwnerAdminID scopes reseller visibility.
 func (s *Store) CreateUser(u *User) error { return s.db.Create(u).Error }
+
+// QuotaError signals that a reseller limit was hit. Handlers map it to a 409 so
+// clients can distinguish an over-quota rejection from a generic failure.
+type QuotaError struct {
+	Reason string
+	Limit  string // "user_quota" | "traffic_credit"
+}
+
+func (e *QuotaError) Error() string { return e.Reason }
+
+// CreateUserEnforcingQuota creates u while enforcing the owning admin's reseller
+// limits inside ONE transaction, so concurrent create requests cannot race past
+// the cap (spec §4). Owners and admins have unlimited privileges and bypass the
+// checks; for resellers, a limit of 0 means unlimited. Soft-deleted users no
+// longer count, so deleting a user restores both its slot and its traffic
+// allocation automatically.
+func (s *Store) CreateUserEnforcingQuota(u *User, owner *Admin) error {
+	if owner == nil || owner.Role == RoleOwner || owner.Role == RoleAdmin {
+		return s.CreateUser(u)
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if owner.UserQuota > 0 {
+			var n int64
+			if e := tx.Model(&User{}).Where("owner_admin_id = ?", owner.ID).Count(&n).Error; e != nil {
+				return e
+			}
+			if n >= int64(owner.UserQuota) {
+				return &QuotaError{Reason: fmt.Sprintf("user quota reached (%d/%d)", n, owner.UserQuota), Limit: "user_quota"}
+			}
+		}
+		if owner.TrafficCredit > 0 {
+			if u.DataLimit <= 0 {
+				return &QuotaError{Reason: "a reseller with a traffic credit cannot allocate unlimited traffic to a user", Limit: "traffic_credit"}
+			}
+			var sum int64
+			if e := tx.Model(&User{}).Where("owner_admin_id = ? AND data_limit > 0", owner.ID).
+				Select("COALESCE(SUM(data_limit),0)").Scan(&sum).Error; e != nil {
+				return e
+			}
+			if sum+u.DataLimit > owner.TrafficCredit {
+				return &QuotaError{Reason: fmt.Sprintf("traffic credit exceeded: %d bytes requested, %d remaining", u.DataLimit, owner.TrafficCredit-sum), Limit: "traffic_credit"}
+			}
+		}
+		return tx.Create(u).Error
+	})
+}
+
+// ResetUserUsageCAS resets a user's period usage exactly once per period. It is a
+// compare-and-set on LastResetAt: the reset only applies when the user has not
+// already been reset for the period beginning at periodStart, so it is
+// idempotent, recovers missed schedules after downtime (catching up to the
+// current period on the next run), and is safe when multiple panel instances
+// sweep concurrently. Lifetime traffic is preserved; a data-limited user that is
+// not expired is reactivated. Returns whether a reset was applied.
+func (s *Store) ResetUserUsageCAS(userID uint, periodStart, now time.Time) (bool, error) {
+	applied := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var u User
+		if e := tx.First(&u, userID).Error; e != nil {
+			return e
+		}
+		if u.LastResetAt != nil && !u.LastResetAt.Before(periodStart) {
+			return nil
+		}
+		u.LifetimeTraffic += u.UsedTraffic
+		u.UsedTraffic = 0
+		u.LastResetAt = &now
+		if u.Status == StatusLimited && (u.ExpireAt == nil || now.Before(*u.ExpireAt)) {
+			u.Status = StatusActive
+		}
+		applied = true
+		return tx.Save(&u).Error
+	})
+	return applied, err
+}
+
+// ResellerUsage reports a reseller's current quota-counted user count and the
+// total finite traffic allocated, for the remaining-quota display.
+func (s *Store) ResellerUsage(ownerID uint) (users int64, allocated int64, err error) {
+	if e := s.db.Model(&User{}).Where("owner_admin_id = ?", ownerID).Count(&users).Error; e != nil {
+		return 0, 0, e
+	}
+	err = s.db.Model(&User{}).Where("owner_admin_id = ? AND data_limit > 0", ownerID).
+		Select("COALESCE(SUM(data_limit),0)").Scan(&allocated).Error
+	return users, allocated, err
+}
 
 // ListUsers returns users; if ownerID != 0 only that admin's users (reseller
 // isolation enforced at the repository layer, spec §4).
@@ -270,3 +357,53 @@ func (s *Store) DeleteZone(id uint) error { return s.db.Delete(&ForgeDNSZone{}, 
 
 // SaveAdmin persists admin changes.
 func (s *Store) SaveAdmin(a *Admin) error { return s.db.Save(a).Error }
+
+// AdminByID looks up an admin by primary key.
+func (s *Store) AdminByID(id uint) (*Admin, error) {
+	var a Admin
+	if err := s.db.First(&a, id).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// SetAdminRecoveryCodes replaces an admin's stored recovery-code hashes.
+func (s *Store) SetAdminRecoveryCodes(adminID uint, hashesJSON string) error {
+	return s.db.Model(&Admin{}).Where("id = ?", adminID).Update("recovery_codes", hashesJSON).Error
+}
+
+// ConsumeRecoveryCode atomically removes one matching recovery-code hash from an
+// admin and reports whether it was present. The read-check-write runs in a
+// transaction so two concurrent logins can never both spend the same code
+// (single-use guarantee, spec §12). remaining is the count left after consuming.
+func (s *Store) ConsumeRecoveryCode(adminID uint, matches func(hash string) bool) (used bool, remaining int, err error) {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// The transaction serializes the read-modify-write; on SQLite the write
+		// lock is exclusive, so two concurrent consumers can't both spend a code.
+		var a Admin
+		if e := tx.First(&a, adminID).Error; e != nil {
+			return e
+		}
+		var hashes []string
+		if a.RecoveryCodes != "" {
+			if e := json.Unmarshal([]byte(a.RecoveryCodes), &hashes); e != nil {
+				hashes = nil
+			}
+		}
+		kept := hashes[:0:0]
+		for _, h := range hashes {
+			if !used && matches(h) {
+				used = true
+				continue
+			}
+			kept = append(kept, h)
+		}
+		remaining = len(kept)
+		if !used {
+			return nil
+		}
+		raw, _ := json.Marshal(kept)
+		return tx.Model(&Admin{}).Where("id = ?", adminID).Update("recovery_codes", string(raw)).Error
+	})
+	return used, remaining, err
+}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,9 +22,10 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		TOTP     string `json:"totp"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		TOTP         string `json:"totp"`
+		RecoveryCode string `json:"recovery_code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -51,15 +53,30 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	if admin.TOTPSecret != "" {
-		if req.TOTP == "" {
-			c.JSON(401, gin.H{"error": "2fa/totp code required", "totp_required": true})
-			return
-		}
-		if !auth.VerifyTOTP(admin.TOTPSecret, req.TOTP, time.Now()) {
-			if s.login != nil {
-				s.login.Fail(ip)
+		switch {
+		case req.TOTP != "":
+			if !auth.VerifyTOTP(admin.TOTPSecret, req.TOTP, time.Now()) {
+				if s.login != nil {
+					s.login.Fail(ip)
+				}
+				c.JSON(401, gin.H{"error": "invalid 2fa code", "totp_required": true})
+				return
 			}
-			c.JSON(401, gin.H{"error": "invalid 2fa code", "totp_required": true})
+		case req.RecoveryCode != "":
+			used, remaining, err := s.db.ConsumeRecoveryCode(admin.ID, func(h string) bool {
+				return auth.RecoveryCodeMatches(h, req.RecoveryCode)
+			})
+			if err != nil || !used {
+				if s.login != nil {
+					s.login.Fail(ip)
+				}
+				c.JSON(401, gin.H{"error": "invalid or already-used recovery code", "totp_required": true})
+				return
+			}
+			s.db.Audit(&store.AuditLog{AdminID: admin.ID, Actor: admin.Username, IP: c.ClientIP(), Action: "2fa.recovery.use"})
+			c.Header("X-Recovery-Codes-Remaining", strconv.Itoa(remaining))
+		default:
+			c.JSON(401, gin.H{"error": "2fa/totp code required", "totp_required": true})
 			return
 		}
 	}
@@ -173,6 +190,10 @@ func (s *Server) handlePortHop(c *gin.Context) {
 	if n.Protocol == model.ProtoHysteria2 && n.Hysteria2 != nil {
 		spec = n.Hysteria2.PortHopping
 	}
+	if s.engine == nil {
+		s.engineUnavailable(c)
+		return
+	}
 	c.JSON(200, s.engine.PortHopStatus(n.Port, spec))
 }
 
@@ -283,6 +304,40 @@ func (s *Server) handleListUsers(c *gin.Context) {
 	c.JSON(200, us)
 }
 
+// handleQuota reports the current admin's reseller limits and remaining headroom
+// (users + traffic). Owners/admins are reported as unlimited.
+func (s *Server) handleQuota(c *gin.Context) {
+	claims, _ := auth.ClaimsFrom(c)
+	admin, err := s.db.AdminByID(claims.AdminID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	unlimited := admin.Role == store.RoleOwner || admin.Role == store.RoleAdmin
+	usedUsers, allocated, _ := s.db.ResellerUsage(admin.ID)
+	resp := gin.H{
+		"role": admin.Role, "unlimited": unlimited,
+		"user_quota": admin.UserQuota, "users_used": usedUsers,
+		"traffic_credit": admin.TrafficCredit, "traffic_allocated": allocated,
+	}
+	if !unlimited {
+		if admin.UserQuota > 0 {
+			resp["users_remaining"] = max64(0, int64(admin.UserQuota)-usedUsers)
+		}
+		if admin.TrafficCredit > 0 {
+			resp["traffic_remaining"] = max64(0, admin.TrafficCredit-allocated)
+		}
+	}
+	c.JSON(200, resp)
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (s *Server) handleCreateUser(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	var req struct {
@@ -305,7 +360,16 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		t := time.Now().AddDate(0, 0, req.ExpireDays)
 		u.ExpireAt = &t
 	}
-	if err := s.db.CreateUser(u); err != nil {
+	// Enforce reseller quotas transactionally: the creating admin's UserQuota and
+	// TrafficCredit are checked and the row is written atomically (spec §4). Owners
+	// and admins are unlimited and bypass. A quota rejection is a 409, not a 500.
+	owner, _ := s.db.AdminByID(claims.AdminID)
+	if err := s.db.CreateUserEnforcingQuota(u, owner); err != nil {
+		var qe *store.QuotaError
+		if errors.As(err, &qe) {
+			c.JSON(409, gin.H{"error": qe.Error(), "code": "quota_exceeded", "limit": qe.Limit})
+			return
+		}
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

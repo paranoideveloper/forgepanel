@@ -95,8 +95,64 @@ func versionFor(e Engine) string {
 	return XrayVersion
 }
 
-// installXray downloads Xray-<os>-<arch>.zip, verifies it against the published
-// .dgst checksum, and extracts the "xray" binary.
+// pinnedSHA256 maps a downloaded engine artifact (by its exact release filename)
+// to its expected SHA-256. Verification against these baked-in values is
+// MANDATORY for every engine: an artifact whose checksum is unknown or does not
+// match is never written into place. This is stronger than trusting a checksum
+// file fetched from the same host, and it closes the previous silent bypass
+// (installs proceeding when the .dgst download failed). Update these when the
+// pinned versions above change.
+var pinnedSHA256 = map[string]string{
+	"Xray-linux-64.zip":                   "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
+	"Xray-linux-arm64-v8a.zip":            "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
+	"sing-box-1.13.15-linux-amd64.tar.gz": "a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f",
+	"sing-box-1.13.15-linux-arm64.tar.gz": "f0810bbb5722ae36635687c421019defcc8b328d31a0b3c287901f331747ca93",
+	"brook_linux_amd64":                   "7853250042877716376fab14a3a99be44bf242cd69dec11cfa71fada915db372",
+	"brook_linux_arm64":                   "5c720698f811ecc265311574140c20d912037ca36aecccd7e8536d03e581a2db",
+}
+
+// verifyPinned enforces the mandatory checksum: it fails if the artifact has no
+// pinned entry (unknown filename) or if the SHA-256 does not match.
+func verifyPinned(asset string, data []byte) error {
+	want, ok := pinnedSHA256[asset]
+	if !ok {
+		return fmt.Errorf("binmgr: no pinned checksum for %q — refusing to install unverified artifact", asset)
+	}
+	sum := sha256.Sum256(data)
+	got := hex.EncodeToString(sum[:])
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("binmgr: checksum mismatch for %s: got %s, want %s", asset, got, want)
+	}
+	return nil
+}
+
+// finalizeInstall verifies the pinned checksum, materializes the binary into a
+// temp path via extract, checks its self-reported version, then atomically swaps
+// it into place — so a failed or tampered download never replaces a known-good
+// binary, and temp files are cleaned up on any failure.
+func finalizeInstall(dst, asset string, data []byte, extract func(tmp string) error, wantVersion string) error {
+	if err := verifyPinned(asset, data); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	_ = os.Remove(tmp)
+	if err := extract(tmp); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := verifyVersion(tmp, wantVersion); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// installXray downloads Xray-<os>-<arch>.zip, verifies its pinned SHA-256, and
+// atomically installs the "xray" binary.
 func (m *Manager) installXray(dst string) error {
 	asset, err := xrayAsset()
 	if err != nil {
@@ -107,15 +163,9 @@ func (m *Manager) installXray(dst string) error {
 	if err != nil {
 		return fmt.Errorf("download xray: %w", err)
 	}
-	if dgst, err := download(base + asset + ".dgst"); err == nil {
-		if err := verifyInDigest(zipBytes, string(dgst)); err != nil {
-			return err
-		}
-	}
-	if err := extractZipFile(zipBytes, "xray", dst); err != nil {
-		return err
-	}
-	return verifyVersion(dst, "Xray "+strings.TrimPrefix(XrayVersion, "v"))
+	return finalizeInstall(dst, asset, zipBytes,
+		func(tmp string) error { return extractZipFile(zipBytes, "xray", tmp) },
+		"Xray "+strings.TrimPrefix(XrayVersion, "v"))
 }
 
 // installSingbox downloads the tar.gz, extracts the binary, and verifies the
@@ -127,10 +177,9 @@ func (m *Manager) installSingbox(dst string) error {
 	if err != nil {
 		return fmt.Errorf("download sing-box: %w", err)
 	}
-	if err := extractTarGzFile(tgz, "sing-box", dst); err != nil {
-		return err
-	}
-	return verifyVersion(dst, "sing-box version "+SingboxVersion)
+	return finalizeInstall(dst, asset, tgz,
+		func(tmp string) error { return extractTarGzFile(tgz, "sing-box", tmp) },
+		"sing-box version "+SingboxVersion)
 }
 
 func xrayAsset() (string, error) {
@@ -267,8 +316,7 @@ func (m *Manager) installBrook(dst string) error {
 	if err != nil {
 		return fmt.Errorf("download brook: %w", err)
 	}
-	if err := writeExec(dst, bytesReader(raw)); err != nil {
-		return err
-	}
-	return verifyVersion(dst, "Brook version")
+	return finalizeInstall(dst, "brook_linux_"+arch, raw,
+		func(tmp string) error { return writeExec(tmp, bytesReader(raw)) },
+		"Brook version")
 }

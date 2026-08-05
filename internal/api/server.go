@@ -114,6 +114,9 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		DB:         db,
 		ReloadHook: s.reloadEngines,
 		PollTraffic: func(reset bool) (map[string]int64, error) {
+			if s.engine == nil {
+				return nil, nil
+			}
 			stats, err := s.engine.QueryUserStats(reset)
 			if err != nil {
 				return nil, err
@@ -227,8 +230,28 @@ func (s *Server) CertTLSConfig() *tls.Config { return s.certs.TLSConfig() }
 // HTTP-01 challenges and redirects everything else to HTTPS.
 func (s *Server) ACMEHTTPHandler() http.Handler { return s.certs.ACMEManager().HTTPHandler(nil) }
 
+// configureTrustedProxies decides whether gin honors X-Forwarded-For. The secure
+// default is to trust NO proxy, so an untrusted client cannot spoof its source
+// IP (which the login rate limiter keys on). Operators who front the panel with a
+// reverse proxy set FORGEPANEL_TRUSTED_PROXIES to a comma-separated CIDR/IP list.
+func configureTrustedProxies(r *gin.Engine) {
+	v := strings.TrimSpace(os.Getenv("FORGEPANEL_TRUSTED_PROXIES"))
+	if v == "" {
+		_ = r.SetTrustedProxies(nil)
+		return
+	}
+	var list []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			list = append(list, p)
+		}
+	}
+	_ = r.SetTrustedProxies(list)
+}
+
 func (s *Server) routes() {
 	r := s.router
+	configureTrustedProxies(r)
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 
 	api := r.Group("/api")
@@ -261,12 +284,20 @@ func (s *Server) routes() {
 			admin.POST("/groups", s.handleCreateGroup)
 			admin.GET("/users", s.handleListUsers)
 			admin.POST("/users", s.handleCreateUser)
+			admin.GET("/quota", s.handleQuota)
 			admin.DELETE("/users/:id", s.handleDeleteUser)
 			admin.GET("/stats", s.handleStats)
 			admin.GET("/engines", s.handleEngines)
 			admin.GET("/engines/config", s.handleEngineConfig)
 			admin.POST("/engines/validate", s.handleEngineValidate)
-			admin.POST("/engines/reload", func(c *gin.Context) { s.reloadEngines(); c.JSON(200, s.engine.Status()) })
+			admin.POST("/engines/reload", func(c *gin.Context) {
+				if s.engine == nil {
+					s.engineUnavailable(c)
+					return
+				}
+				s.reloadEngines()
+				c.JSON(200, s.engine.Status())
+			})
 			admin.GET("/domains/check", s.handleDomainCheck)
 			admin.GET("/domains/ns-wizard", s.handleNSWizard)
 			admin.POST("/certs/import", s.handleCertImport)
@@ -293,6 +324,8 @@ func (s *Server) routes() {
 			admin.POST("/2fa/setup", s.handle2FASetup)
 			admin.POST("/2fa/enable", s.handle2FAEnable)
 			admin.POST("/2fa/disable", s.handle2FADisable)
+			admin.GET("/2fa/recovery", s.handle2FARecoveryStatus)
+			admin.POST("/2fa/recovery/regenerate", s.handle2FARecoveryRegenerate)
 			admin.POST("/change-password", s.handleChangePassword)
 			admin.GET("/panel-address", s.handlePanelAddress)
 			admin.POST("/panel-address", s.handlePanelAddressUpdate)

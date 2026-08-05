@@ -43,7 +43,10 @@ func TestCheckMatchesIP(t *testing.T) {
 }
 
 func TestNSDelegation(t *testing.T) {
-	recs := NSDelegation("t.example.com", "203.0.113.5")
+	recs, err := NSDelegation("t.example.com", "203.0.113.5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(recs) != 2 {
 		t.Fatalf("expected 2 records, got %d", len(recs))
 	}
@@ -52,5 +55,43 @@ func TestNSDelegation(t *testing.T) {
 	}
 	if recs[1].Type != "NS" || recs[1].Name != "t.example.com" || recs[1].Value != "ns1.example.com" {
 		t.Fatalf("bad NS record: %+v", recs[1])
+	}
+}
+
+func TestNSDelegationCases(t *testing.T) {
+	// The core regression: example.com must NOT yield ns1.com.
+	recs, err := NSDelegation("example.com", "203.0.113.9")
+	if err != nil {
+		t.Fatalf("example.com: %v", err)
+	}
+	if recs[0].Name != "ns1.example.com" || recs[1].Value != "ns1.example.com" {
+		t.Fatalf("example.com should delegate to ns1.example.com, got %+v", recs)
+	}
+	if recs[0].Name == "ns1.com" {
+		t.Fatal("regression: produced ns1.com")
+	}
+	// Multi-label public suffix.
+	recs, err = NSDelegation("example.co.uk", "203.0.113.9")
+	if err != nil || recs[0].Name != "ns1.example.co.uk" {
+		t.Fatalf("co.uk: %v %+v", err, recs)
+	}
+	// IPv6 => AAAA glue.
+	recs, err = NSDelegation("example.com", "2001:db8::1")
+	if err != nil || recs[0].Type != "AAAA" {
+		t.Fatalf("ipv6 glue: %v %+v", err, recs)
+	}
+	// Uppercase + trailing dot normalize.
+	recs, _ = NSDelegation("Example.COM.", "203.0.113.9")
+	if recs[1].Name != "example.com" {
+		t.Fatalf("normalize: %+v", recs)
+	}
+	// Invalid inputs.
+	for _, bad := range []string{"", "com", "co.uk", "localhost"} {
+		if _, err := NSDelegation(bad, "203.0.113.9"); err == nil {
+			t.Fatalf("expected error for zone %q", bad)
+		}
+	}
+	if _, err := NSDelegation("example.com", "not-an-ip"); err == nil {
+		t.Fatal("expected error for bad IP")
 	}
 }

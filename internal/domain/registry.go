@@ -7,9 +7,12 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // Role is what a domain is used for (spec §7).
@@ -80,17 +83,44 @@ func (r *Registry) Check(ctx context.Context, domainName, expectIP string, now t
 
 // NSDelegation returns the exact glue/NS records an operator must create to
 // delegate a ForgeDNS tunnel zone to this server (spec §5.3 NS wizard).
-func NSDelegation(zone, serverIP string) []Record {
-	zone = strings.TrimSuffix(zone, ".")
-	parent := zone
-	if i := strings.Index(zone, "."); i >= 0 {
-		parent = zone[i+1:]
+func NSDelegation(zone, serverIP string) ([]Record, error) {
+	zone = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(zone), "."))
+	if zone == "" || !strings.Contains(zone, ".") {
+		return nil, fmt.Errorf("domain: invalid zone %q", zone)
 	}
-	ns := "ns1." + parent
+	// A public suffix (a TLD like "com" or a multi-label one like "co.uk") cannot
+	// be delegated — this is what previously produced "ns1.com" for "example.com".
+	if suffix, icann := publicsuffix.PublicSuffix(zone); icann && suffix == zone {
+		return nil, fmt.Errorf("domain: %q is a public suffix and cannot be delegated", zone)
+	}
+	// The nameserver host lives under the REGISTRABLE domain (eTLD+1), so a
+	// subdomain zone like "t.example.com" delegates to "ns1.example.com" and a
+	// bare "example.com" delegates to "ns1.example.com" — never "ns1.com".
+	reg, err := publicsuffix.EffectiveTLDPlusOne(zone)
+	if err != nil {
+		return nil, fmt.Errorf("domain: %q has no registrable domain: %w", zone, err)
+	}
+	ip := net.ParseIP(serverIP)
+	if ip == nil {
+		return nil, fmt.Errorf("domain: invalid server IP %q", serverIP)
+	}
+	// AAAA glue for an IPv6 address, A for IPv4.
+	glueType := "A"
+	if ip.To4() == nil {
+		glueType = "AAAA"
+	}
+	ns := "ns1." + reg
+	// Glue is strictly required only when the NS host is in-bailiwick (within the
+	// delegated zone); otherwise the A/AAAA record belongs in the registrable
+	// zone. We emit it either way and label which case applies.
+	note := "glue: the in-bailiwick NS host → this server"
+	if ns != zone && !strings.HasSuffix(ns, "."+zone) {
+		note = "A/AAAA for the out-of-bailiwick NS host → this server"
+	}
 	return []Record{
-		{Type: "A", Name: ns, Value: serverIP, Note: "glue: the authoritative NS host → this server"},
-		{Type: "NS", Name: zone, Value: ns, Note: "delegate the tunnel zone to that NS"},
-	}
+		{Type: glueType, Name: ns, Value: ip.String(), Note: note},
+		{Type: "NS", Name: zone, Value: ns, Note: "delegate the zone to that NS"},
+	}, nil
 }
 
 // Record is a DNS record instruction.
