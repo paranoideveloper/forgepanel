@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Suite & Complex Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+
+      - name: Install Staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Go Code Formatting Check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "The following files are not formatted with gofmt:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Staticcheck Analysis
+        run: staticcheck ./...
+
+      - name: Shell Installer Syntax Check
+        run: bash -n install.sh
+
+      - name: Run Full Unit, Integration & Complex Lifecycle Tests (with Race Detector)
+        run: go test -race -v -cover ./...
+
+      - name: Build All Binaries
+        run: make build
+
+      - name: Docker Build Verification
+        run: docker build -t forgepanel:ci .

@@ -89,6 +89,9 @@ func (s *Store) InboundByID(id uint) (*Inbound, error) {
 // DeleteInbound removes an inbound.
 func (s *Store) DeleteInbound(id uint) error { return s.db.Delete(&Inbound{}, id).Error }
 
+// SaveInbound updates an inbound.
+func (s *Store) SaveInbound(in *Inbound) error { return s.db.Save(in).Error }
+
 // --- groups & users -------------------------------------------------------
 
 // CreateGroup persists a group.

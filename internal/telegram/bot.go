@@ -128,7 +128,7 @@ func (b *Bot) Handle(chatID int64, text string) {
 		if limit > 0 {
 			lim = fmt.Sprintf("%.1f GB", limit)
 		}
-		b.sender.Send(chatID, fmt.Sprintf("*%s*\nstatus: %s\ntraffic: %.2f / %s", name, status, used, lim))
+		b.sender.Send(chatID, fmt.Sprintf("*%s*\nstatus: %s\ntraffic: %.2f / %s", escapeMarkdown(name), escapeMarkdown(status), used, lim))
 	case "/sub":
 		if len(args) == 0 {
 			b.sender.Send(chatID, "usage: /sub <token>")
@@ -183,4 +183,9 @@ func (b *Bot) getUpdates(ctx context.Context) ([]update, error) {
 		return nil, err
 	}
 	return out.Result, nil
+}
+
+func escapeMarkdown(s string) string {
+	r := strings.NewReplacer("_", "\\_", "*", "\\*", "`", "\\`", "[", "\\[")
+	return r.Replace(s)
 }

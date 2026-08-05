@@ -96,6 +96,9 @@ func VerifyTOTPStep(secret, code string, now time.Time, lastUsed int64) (int64, 
 	counter := int64(uint64(now.Unix()) / totpPeriod)
 	for _, delta := range []int64{0, -1, 1} {
 		step := counter + delta
+		if step < 0 {
+			continue
+		}
 		want, err := totpAt(secret, uint64(step))
 		if err != nil {
 			return 0, false
