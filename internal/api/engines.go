@@ -150,3 +150,18 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 	_, results := s.engine.Validate(s.enabledInboundNodes())
 	c.JSON(200, results)
 }
+
+// enabledInboundSpecsForNodeAddress returns inbound specs filtered for a specific node address.
+func (s *Server) enabledInboundSpecsForNodeAddress(addr string) []engine.InboundSpec {
+	all := s.enabledInboundSpecs()
+	if addr == "" {
+		return all
+	}
+	var out []engine.InboundSpec
+	for _, sp := range all {
+		if sp.Node != nil && (sp.Node.Address == "" || sp.Node.Address == "0.0.0.0" || sp.Node.Address == addr) {
+			out = append(out, sp)
+		}
+	}
+	return out
+}

@@ -209,3 +209,9 @@ func (s *Scheduler) userForEmail(email string) *store.User {
 	}
 	return u
 }
+
+// PollAndAccountForTest exposes pollAndAccount for internal package testing.
+func (s *Scheduler) PollAndAccountForTest() { s.pollAndAccount() }
+
+// SweepAtForTest exposes sweepAt for internal package testing.
+func (s *Scheduler) SweepAtForTest(now time.Time) { s.sweepAt(now) }
