@@ -138,3 +138,58 @@ func TestRollbackRestoreAndClear(t *testing.T) {
 		t.Fatal("ClearRollback did not remove the bak")
 	}
 }
+
+func TestConfigRollbackAndClone(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FORGEPANEL_DATA", dir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	prev := ClonePanel(cfg.Panel())
+	if prev.Port != cfg.Panel().Port {
+		t.Fatalf("ClonePanel mismatch: %d != %d", prev.Port, cfg.Panel().Port)
+	}
+
+	cfg.Panel().Port = 9999
+	if err := cfg.SavePanel(); err != nil {
+		t.Fatalf("SavePanel: %v", err)
+	}
+
+	if err := cfg.WriteRollback(&prev); err != nil {
+		t.Fatalf("WriteRollback: %v", err)
+	}
+
+	if !RestoreRollback(dir) {
+		t.Fatal("RestoreRollback returned false, expected true")
+	}
+
+	cfgReloaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load reloaded: %v", err)
+	}
+	if cfgReloaded.Panel().Port == 9999 {
+		t.Fatal("RestoreRollback did not revert panel port")
+	}
+
+	ClearRollback(dir)
+	if RestoreRollback(dir) {
+		t.Fatal("RestoreRollback expected false after ClearRollback")
+	}
+}
+
+func TestEnvBool(t *testing.T) {
+	t.Setenv("TEST_BOOL_1", "1")
+	t.Setenv("TEST_BOOL_TRUE", "true")
+	t.Setenv("TEST_BOOL_YES", "yes")
+	t.Setenv("TEST_BOOL_FALSE", "0")
+
+	if !envBool("TEST_BOOL_1") || !envBool("TEST_BOOL_TRUE") || !envBool("TEST_BOOL_YES") {
+		t.Fatal("envBool expected true")
+	}
+	if envBool("TEST_BOOL_FALSE") || envBool("TEST_BOOL_NONEXISTENT") {
+		t.Fatal("envBool expected false")
+	}
+}

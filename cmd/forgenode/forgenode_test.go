@@ -93,3 +93,69 @@ func TestNodeAgentRejectsInvalidConfig(t *testing.T) {
 		t.Fatalf("expected lastCfg to be empty, got %q", agent.lastCfg)
 	}
 }
+
+func TestNodeAgentRegisterAndHeartbeatErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Server returning HTTP 500 error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	agent := &NodeAgent{
+		panel:   server.URL,
+		token:   "test-token",
+		dataDir: dir,
+	}
+
+	if err := agent.register(); err == nil {
+		t.Fatal("expected error on 500 status code for register")
+	}
+
+	if _, err := agent.heartbeat(); err == nil {
+		t.Fatal("expected error on 500 status code for heartbeat")
+	}
+
+	// Invalid URL test
+	invalidAgent := &NodeAgent{
+		panel:   "http://invalid.localhost.nonexistent:9999",
+		token:   "test-token",
+		dataDir: dir,
+	}
+	if err := invalidAgent.register(); err == nil {
+		t.Fatal("expected network error for invalid panel URL")
+	}
+}
+
+func TestNodeAgentStepAndProcessLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	var heartbeatCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		heartbeatCalled = true
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"xray_config": `{"inbounds":[]}`})
+	}))
+	defer server.Close()
+
+	dummyBin := filepath.Join(dir, "fake-xray-ok")
+	script := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(dummyBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := &NodeAgent{
+		panel:   server.URL,
+		token:   "test-token",
+		dataDir: dir,
+		xrayBin: dummyBin,
+	}
+
+	agent.step()
+	if !heartbeatCalled {
+		t.Fatal("expected step to invoke heartbeat")
+	}
+
+	// Re-applying same config should skip restart
+	agent.applyConfig(`{"inbounds":[]}`)
+}

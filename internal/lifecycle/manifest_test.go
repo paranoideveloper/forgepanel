@@ -110,3 +110,18 @@ func TestUpgradeRetainsOriginalOwnershipProof(t *testing.T) {
 		t.Fatalf("created resource was not removed: %v", err)
 	}
 }
+
+func TestLegacyInventoryAndManagedRule(t *testing.T) {
+	dir := t.TempDir()
+	m := LegacyInventory(dir)
+	if m == nil || m.InstallMethod != "legacy" {
+		t.Fatalf("LegacyInventory unexpected: %+v", m)
+	}
+
+	if !IsManagedRule("forgepanel-porthop-rule1") {
+		t.Fatal("IsManagedRule expected true")
+	}
+	if IsManagedRule("other-rule") {
+		t.Fatal("IsManagedRule expected false")
+	}
+}

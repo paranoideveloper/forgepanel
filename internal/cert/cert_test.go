@@ -2,6 +2,7 @@ package cert
 
 import (
 	"crypto/ecdsa"
+	"crypto/tls"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
@@ -94,4 +95,68 @@ func TestCachedInfoWildcard(t *testing.T) {
 	if _, ok := s.CachedInfo("nope.other.com"); ok {
 		t.Fatal("unrelated name must not match")
 	}
+}
+
+func TestStore_TLSConfigAndCachedInfo(t *testing.T) {
+	s := NewStore(t.TempDir(), true, nil)
+	cpem, kpem := selfSigned(t, "api.example.com")
+	if _, err := s.Import(cpem, kpem); err != nil {
+		t.Fatal(err)
+	}
+
+	info, ok := s.CachedInfo("api.example.com")
+	if !ok || len(info.Domains) != 1 || info.Domains[0] != "api.example.com" {
+		t.Fatalf("CachedInfo failed: %+v", info)
+	}
+
+	_, ok = s.CachedInfo("nonexistent.com")
+	if ok {
+		t.Fatal("CachedInfo expected false for nonexistent domain")
+	}
+
+	tlsCfg := s.TLSConfig()
+	if tlsCfg == nil || tlsCfg.GetCertificate == nil {
+		t.Fatal("TLSConfig failed to produce valid config")
+	}
+
+	if s.ACMEManager() == nil {
+		t.Fatal("ACMEManager returned nil")
+	}
+}
+
+func TestEnsureSelfSigned(t *testing.T) {
+	dir := t.TempDir()
+	crt, key, err := EnsureSelfSigned(dir)
+	if err != nil {
+		t.Fatalf("EnsureSelfSigned failed: %v", err)
+	}
+
+	if crt == "" || key == "" {
+		t.Fatal("empty cert or key path returned")
+	}
+
+	// Calling again should reuse existing files
+	crt2, key2, err := EnsureSelfSigned(dir)
+	if err != nil || crt2 != crt || key2 != key {
+		t.Fatalf("EnsureSelfSigned reuse failed: %v", err)
+	}
+}
+
+func TestTLSConfigGetCertificate(t *testing.T) {
+	s := NewStore(t.TempDir(), true, nil)
+	cpem, kpem := selfSigned(t, "api.example.com")
+	if _, err := s.Import(cpem, kpem); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := s.TLSConfig()
+	hello := &tls.ClientHelloInfo{ServerName: "api.example.com"}
+	cert, err := cfg.GetCertificate(hello)
+	if err != nil || cert == nil {
+		t.Fatalf("GetCertificate failed for imported domain: %v", err)
+	}
+
+	// Unknown domain should trigger fallback or error
+	helloUnknown := &tls.ClientHelloInfo{ServerName: "unknown.domain.org"}
+	_, _ = cfg.GetCertificate(helloUnknown)
 }

@@ -61,3 +61,10 @@ func TestBotRouting(t *testing.T) {
 		t.Fatal("empty token must be disabled")
 	}
 }
+
+func TestBot_SendEmptyToken(t *testing.T) {
+	b := New("", nil, fakeData{})
+	if err := b.Send(123, "test"); err != nil {
+		t.Fatalf("expected nil error for empty token, got %v", err)
+	}
+}

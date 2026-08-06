@@ -76,3 +76,122 @@ func TestResellerIsolation(t *testing.T) {
 		t.Fatalf("owner should see all users, got %d", len(all))
 	}
 }
+
+func TestStore_NodeAndZoneOperations(t *testing.T) {
+	s := testStore(t)
+
+	n := &Node{Name: "Node1", Address: "10.0.0.1", EnrollToken: "sec123"}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	nodes, err := s.ListNodes()
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("ListNodes: %v, count=%d", err, len(nodes))
+	}
+
+	byID, err := s.NodeByID(n.ID)
+	if err != nil || byID.Name != "Node1" {
+		t.Fatalf("NodeByID: %v", err)
+	}
+
+	byToken, err := s.NodeByToken("sec123")
+	if err != nil || byToken.ID != n.ID {
+		t.Fatalf("NodeByToken: %v", err)
+	}
+
+	n.Name = "Node1-Updated"
+	if err := s.SaveNode(n); err != nil {
+		t.Fatalf("SaveNode: %v", err)
+	}
+
+	// Traffic purging tests
+	if err := s.SaveNodeClientTraffic(&NodeClientTraffic{NodeID: n.ID, Username: "bob", LastRecorded: 100}); err != nil {
+		t.Fatalf("SaveNodeClientTraffic: %v", err)
+	}
+	tr, err := s.GetNodeClientTraffic(n.ID, "bob")
+	if err != nil || tr.LastRecorded != 100 {
+		t.Fatalf("GetNodeClientTraffic: %v", err)
+	}
+	if err := s.PurgeUserNodeClientTraffic("bob"); err != nil {
+		t.Fatalf("PurgeUserNodeClientTraffic: %v", err)
+	}
+	if err := s.PurgeNodeClientTraffic(n.ID); err != nil {
+		t.Fatalf("PurgeNodeClientTraffic: %v", err)
+	}
+
+	if err := s.DeleteNode(n.ID); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+
+	// Zone tests
+	z := &ForgeDNSZone{Zone: "example.com", Enabled: true}
+	if err := s.CreateZone(z); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	zones, err := s.ListZones()
+	if err != nil || len(zones) != 1 {
+		t.Fatalf("ListZones: %v", err)
+	}
+	zByID, err := s.ZoneByID(z.ID)
+	if err != nil || zByID.Zone != "example.com" {
+		t.Fatalf("ZoneByID: %v", err)
+	}
+	z.Zone = "example.org"
+	if err := s.SaveZone(z); err != nil {
+		t.Fatalf("SaveZone: %v", err)
+	}
+	if err := s.DeleteZone(z.ID); err != nil {
+		t.Fatalf("DeleteZone: %v", err)
+	}
+}
+
+func TestStore_AdminAndSettings(t *testing.T) {
+	s := testStore(t)
+
+	a := &Admin{Username: "admin", PasswordHash: "hash", Role: RoleOwner}
+	if err := s.CreateAdmin(a); err != nil {
+		t.Fatalf("CreateAdmin: %v", err)
+	}
+
+	count, err := s.CountAdmins()
+	if err != nil || count != 1 {
+		t.Fatalf("CountAdmins: %v, count=%d", err, count)
+	}
+
+	gotA, err := s.AdminByUsername("admin")
+	if err != nil || gotA.ID != a.ID {
+		t.Fatalf("AdminByUsername: %v", err)
+	}
+
+	gotByID, err := s.AdminByID(a.ID)
+	if err != nil || gotByID.Username != "admin" {
+		t.Fatalf("AdminByID: %v", err)
+	}
+
+	if err := s.BumpAdminSessionEpoch(a.ID); err != nil {
+		t.Fatalf("BumpAdminSessionEpoch: %v", err)
+	}
+	epoch, err := s.AdminSessionEpoch(a.ID)
+	if err != nil || epoch != 1 {
+		t.Fatalf("AdminSessionEpoch: %d, %v", epoch, err)
+	}
+
+	claimed, err := s.ClaimTOTPStep(a.ID, 1000)
+	if err != nil || !claimed {
+		t.Fatalf("ClaimTOTPStep: %v, %v", claimed, err)
+	}
+	claimedAgain, _ := s.ClaimTOTPStep(a.ID, 1000)
+	if claimedAgain {
+		t.Fatalf("ClaimTOTPStep expected false for duplicate step")
+	}
+
+	if err := s.SetSetting("key1", "val1"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	if v := s.GetSetting("key1"); v != "val1" {
+		t.Fatalf("GetSetting: %s", v)
+	}
+
+	s.Audit(&AuditLog{AdminID: a.ID, Action: "test", Actor: "admin"})
+}

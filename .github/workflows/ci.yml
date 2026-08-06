@@ -1,4 +1,4 @@
-name: CI
+name: CI & Quality Assurance
 
 on:
   push:
@@ -6,11 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
-jobs:
-  test:
-    name: Test Suite & Complex Verification
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
+jobs:
+  code-hygiene:
+    name: Code Hygiene & Static Analysis
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,33 +21,212 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-          check-latest: true
-
-      - name: Install Staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+          cache: true
 
       - name: Go Code Formatting Check
         run: |
-          if [ -n "$(gofmt -l .)" ]; then
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
             echo "The following files are not formatted with gofmt:"
-            gofmt -l .
+            echo "$UNFORMATTED"
             exit 1
           fi
 
-      - name: Go Vet
+      - name: Go Mod Tidy Check
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go.mod or go.sum is out of sync. Please run 'go mod tidy' and commit."
+            exit 1
+          fi
+
+      - name: Go Vet Analysis
         run: go vet ./...
 
       - name: Staticcheck Analysis
-        run: staticcheck ./...
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
 
-      - name: Shell Installer Syntax Check
-        run: bash -n install.sh
+      - name: Shell Installer Linting
+        uses: ludeeus/action-shellcheck@master
+        with:
+          sc-files: 'install.sh'
 
-      - name: Run Full Unit, Integration & Complex Lifecycle Tests (with Race Detector)
-        run: go test -race -v -cover ./...
+      - name: GoReleaser Config Check
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          args: check
+
+  test-core-protocols:
+    name: Test Suite: Core & Protocol Engines
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Core & Protocol Engine Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/core/... ./internal/protocol/...
+
+  test-api-store-auth:
+    name: Test Suite: API, Store & Auth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run API, Store & Auth Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/api/... ./internal/store/... ./internal/auth/...
+
+  test-forgedns-stack:
+    name: Test Suite: ForgeDNS Stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run ForgeDNS Stack Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/forgedns/...
+
+  test-cmd-binaries:
+    name: Test Suite: CLI & Node Agent Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run CLI & Node Binary Tests
+        run: go test -shuffle=on -count=1 -v -cover ./cmd/...
+
+  test-system-services:
+    name: Test Suite: System Services & Modules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run System Services Tests
+        run: |
+          go test -shuffle=on -count=1 -v -cover \
+            ./internal/deploy/... ./internal/domain/... ./internal/backup/... \
+            ./internal/cert/... ./internal/config/... ./internal/job/... \
+            ./internal/lifecycle/... ./internal/migrate/... ./internal/telegram/... ./internal/version/...
+
+  race-detector:
+    name: Concurrency & Data Race Detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Race Detector
+        run: go test -race -v ./...
+
+  govulncheck:
+    name: Security Vulnerability Audit (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run Security Analysis
+        run: govulncheck ./...
+
+  e2e-smoke-test:
+    name: End-to-End Binary Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
 
       - name: Build All Binaries
         run: make build
 
-      - name: Docker Build Verification
+      - name: Verify Binary Execution
+        run: |
+          ./bin/forgectl version
+          ./bin/forgenode --version || true
+
+  cross-compile:
+    name: Cross-Compilation Matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64, 386]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Build Binaries (${{ matrix.goos }}/${{ matrix.goarch }})
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgepanel-${{ matrix.goarch }} ./cmd/forgepanel
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgectl-${{ matrix.goarch }} ./cmd/forgectl
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgenode-${{ matrix.goarch }} ./cmd/forgenode
+
+  docker-build:
+    name: Docker Container Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
         run: docker build -t forgepanel:ci .

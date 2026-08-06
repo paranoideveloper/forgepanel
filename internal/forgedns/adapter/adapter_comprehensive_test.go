@@ -32,3 +32,29 @@ func TestAdapter_ForgeAndNamed(t *testing.T) {
 		t.Fatalf("empty Names()")
 	}
 }
+
+func TestAdapter_VariantEncodings(t *testing.T) {
+	adapters := []string{"stormdns", "masterdns", "cottendns"}
+	for _, name := range adapters {
+		ad, err := Get(name)
+		if err != nil || ad == nil {
+			t.Fatalf("Get(%s) failed: %v", name, err)
+		}
+		if ad.Name() != name {
+			t.Fatalf("unexpected name: %s", ad.Name())
+		}
+		caps := ad.Caps()
+		if caps.Name != name {
+			t.Fatalf("caps name mismatch: %s != %s", caps.Name, name)
+		}
+
+		q := new(dns.Msg)
+		q.SetQuestion("t0.example.com.", dns.TypeTXT)
+		_, _ = ad.Decode("example.com", q)
+	}
+
+	_, err := Get("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent adapter")
+	}
+}
