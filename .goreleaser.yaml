@@ -26,7 +26,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
       - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
       - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
 
@@ -43,10 +43,10 @@ builds:
     # (cmd/forgectl/version.go); `forgectl version` prints it.
     ldflags:
       - -s -w
-      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
       - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
       - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
-      - -X main.version={{ .Version }}
+      - -X main.version={{ .Tag }}
 
   - id: forgenode
     main: ./cmd/forgenode
@@ -59,7 +59,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Version }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
       - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
       - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
 
@@ -145,9 +145,6 @@ release:
     name: forgepanel
   draft: false
   prerelease: auto
-  extra_files:
-    - glob: ./install.sh
-    - glob: ./install.sh.sha256
   footer: |
     ## Install
 

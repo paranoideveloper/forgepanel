@@ -96,11 +96,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Publish install.sh alongside its checksum, so the documented install
-      # path can be verified before it is run as root.
-      - name: Checksum install.sh
-        run: sha256sum install.sh > install.sh.sha256
-
       - uses: sigstore/cosign-installer@v3
       - uses: anchore/sbom-action/download-syft@v0
 
@@ -112,6 +107,16 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Keep generated release-only files out of the git worktree before
+      # GoReleaser validates its source state, then upload them to the release.
+      - name: Upload verified installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          sha256sum install.sh > install.sh.sha256
+          gh release upload "$VERSION" install.sh install.sh.sha256 --clobber
 
   # ---------------------------------------------------------------------------
   # Multi-arch image -> GHCR, from the same commit as the binaries.

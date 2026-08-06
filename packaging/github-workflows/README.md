@@ -1,17 +1,16 @@
 # GitHub Actions workflows
 
-These are the maintained source copies for CI and release automation. The active
-release workflow is also committed at `.github/workflows/release.yml`; keep the
-two release files synchronized when changing the release process. GitHub rejects
-a workflow change when the credential lacks workflow permission:
+These live here rather than under `.github/workflows/` because the token this
+repository is pushed with does not hold the `workflow` scope, and GitHub rejects
+any push that creates or modifies a workflow file without it:
 
 ```
 ! [remote rejected] main -> main (refusing to allow a Personal Access Token to
   create or update workflow `.github/workflows/ci.yml` without `workflow` scope)
 ```
 
-The copy in this directory is inert; the file under `.github/workflows/` is what
-GitHub Actions runs.
+**They are inert until copied into place.** Nothing runs on push or on a tag
+while they sit here.
 
 ## Activating them
 
