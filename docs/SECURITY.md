@@ -324,5 +324,5 @@ waiver.
   panel master secret; tested backup→wipe→restore cycle; wrong-key rejected.
 - **Deployment**: distroless non-root container, `no-new-privileges`,
   `CAP_NET_BIND_SERVICE` only; systemd unit with `ProtectSystem=strict`.
-- **Dependencies pinned** to go1.24-compatible versions; `govulncheck`/`gosec`
+- **Dependencies pinned** to go1.25-compatible versions; `govulncheck`/`gosec`
   are intended CI gates.

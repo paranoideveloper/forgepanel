@@ -13,7 +13,7 @@
 # To build from source instead, uncomment `build: .` and drop the tag.
 services:
   forgepanel:
-    image: ghcr.io/paranoideveloper/forgepanel:v1.0.0
+    image: ghcr.io/paranoideveloper/forgepanel:${FORGEPANEL_VERSION:-v1.2.0}
     # build: .
     container_name: forgepanel
     restart: unless-stopped

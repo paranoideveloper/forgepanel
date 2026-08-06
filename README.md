@@ -23,49 +23,108 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 - **Import** — pull existing inbounds in from another panel's SQLite database.
 - **Ships anywhere** — a single static binary, a systemd service, or Docker.
 
-## Quick install (Linux, one command)
+## Install
+
+Every published mode uses the same release version. Replace `v1.2.0` with the
+version you intend to run and keep it pinned in production.
+
+### Verified Linux installer (recommended)
+
+For a systemd VPS, fetch the installer and its checksum before giving it root
+access. It installs the three matching binaries, records ownership in an
+installation manifest, starts the service, and prints the one-time setup token.
 
 ```bash
-VERSION=v1.0.0
-curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh
-curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh.sha256
+VERSION=v1.2.0
+BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
+curl -fsSLO "$BASE/install.sh"
+curl -fsSLO "$BASE/install.sh.sha256"
 sha256sum -c install.sh.sha256 && sudo bash install.sh
 ```
 
-Two steps rather than a pipe into a root shell, on purpose: the installer is
-published with a checksum for each release, so verify it before running it. See
-[docs/INSTALL.md](docs/INSTALL.md).
+Use `sudo bash install.sh --update`, `sudo forgectl update --yes`, or
+`sudo forgectl repair` for lifecycle operations. `sudo forgectl uninstall`
+preserves data by default; `--purge --yes` is explicit.
 
-The installer downloads the latest release binary, creates a `forgepanel` systemd service, starts it, and prints your **panel URL** and a **one-time setup token**. Open the URL and create your administrator account with that token — no password is generated for you. It walks you through the panel port and (optional) domain/HTTPS with plain, coloured prompts; add `--tui` for a full-screen dialog UI.
+### Debian and Ubuntu package
 
-Then open the URL it prints (e.g. `http://YOUR_SERVER_IP:2053/panel/<secret>`) and complete first-run setup.
+```bash
+VERSION=v1.2.0
+ARCH=$(dpkg --print-architecture)       # amd64 or arm64
+ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.deb
+curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
+sudo apt install "./$ASSET"
+```
 
-**This one command is the recommended install** — it needs no Docker.
+### Fedora, RHEL, Rocky, and AlmaLinux package
 
-## Docker
+```bash
+VERSION=v1.2.0
+case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
+ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.rpm
+curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
+sudo dnf install "./$ASSET"
+```
 
-Requires Docker **with the Compose plugin**. If `docker compose` reports `unknown command`, install it first — `apt-get install -y docker-compose-plugin` (Debian/Ubuntu) — or use the standalone `docker-compose` binary; the commands below fall back to it automatically.
+### Docker image
+
+```bash
+VERSION=v1.2.0
+docker volume create forgepanel-data
+docker run -d --name forgepanel --restart unless-stopped \
+  -p 2053:2053 -p 2054:2054 -p 2096:2096 \
+  -v forgepanel-data:/var/lib/forgepanel \
+  ghcr.io/paranoideveloper/forgepanel:$VERSION
+docker logs -f forgepanel
+```
+
+Publish ports `80` and `443` when using built-in ACME HTTPS, and add
+`--cap-add=NET_ADMIN` only for port-hopping or the affected ForgeDNS modes.
+
+### Docker Compose
+
+Requires Docker with the Compose plugin. The checked-in Compose file keeps data
+in a named volume and accepts an explicit image version.
+
+```bash
+VERSION=v1.2.0
+git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
+cd forgepanel
+FORGEPANEL_VERSION=$VERSION docker compose up -d
+docker compose logs -f forgepanel
+```
+
+### Standalone release binaries
+
+Use this mode for a foreground process, testing, or custom supervision. The
+systemd installer or package remains the supported VPS management path.
+
+```bash
+VERSION=v1.2.0
+ARCH=amd64                         # use arm64 on 64-bit ARM
+BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
+for bin in forgepanel forgectl forgenode; do
+  curl -fSLO "$BASE/$bin-linux-$ARCH"
+  chmod 0755 "$bin-linux-$ARCH"
+done
+FORGEPANEL_DATA="$PWD/forgepanel-data" ./forgepanel-linux-$ARCH
+```
+
+### Build from source
+
+Requires Go 1.25+ and is intended for development or a custom supervisor.
 
 ```bash
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-docker compose up -d      2>/dev/null || docker-compose up -d
-docker compose logs -f forgepanel 2>/dev/null || docker-compose logs -f forgepanel
-# ^ the container prints your panel URL + one-time setup token on first boot
+git checkout v1.2.0
+make build
+FORGEPANEL_DATA="$PWD/forgepanel-data" ./bin/forgepanel
 ```
 
-Then open the URL and create your admin account with the setup token.
-
-## Build from source
-
-Requires Go 1.24+.
-
-```bash
-git clone https://github.com/paranoideveloper/forgepanel.git
-cd forgepanel
-make build          # -> bin/forgepanel (server) + bin/forgectl (CLI)
-./bin/forgepanel    # first boot prints the panel URL + a one-time setup token
-```
+All modes print a panel URL and one-time setup token on first boot. Open that
+URL to create the first administrator account. Detailed deployment, migration,
+backup, and recovery instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## How it works
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 type NodeAgent struct {
@@ -30,6 +31,10 @@ type NodeAgent struct {
 }
 
 func main() {
+	if nodeVersionRequested(os.Args[1:]) {
+		fmt.Println(version.String("forgenode"))
+		return
+	}
 	panel := os.Getenv("PANEL")
 	token := os.Getenv("TOKEN")
 	if panel == "" || token == "" {
@@ -73,6 +78,10 @@ func main() {
 	for range ticker.C {
 		agent.step()
 	}
+}
+
+func nodeVersionRequested(args []string) bool {
+	return len(args) == 1 && (args[0] == "--version" || args[0] == "-v" || args[0] == "version")
 }
 
 func (a *NodeAgent) step() {

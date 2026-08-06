@@ -77,5 +77,5 @@ zone's `last_error` and recent logs say what the new config did wrong.
 inbound, and the user must be `active` (not limited/expired/disabled).
 
 **Build fails with "requires go >= 1.25".** Dependencies are pinned to
-go1.24-compatible versions; run `go mod tidy` with go1.24 and keep the `go 1.24`
+go1.25-compatible versions; run `go mod tidy` with go1.25 and keep the `go 1.25`
 directive.

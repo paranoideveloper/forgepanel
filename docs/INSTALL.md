@@ -13,7 +13,7 @@ checksum**. Fetch the pinned copy for the release you want and verify it before
 running it as root:
 
 ```bash
-VERSION=v1.0.0
+VERSION=v1.2.0
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh.sha256
 sha256sum -c install.sh.sha256 && sudo bash install.sh
@@ -87,7 +87,7 @@ docker run -d \
   --restart unless-stopped \
   -p 2053:2053 \
   -v forgepanel-data:/var/lib/forgepanel \
-  ghcr.io/paranoideveloper/forgepanel:v1.0.0
+  ghcr.io/paranoideveloper/forgepanel:v1.2.0
 ```
 
 Or with Compose — `docker-compose.yml` in the repository is a production example
@@ -128,11 +128,11 @@ are not looking.
 Images are signed with keyless Sigstore and ship build provenance and an SBOM:
 
 ```bash
-cosign verify ghcr.io/paranoideveloper/forgepanel:v1.0.0 \
+cosign verify ghcr.io/paranoideveloper/forgepanel:v1.2.0 \
   --certificate-identity-regexp '^https://github.com/paranoideveloper/forgepanel/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-docker buildx imagetools inspect ghcr.io/paranoideveloper/forgepanel:v1.0.0
+docker buildx imagetools inspect ghcr.io/paranoideveloper/forgepanel:v1.2.0
 ```
 
 ## From source
