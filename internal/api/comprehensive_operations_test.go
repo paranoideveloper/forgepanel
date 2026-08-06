@@ -140,6 +140,23 @@ func TestAPI_InboundAndAssignmentsFlow(t *testing.T) {
 		t.Fatalf("Inbound ID zero")
 	}
 
+	// 1b. Update Inbound
+	updateInboundReq := map[string]any{
+		"remark":   "vless-updated",
+		"protocol": "vless",
+		"port":     8443,
+		"flow":     "xtls-rprx-vision",
+	}
+	upBody, _ := json.Marshal(updateInboundReq)
+	upReq := httptest.NewRequest("PUT", "/api/admin/inbounds/"+strconv.FormatUint(uint64(inResp.ID), 10), bytes.NewReader(upBody))
+	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("Authorization", "Bearer "+token)
+	upW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(upW, upReq)
+	if upW.Code != http.StatusOK {
+		t.Fatalf("Update inbound expected 200, got %d: %s", upW.Code, upW.Body.String())
+	}
+
 	// 2. List Inbounds
 	req = httptest.NewRequest("GET", "/api/admin/inbounds", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

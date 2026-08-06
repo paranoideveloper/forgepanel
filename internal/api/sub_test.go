@@ -213,7 +213,6 @@ func TestValidTokenNotBlockedByAnotherSourcesGuessing(t *testing.T) {
 	}
 }
 
-
 func TestMultiLocationSubscriptionLinks(t *testing.T) {
 	s := dbServerT(t)
 

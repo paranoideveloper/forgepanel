@@ -53,7 +53,7 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		groupInbounds[g.ID] = []uint(g.InboundIDs)
 	}
 	for _, u := range users {
-		if u.Status != store.StatusActive {
+		if u.Status == store.StatusDisabled || u.Status == store.StatusExpired {
 			continue
 		}
 		seen := map[uint]bool{}
@@ -82,6 +82,11 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		n, err := in.Node()
 		if err != nil {
 			continue
+		}
+		if in.NodeID > 0 {
+			if node, err := s.db.NodeByID(in.NodeID); err == nil && node.Address != "" {
+				n.Address = node.Address
+			}
 		}
 		sp := engine.InboundSpec{Node: n}
 		for _, u := range byInbound[in.ID] {

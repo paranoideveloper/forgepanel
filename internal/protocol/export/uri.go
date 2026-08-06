@@ -419,6 +419,10 @@ func wireguardURI(n *model.Node) string {
 	// wireguard://<privkey-urlsafe>@host:port?publickey=&reserved=&address=&mtu=#tag
 	v := url.Values{}
 	w := n.WireGuard
+	priv := w.PrivateKey
+	if priv == "" {
+		priv = w.PeerPrivateKey
+	}
 	v.Set("publickey", w.PublicKey)
 	if w.PreSharedKey != "" {
 		v.Set("presharedkey", w.PreSharedKey)
@@ -432,7 +436,7 @@ func wireguardURI(n *model.Node) string {
 	if len(w.Reserved) == 3 {
 		v.Set("reserved", fmt.Sprintf("%d,%d,%d", w.Reserved[0], w.Reserved[1], w.Reserved[2]))
 	}
-	return "wireguard://" + url.QueryEscape(w.PrivateKey) + "@" + hostPort(n.Address, n.Port) + "?" + encodeQuery(v) + frag(n.Remark)
+	return "wireguard://" + url.QueryEscape(priv) + "@" + hostPort(n.Address, n.Port) + "?" + encodeQuery(v) + frag(n.Remark)
 }
 
 func brookURI(n *model.Node) (string, error) {

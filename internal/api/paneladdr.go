@@ -165,6 +165,9 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	if s.db != nil && req.Domain != nil {
+		_ = s.db.SetSetting("public_address", *req.Domain)
+	}
 	s.writePublicURLFile()
 	s.audit(c, "panel.address.update", result.New.Domain)
 	c.JSON(200, gin.H{

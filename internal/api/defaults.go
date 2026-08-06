@@ -253,6 +253,9 @@ func (s *Server) substituteAddr(n *model.Node, fallbackHost string) {
 		if s.db != nil {
 			pub = s.db.GetSetting("public_address")
 		}
+		if pub == "" && s.cfg != nil {
+			pub = s.cfg.Panel().Domain
+		}
 		if pub == "" {
 			pub = fallbackHost
 		}

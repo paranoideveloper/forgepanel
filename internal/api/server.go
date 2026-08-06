@@ -358,6 +358,7 @@ func (s *Server) routes() {
 			admin.GET("/me", s.handleMe)
 			admin.GET("/inbounds", s.handleListInbounds)
 			admin.POST("/inbounds", s.handleCreateInbound)
+			admin.PUT("/inbounds/:id", s.handleUpdateInbound)
 			admin.GET("/inbounds/:id/config", s.handleInboundConfig)
 			admin.GET("/inbounds/:id/porthop", s.handlePortHop)
 			admin.DELETE("/inbounds/:id", s.handleDeleteInbound)

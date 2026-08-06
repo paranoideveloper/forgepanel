@@ -181,6 +181,36 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 	c.JSON(201, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port})
 }
 
+func (s *Server) handleUpdateInbound(c *gin.Context) {
+	id := parseID(c)
+	in, err := s.db.InboundByID(id)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "inbound not found"})
+		return
+	}
+	var n model.Node
+	if err := c.ShouldBindJSON(&n); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	applyCreateDefaults(&n)
+	if err := n.Validate(); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := in.SetNode(&n); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.db.SaveInbound(in); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	s.audit(c, "inbound.update", strconv.FormatUint(uint64(id), 10))
+	s.startBackground(s.reloadEngines)
+	c.JSON(200, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port})
+}
+
 // handleInboundConfig returns the ready-to-use CLIENT config for one inbound with
 // the public address substituted: a wg-quick .conf for WireGuard, otherwise the
 // share URI. This is what the UI hands the user to connect.
@@ -506,6 +536,23 @@ func stampIdentity(n *model.Node, u *store.User) {
 	case model.ProtoTrojan, model.ProtoHysteria2, model.ProtoAnyTLS, model.ProtoShadowsocks:
 		if u.Password != "" {
 			n.Password = u.Password
+		}
+	case model.ProtoSOCKS, model.ProtoHTTP:
+		if u.Username != "" {
+			n.Username = u.Username
+		}
+		if u.Password != "" {
+			n.Password = u.Password
+		}
+	case model.ProtoSSH:
+		if n.SSH == nil {
+			n.SSH = &model.SSHOptions{}
+		}
+		if u.Username != "" {
+			n.SSH.User = u.Username
+		}
+		if u.Password != "" {
+			n.SSH.Password = u.Password
 		}
 	}
 	if n.Remark == "" {
