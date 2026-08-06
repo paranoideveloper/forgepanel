@@ -42,3 +42,75 @@ func TestApplyPersistsAndIgnoresFutureEnvironmentOverrides(t *testing.T) {
 		t.Fatalf("settings did not persist: %+v", check.Panel())
 	}
 }
+
+func TestSettingsService_ValidationAndErrors(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := config.LoadFromDataDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(cfg)
+	svc.PortOK = func(string, int) bool { return false } // Port in use
+
+	// Test nil config error
+	nilSvc := &Service{}
+	if _, err := nilSvc.Apply(Change{}); err == nil {
+		t.Fatal("expected error for nil config Service")
+	}
+
+	// Test invalid domain error
+	invalidDomain := "invalid_domain_name!"
+	if _, err := svc.Apply(Change{Domain: &invalidDomain}); err == nil {
+		t.Fatal("expected error for invalid domain")
+	}
+
+	// Test port in use error
+	port := 80
+	if _, err := svc.Apply(Change{Port: &port}); err == nil {
+		t.Fatal("expected error when port is not free")
+	}
+}
+
+func TestSettingsHelpers(t *testing.T) {
+	// PortFree test
+	_ = PortFree("127.0.0.1", 0)
+
+	// ResolveDomain test (localhost or invalid)
+	_, _, _ = ResolveDomain("127.0.0.1")
+
+	// Outbound IP helpers
+	_ = outboundIP4()
+	_ = outboundIP6()
+}
+
+func TestValidEmailAndApplyDetails(t *testing.T) {
+	if !ValidEmail("admin@example.com") || ValidEmail("invalid-email") {
+		t.Fatal("ValidEmail failed")
+	}
+
+	dir := t.TempDir()
+	cfg, err := config.LoadFromDataDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(cfg)
+	svc.PortOK = func(string, int) bool { return true }
+
+	email := "operator@domain.com"
+	bind := "127.0.0.1"
+	https := false
+
+	res, err := svc.Apply(Change{
+		ACMEEmail:    &email,
+		BindAddress:  &bind,
+		HTTPSEnabled: &https,
+	})
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	if res.New.ACME.Email != email || res.New.BindAddress != bind {
+		t.Fatalf("Apply result mismatch: %+v", res.New)
+	}
+}

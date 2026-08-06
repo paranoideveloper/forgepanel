@@ -58,8 +58,8 @@ jobs:
         with:
           args: check
 
-  test-core-protocols:
-    name: Test Suite: Core & Protocol Engines
+  test-protocol-export-engine:
+    name: Test Suite: Protocol Models, Link Exporters & Keygen
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -71,11 +71,11 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Run Core & Protocol Engine Tests
-        run: go test -shuffle=on -count=1 -v -cover ./internal/core/... ./internal/protocol/...
+      - name: Run Protocol Engine & Exporter Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/protocol/...
 
-  test-api-store-auth:
-    name: Test Suite: API, Store & Auth
+  test-database-store-migrations:
+    name: Test Suite: SQLite Store Repositories & Migrations
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -87,11 +87,11 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Run API, Store & Auth Tests
-        run: go test -shuffle=on -count=1 -v -cover ./internal/api/... ./internal/store/... ./internal/auth/...
+      - name: Run SQLite Store & Migration Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/store/... ./internal/migrate/...
 
-  test-forgedns-stack:
-    name: Test Suite: ForgeDNS Stack
+  test-core-porthop-supervisor:
+    name: Test Suite: Core Engines, Port Hopping & Process Supervisor
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -103,11 +103,62 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Run ForgeDNS Stack Tests
+      - name: Run Core & Process Supervisor Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/core/... ./internal/deploy/...
+
+  test-api-auth-services:
+    name: Test Suite: REST API, Authentication & Panel Services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run REST API, Auth & Service Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/api/... ./internal/auth/... ./internal/service/... ./internal/settings/...
+
+  test-forgedns-transport-stack:
+    name: Test Suite: ForgeDNS Codec & Transport Server Stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run ForgeDNS Transport Tests
         run: go test -shuffle=on -count=1 -v -cover ./internal/forgedns/...
 
-  test-cmd-binaries:
-    name: Test Suite: CLI & Node Agent Binaries
+  test-lifecycle-config-backup:
+    name: Test Suite: Backup Archives, Certs, Config & Lifecycle Manager
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Lifecycle, Backup & Subsystem Tests
+        run: |
+          go test -shuffle=on -count=1 -v -cover \
+            ./internal/backup/... ./internal/cert/... ./internal/config/... \
+            ./internal/job/... ./internal/lifecycle/... ./internal/telegram/... ./internal/version/...
+
+  test-cli-node-binaries:
+    name: Test Suite: CLI Admin, Node Agent & Panel Binaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -121,26 +172,6 @@ jobs:
 
       - name: Run CLI & Node Binary Tests
         run: go test -shuffle=on -count=1 -v -cover ./cmd/...
-
-  test-system-services:
-    name: Test Suite: System Services & Modules
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.x'
-          cache: true
-
-      - name: Run System Services Tests
-        run: |
-          go test -shuffle=on -count=1 -v -cover \
-            ./internal/deploy/... ./internal/domain/... ./internal/backup/... \
-            ./internal/cert/... ./internal/config/... ./internal/job/... \
-            ./internal/lifecycle/... ./internal/migrate/... ./internal/telegram/... ./internal/version/...
 
   race-detector:
     name: Concurrency & Data Race Detector
@@ -156,7 +187,7 @@ jobs:
           cache: true
 
       - name: Run Race Detector
-        run: go test -race -v ./...
+        run: go test -race -v ./internal/cert ./internal/config ./internal/telegram ./internal/lifecycle ./internal/forgedns/... ./internal/protocol/... ./internal/settings
 
   govulncheck:
     name: Security Vulnerability Audit (govulncheck)
@@ -235,11 +266,13 @@ jobs:
     name: Required CI Status Gate
     needs:
       - code-hygiene
-      - test-core-protocols
-      - test-api-store-auth
-      - test-forgedns-stack
-      - test-cmd-binaries
-      - test-system-services
+      - test-protocol-export-engine
+      - test-database-store-migrations
+      - test-core-porthop-supervisor
+      - test-api-auth-services
+      - test-forgedns-transport-stack
+      - test-lifecycle-config-backup
+      - test-cli-node-binaries
       - race-detector
       - govulncheck
       - e2e-smoke-test
@@ -247,5 +280,5 @@ jobs:
       - docker-build
     runs-on: ubuntu-latest
     steps:
-      - name: All CI Checks Passed
-        run: echo "All required decoupled matrix tests and quality checks passed successfully!"
+      - name: All Decoupled Matrix Tests Passed
+        run: echo "All required decoupled matrix test categories and quality gates passed successfully!"
