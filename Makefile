@@ -25,7 +25,10 @@ IMAGE ?= forgepanel:latest
 
 all: build
 
-build:
+web-build:
+	cd frontend && bun install && bun run build
+
+build: web-build
 	@mkdir -p $(BIN)
 	@for cmd in $(CMDS); do \
 	  echo "  build  $$cmd"; \
@@ -54,8 +57,11 @@ uninstall:
 	fi
 	@$(PREFIX)/bin/forgectl uninstall --keep-data
 
-check: vet test
+check: frontend-check vet test
 	@echo "make check passed"
+
+frontend-check:
+	cd frontend && bun run check && bun run test
 
 test:
 	$(GO) test ./... -count=1

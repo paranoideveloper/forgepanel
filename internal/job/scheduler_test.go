@@ -140,3 +140,25 @@ func TestResetDoesNotReviveExpired(t *testing.T) {
 		t.Fatalf("expired user must stay expired, got %s", got.Status)
 	}
 }
+
+func TestSchedulerStartStop(t *testing.T) {
+	s := New(Config{PollEvery: 5 * time.Millisecond, SweepEvery: 5 * time.Millisecond})
+	s.Start()
+	time.Sleep(15 * time.Millisecond)
+	s.Stop()
+}
+
+func TestUserEmailHelper(t *testing.T) {
+	tag := UserEmail(42)
+	if tag != "u42" {
+		t.Fatalf("UserEmail(42) = %s, want u42", tag)
+	}
+
+	if id := parseUserEmail("u42"); id != 42 {
+		t.Fatalf("parseUserEmail(u42) = %d, want 42", id)
+	}
+
+	if id := parseUserEmail("invalid"); id != 0 {
+		t.Fatalf("parseUserEmail(invalid) = %d, want 0", id)
+	}
+}

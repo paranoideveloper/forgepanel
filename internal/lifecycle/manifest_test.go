@@ -110,3 +110,101 @@ func TestUpgradeRetainsOriginalOwnershipProof(t *testing.T) {
 		t.Fatalf("created resource was not removed: %v", err)
 	}
 }
+
+func TestLegacyInventoryAndManagedRule(t *testing.T) {
+	dir := t.TempDir()
+	m := LegacyInventory(dir)
+	if m == nil || m.InstallMethod != "legacy" {
+		t.Fatalf("LegacyInventory unexpected: %+v", m)
+	}
+
+	if !IsManagedRule("forgepanel-porthop-rule1") {
+		t.Fatal("IsManagedRule expected true")
+	}
+	if IsManagedRule("other-rule") {
+		t.Fatal("IsManagedRule expected false")
+	}
+}
+
+func TestManifestEdgeCases(t *testing.T) {
+	dir := t.TempDir()
+
+	// Load non-existent file
+	if _, err := Load(filepath.Join(dir, "nonexistent.json")); err == nil {
+		t.Fatal("expected error loading nonexistent manifest")
+	}
+
+	// Load corrupt JSON
+	corruptPath := filepath.Join(dir, "corrupt.json")
+	_ = os.WriteFile(corruptPath, []byte("invalid json"), 0600)
+	if _, err := Load(corruptPath); err == nil {
+		t.Fatal("expected error loading corrupt manifest")
+	}
+
+	// Save to invalid path
+	m := NewManifest("docker", "v1.0.0", filepath.Join(dir, "data"))
+	fileAsDir := filepath.Join(dir, "regularfile")
+	_ = os.WriteFile(fileAsDir, []byte("x"), 0600)
+	if err := m.Save(filepath.Join(fileAsDir, "manifest.json")); err == nil {
+		t.Fatal("expected error saving to non-existent directory")
+	}
+}
+
+func TestAddOrUpdateResource(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManifest("docker", "v1.0.0", filepath.Join(dir, "data"))
+
+	filePath := filepath.Join(dir, "test.txt")
+	_ = os.WriteFile(filePath, []byte("v1"), 0644)
+
+	// Add resource
+	if err := m.AddOrUpdateResource("config", filePath, true, ""); err != nil {
+		t.Fatalf("AddOrUpdateResource failed: %v", err)
+	}
+	if len(m.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(m.Resources))
+	}
+
+	// Update existing resource
+	_ = os.WriteFile(filePath, []byte("v2"), 0644)
+	if err := m.AddOrUpdateResource("config", filePath, true, ""); err != nil {
+		t.Fatalf("AddOrUpdateResource update failed: %v", err)
+	}
+	if len(m.Resources) != 1 {
+		t.Fatalf("expected 1 resource after update, got %d", len(m.Resources))
+	}
+}
+
+func TestCleanupFilesDryRunAndForce(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	_ = os.Mkdir(dataDir, 0700)
+
+	m := NewManifest("curl", "v1", dataDir)
+
+	file1 := filepath.Join(dir, "file1.txt")
+	_ = os.WriteFile(file1, []byte("content1"), 0644)
+	_ = m.AddResource("file", file1, true, "")
+
+	// Dry run cleanup
+	summary, err := m.CleanupFiles(false, true, false)
+	if err != nil {
+		t.Fatalf("CleanupFiles dryRun failed: %v", err)
+	}
+	if len(summary.Actions) == 0 || summary.Actions[0].Action != "would_remove" {
+		t.Fatalf("expected would_remove in dryRun summary, got %+v", summary)
+	}
+	if _, err := os.Stat(file1); err != nil {
+		t.Fatal("dryRun should not actually delete file")
+	}
+
+	// Modify file and test force cleanup
+	_ = os.WriteFile(file1, []byte("modified"), 0644)
+	summaryForce, err := m.CleanupFiles(false, false, true)
+	if err != nil {
+		t.Fatalf("CleanupFiles force failed: %v", err)
+	}
+	if len(summaryForce.Actions) == 0 || summaryForce.Actions[0].Action != "removed" {
+		t.Fatalf("expected removed with force=true, got %+v", summaryForce)
+	}
+}

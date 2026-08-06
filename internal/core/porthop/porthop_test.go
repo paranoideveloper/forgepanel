@@ -53,3 +53,38 @@ func TestManualCommands(t *testing.T) {
 		t.Errorf("iptables manual commands missing: %v", ipt)
 	}
 }
+
+func TestManagerAndBackend(t *testing.T) {
+	m := New()
+	if m == nil {
+		t.Fatal("New() returned nil")
+	}
+
+	backend := m.Backend()
+	if backend != BackendNFT && backend != BackendIptables && backend != BackendNone {
+		t.Fatalf("unexpected backend: %s", backend)
+	}
+
+	_ = HasNetAdmin()
+	_ = m.ownedPorts()
+	_ = m.Rules()
+}
+
+func TestPortRangeString(t *testing.T) {
+	r1 := PortRange{Lo: 100, Hi: 200}
+	if r1.String() != "100-200" {
+		t.Fatalf("r1.String() = %q", r1.String())
+	}
+
+	r2 := PortRange{Lo: 443, Hi: 443}
+	if r2.String() != "443" {
+		t.Fatalf("r2.String() = %q", r2.String())
+	}
+}
+
+func TestCleanAllAndSyncEdgeCases(t *testing.T) {
+	m := New()
+	_ = m.CleanupOwned()
+	_ = m.Remove(9999)
+	_ = m.Sync(map[int]string{9999: "20000-20005"})
+}

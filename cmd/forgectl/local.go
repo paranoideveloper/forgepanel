@@ -33,15 +33,17 @@ import (
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
+var loadManifest = lifecycle.Load
+
 const systemDataDir = "/var/lib/forgepanel"
 
 const releaseAPI = "https://api.github.com/repos/paranoideveloper/forgepanel/releases/latest"
 
-func interactiveTerminal() bool {
+var interactiveTerminal = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
-func requireLocalAdmin() error {
+var requireLocalAdmin = func() error {
 	if os.Geteuid() != 0 {
 		return errors.New("this operation requires root; run it with sudo")
 	}
@@ -52,7 +54,7 @@ func defaultDataDir() string {
 	if data := strings.TrimSpace(os.Getenv("FORGEPANEL_DATA")); data != "" {
 		return data
 	}
-	if m, err := lifecycle.Load(lifecycle.DefaultManifestPath); err == nil && m.DataDir != "" {
+	if m, err := loadManifest(lifecycle.DefaultManifestPath); err == nil && m.DataDir != "" {
 		return m.DataDir
 	}
 	return systemDataDir
@@ -68,7 +70,7 @@ func loadLocalConfig(data string) (*config.Config, error) {
 	return config.LoadFromDataDir(data)
 }
 
-func systemctl(args ...string) error {
+var systemctl = func(args ...string) error {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return fmt.Errorf("systemctl is unavailable")
 	}
@@ -77,7 +79,7 @@ func systemctl(args ...string) error {
 	return cmd.Run()
 }
 
-func systemctlState() string {
+var systemctlState = func() string {
 	cmd := exec.Command("systemctl", "is-active", "forgepanel")
 	b, err := cmd.Output()
 	if err != nil {
@@ -312,11 +314,15 @@ func cmdSettingsSet(args []string) error {
 	return nil
 }
 
+var verifyHealth = func(cfg *config.Config) error {
+	return cmdHealth([]string{strconv.Itoa(cfg.Panel().Port)})
+}
+
 func restartAndVerify(cfg *config.Config) error {
 	if err := systemctl("restart", "forgepanel"); err != nil {
 		return err
 	}
-	return cmdHealth([]string{strconv.Itoa(cfg.Panel().Port)})
+	return verifyHealth(cfg)
 }
 
 func cmdDNSCheck(args []string) error {
@@ -449,7 +455,7 @@ func cmdAdmin(args []string) error {
 	}
 }
 
-func promptSecret(label string) (string, error) {
+var promptSecret = func(label string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return "", errors.New("a terminal is required for secret input")
 	}
@@ -625,7 +631,7 @@ func cmdLifecycle(args []string) error {
 		}
 		backupFor[parts[0]] = parts[1]
 	}
-	m, err := lifecycle.Load(*manifestPath)
+	m, err := loadManifest(*manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
 		m = lifecycle.NewManifest(*method, *versionValue, *data)
 	} else if err != nil {
@@ -688,7 +694,7 @@ func cmdUninstall(args []string) error {
 			return nil
 		}
 	}
-	m, err := lifecycle.Load(*manifestPath)
+	m, err := loadManifest(*manifestPath)
 	legacy := false
 	if errors.Is(err, os.ErrNotExist) {
 		m, legacy = lifecycle.LegacyInventory(*data), true
@@ -741,7 +747,7 @@ func cmdUninstall(args []string) error {
 	return nil
 }
 
-func confirmLocal(prompt string) bool {
+var confirmLocal = func(prompt string) bool {
 	fmt.Fprint(os.Stderr, prompt+" ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
@@ -765,7 +771,7 @@ func cmdRepair(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := lifecycle.Load(lifecycle.DefaultManifestPath); err != nil {
+	if _, err := loadManifest(lifecycle.DefaultManifestPath); err != nil {
 		return errors.New("installation manifest is missing; run the verified installer to repair a legacy installation")
 	}
 	if err := systemctl("daemon-reload"); err != nil {
@@ -792,7 +798,7 @@ type releaseMetadata struct {
 	Assets  []releaseAsset `json:"assets"`
 }
 
-func latestRelease() (releaseMetadata, error) {
+var latestRelease = func() (releaseMetadata, error) {
 	req, err := http.NewRequest(http.MethodGet, releaseAPI, nil)
 	if err != nil {
 		return releaseMetadata{}, err
@@ -827,7 +833,7 @@ func releaseAssetURL(metadata releaseMetadata, name string) (string, error) {
 	return "", fmt.Errorf("release %s does not contain %s", metadata.TagName, name)
 }
 
-func downloadReleaseAsset(client *http.Client, metadata releaseMetadata, name string) ([]byte, error) {
+var downloadReleaseAsset = func(client *http.Client, metadata releaseMetadata, name string) ([]byte, error) {
 	url, err := releaseAssetURL(metadata, name)
 	if err != nil {
 		return nil, err

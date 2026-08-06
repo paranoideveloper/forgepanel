@@ -36,6 +36,14 @@ ForgePanel is a Go-based server management panel and node orchestration platform
    - Do not add unrequested abstractions, unnecessary files, or dead code.
    - Maintain concise, clean diffs focused directly on the prompt requirement.
 
+3. **Mandatory Test Verification & CI Matrix Standards**:
+   - All tests across all decoupled suites (`.github/workflows/ci.yml`) must pass cleanly.
+   - Run tests with `-shuffle=on -count=1` to guarantee test independence and prevent state leakages between tests.
+   - Ensure code passes race detector (`go test -race ./...`) and `gofmt -l .` formatting checks.
+
+4. **Zero CGO Requirement**:
+   - SQLite is driven via pure Go (`modernc.org/sqlite`).
+   - Binaries must build cleanly with `CGO_ENABLED=0`.
 3. **Mandatory Testing & Quality Verification**:
    - All tests must pass prior to opening or updating a PR.
    - Run `go test ./...` and `go vet ./...` locally before submitting changes.
@@ -49,6 +57,30 @@ ForgePanel is a Go-based server management panel and node orchestration platform
 
 ---
 
+## 3. Mandatory Pre-Commit Checklist & Test Suite Verification
+
+Before submitting or updating any Pull Request, agents **MUST** execute and pass all verification steps:
+
+```bash
+# 1. Code Formatting, Frontend & Dependency Hygiene
+UNFORMATTED=$(gofmt -l .) && test -z "$UNFORMATTED"
+(cd frontend && bun run check && bun run test --coverage)
+go mod tidy && git diff --exit-code go.mod go.sum
+
+# 2. Decoupled Matrix & Randomized Test Execution
+rtk go test -shuffle=on -count=1 -v ./internal/core/... ./internal/protocol/...
+rtk go test -shuffle=on -count=1 -v ./internal/api/... ./internal/store/... ./internal/auth/...
+rtk go test -shuffle=on -count=1 -v ./internal/forgedns/...
+rtk go test -shuffle=on -count=1 -v ./cmd/...
+rtk go test -shuffle=on -count=1 -v ./internal/deploy/... ./internal/domain/... ./internal/backup/... ./internal/cert/... ./internal/config/... ./internal/job/... ./internal/lifecycle/... ./internal/migrate/... ./internal/telegram/... ./internal/version/...
+
+# 3. Concurrency & Data Race Detector
+rtk go test -race -v ./...
+
+# 4. Go Vet & Static Analysis
+rtk go vet ./...
+
+# 5. Build Compilation Check
 ## 3. Mandatory Pre-Commit Checklist & Test Execution
 
 Before submitting a Pull Request, agents **MUST** execute and pass the following steps:
@@ -68,6 +100,10 @@ rtk make build
 
 ## 4. Pull Request Requirements
 
+Every pull request created or modified by an agent must follow `.github/PULL_REQUEST_TEMPLATE.md`, providing:
+- Clear summary of changes and root-cause rationale.
+- Verification evidence covering formatting, matrix testing, race detection, static analysis, and builds.
+- Checklist confirming full compliance with `AGENTS.md` instructions and PR #3 CI matrix standards.
 Every pull request created by an agent must follow `.github/PULL_REQUEST_TEMPLATE.md`, providing:
 - Clear summary of changes and root-cause rationale.
 - Verification evidence (pasted output of test runs).
