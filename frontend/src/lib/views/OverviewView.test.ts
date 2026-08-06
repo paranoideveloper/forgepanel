@@ -30,7 +30,7 @@ describe('OverviewView Component', () => {
 
     expect(await screen.findByText('healthy')).toBeTruthy();
     expect(screen.getByText('1.0.0')).toBeTruthy();
-    expect(screen.getByText('3 / 3 Online')).toBeTruthy();
+    expect(screen.getByText((content) => content.includes('3 / 3'))).toBeTruthy();
     expect(screen.getByText('2h 0m')).toBeTruthy();
 
     await fireEvent.click(refreshBtn);

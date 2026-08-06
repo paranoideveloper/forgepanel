@@ -43,7 +43,7 @@ describe('API Client', () => {
       ok: false,
       status: 400,
       json: async () => ({ error: 'Invalid input' })
-    } as Response);
+    } as unknown as Response);
 
     await expect(apiFetch('/test')).rejects.toEqual({
       message: 'Invalid input',
@@ -56,7 +56,7 @@ describe('API Client', () => {
       ok: false,
       status: 500,
       json: async () => { throw new Error('Bad JSON'); }
-    } as Response);
+    } as unknown as Response);
 
     await expect(apiFetch('/test')).rejects.toEqual({
       message: 'HTTP Error 500',

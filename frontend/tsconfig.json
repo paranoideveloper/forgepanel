@@ -11,5 +11,6 @@
 		"strict": true,
 		"moduleResolution": "bundler",
 		"types": ["vitest/globals"]
-	}
+	},
+	"exclude": ["src/bun-svelte-plugin.ts", "src/bun-preload.ts"]
 }

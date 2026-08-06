@@ -10,6 +10,7 @@
   let password = $state('');
   let authError = $state('');
   let activeTab = $state('overview');
+  let mobileMenuOpen = $state(false);
 
   let CurrentView = $state<Component | null>(null);
   let componentLoading = $state(false);
@@ -76,9 +77,11 @@
 
 {#if !token}
   <div class="login-wrapper" in:fade={{ duration: 200 }}>
-    <div class="login-card" in:fly={{ y: 20, duration: 250 }}>
+    <div class="login-card" in:fly={{ y: 24, duration: 300 }}>
       <div class="brand">
-        <span class="logo">⚡</span>
+        <div class="logo-box">
+          <span class="logo">⚡</span>
+        </div>
         <h1>ForgePanel</h1>
       </div>
       <p class="subtitle">High-performance control plane</p>
@@ -86,11 +89,11 @@
       <form onsubmit={handleLogin}>
         <div class="form-group">
           <label for="uname">Username</label>
-          <input id="uname" type="text" bind:value={username} required />
+          <input id="uname" type="text" bind:value={username} placeholder="admin" required />
         </div>
         <div class="form-group">
           <label for="pwd">Password</label>
-          <input id="pwd" type="password" bind:value={password} required />
+          <input id="pwd" type="password" bind:value={password} placeholder="••••••••" required />
         </div>
         <button type="submit" class="btn-submit">Sign In</button>
       </form>
@@ -102,21 +105,34 @@
   </div>
 {:else}
   <div class="app-layout" in:fade={{ duration: 150 }}>
-    <Sidebar {activeTab} onTabChange={(tab) => loadTabModule(tab)} />
+    <Sidebar 
+      {activeTab} 
+      bind:mobileOpen={mobileMenuOpen}
+      onTabChange={(tab) => loadTabModule(tab)} 
+    />
 
     <div class="main-content">
       <header class="top-nav">
-        <div class="user-badge">
-          <span>Logged in as <strong>admin</strong></span>
+        <div class="nav-left">
+          <button class="mobile-toggle" onclick={() => mobileMenuOpen = !mobileMenuOpen}>
+            ☰
+          </button>
+          <div class="user-badge">
+            <span class="online-indicator"></span>
+            <span>Signed in as <strong>admin</strong></span>
+          </div>
         </div>
-        <button class="logout-btn" onclick={handleLogout}>Sign Out</button>
+
+        <div class="nav-right">
+          <button class="logout-btn" onclick={handleLogout}>Sign Out</button>
+        </div>
       </header>
 
       <main class="page-container">
         {#if componentLoading}
           <div class="loading-state" in:fade={{ duration: 100 }}>
             <div class="spinner"></div>
-            <span>Lazy loading module...</span>
+            <span>Lazy loading view module...</span>
           </div>
         {:else if CurrentView}
           <div class="view-wrapper" in:fade={{ duration: 180 }}>
@@ -131,84 +147,115 @@
 <style>
   :global(body) {
     margin: 0;
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #0B0F16;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    background: #090D16;
     color: rgba(255, 255, 255, 0.92);
+    -webkit-font-smoothing: antialiased;
   }
+
   .login-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    background: radial-gradient(circle at center, #111827 0%, #0B0F16 100%);
+    padding: 20px;
+    box-sizing: border-box;
+    background: radial-gradient(circle at center, #111827 0%, #070A10 100%);
   }
   .login-card {
-    background: #141A24;
+    background: rgba(20, 26, 36, 0.85);
+    backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 36px;
     width: 100%;
     max-width: 380px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    justify-content: center;
+  .brand { display: flex; align-items: center; gap: 12px; justify-content: center; }
+  .logo-box {
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(255,122,26,0.3) 0%, rgba(255,122,26,0.05) 100%);
+    border: 1px solid rgba(255,122,26,0.4);
+    display: flex; align-items: center; justify-content: center;
   }
-  .brand h1 {
-    margin: 0;
-    font-size: 22px;
-    color: #FF7A1A;
-  }
-  .logo { font-size: 24px; }
-  .subtitle { text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; margin: 6px 0 24px; }
-  .form-group { margin-bottom: 16px; }
-  .form-group label { display: block; font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 6px; }
+  .brand h1 { margin: 0; font-size: 24px; color: #fff; font-weight: 700; letter-spacing: -0.02em; }
+  .logo { font-size: 20px; }
+  .subtitle { text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; margin: 8px 0 28px; }
+  .form-group { margin-bottom: 18px; }
+  .form-group label { display: block; font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 6px; font-weight: 500; }
   input {
     width: 100%;
-    padding: 10px 12px;
-    background: #0F1420;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
+    min-height: 44px;
+    padding: 10px 14px;
+    background: #0D121F;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
     color: #fff;
     box-sizing: border-box;
+    font-size: 14px;
+  }
+  input:focus {
+    outline: none;
+    border-color: #FF7A1A;
+    box-shadow: 0 0 0 3px rgba(255,122,26,0.2);
   }
   .btn-submit {
     width: 100%;
+    min-height: 44px;
     background: #FF7A1A;
     color: #1a1204;
     font-weight: 700;
     border: none;
-    padding: 12px;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
+    font-size: 14px;
     margin-top: 10px;
+    transition: transform 0.15s ease, filter 0.15s ease;
   }
-  .err-box { margin-top: 14px; padding: 10px; background: rgba(255,77,77,0.15); color: #FF4D4D; border-radius: 6px; font-size: 13px; text-align: center; }
-  
+  .btn-submit:active { transform: scale(0.98); }
+  .err-box { margin-top: 14px; padding: 10px; background: rgba(255,77,77,0.15); color: #FF4D4D; border-radius: 8px; font-size: 13px; text-align: center; }
+
   .app-layout { display: flex; min-height: 100vh; }
-  .main-content { flex: 1; display: flex; flex-direction: column; }
+  .main-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .top-nav {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 32px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    background: #0F1420;
+    padding: 16px 24px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: #0D121F;
+    min-height: 60px;
+    box-sizing: border-box;
   }
-  .user-badge { font-size: 13px; color: rgba(255,255,255,0.7); }
-  .logout-btn {
+  .nav-left { display: flex; align-items: center; gap: 14px; }
+  .mobile-toggle {
+    display: none;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.8);
-    padding: 6px 14px;
-    border-radius: 6px;
-    font-size: 12px;
+    color: #fff;
+    font-size: 18px;
+    padding: 6px 12px;
+    border-radius: 8px;
     cursor: pointer;
+    min-height: 40px;
   }
-  .page-container { flex: 1; padding: 32px; max-width: 1200px; }
+  .user-badge { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.7); }
+  .online-indicator { width: 6px; height: 6px; border-radius: 50%; background: #27D17C; }
+  .logout-btn {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.8);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .logout-btn:hover { background: rgba(255,77,77,0.15); color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
+
+  .page-container { flex: 1; padding: 28px; max-width: 1200px; box-sizing: border-box; }
   .loading-state { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,0.6); padding: 40px; }
   .spinner {
     width: 20px; height: 20px;
@@ -218,4 +265,9 @@
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 768px) {
+    .mobile-toggle { display: block; }
+    .page-container { padding: 16px; }
+  }
 </style>

@@ -15,7 +15,6 @@
   let newNotes = $state('');
   let createErr = $state('');
 
-  // Subscription modal state
   let subModalOpen = $state(false);
   let activeSubUser = $state<User | null>(null);
   let subFormat = $state<'v2ray' | 'clash' | 'sing-box'>('v2ray');
@@ -119,7 +118,10 @@
 </script>
 
 <div class="view-header">
-  <h2>User Accounts & Subscriptions</h2>
+  <div>
+    <h2>User Accounts &amp; Subscriptions</h2>
+    <p class="header-desc">Manage proxy access tokens, quotas, and subscriber formats</p>
+  </div>
   <button class="btn-primary" onclick={loadData}>Refresh</button>
 </div>
 
@@ -143,40 +145,42 @@
   {#if loading}
     <p class="muted">Loading users...</p>
   {:else}
-    <table>
-      <thead>
-        <tr>
-          <th>User</th>
-          <th>Group</th>
-          <th>Sub Token</th>
-          <th>Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each users as u}
+    <div class="table-responsive">
+      <table>
+        <thead>
           <tr>
-            <td>
-              <strong>{u.username}</strong>
-              {#if u.notes}<span class="user-notes">{u.notes}</span>{/if}
-            </td>
-            <td><code>{groups.find(g => g.id === u.group_id)?.name || 'Default'}</code></td>
-            <td><code>{u.sub_token.slice(0, 8)}...</code></td>
-            <td>
-              <span class="badge {u.enabled ? 'badge-ok' : 'badge-err'}">
-                {u.enabled ? 'Active' : 'Disabled'}
-              </span>
-            </td>
-            <td class="action-cell">
-              <button class="btn-sm" onclick={() => openSubModal(u)}>Sub Link</button>
-              <button class="btn-sm" onclick={() => toggleUser(u)}>{u.enabled ? 'Disable' : 'Enable'}</button>
-              <button class="btn-sm" onclick={() => rotateSubToken(u)}>Rotate</button>
-              <button class="btn-sm danger" onclick={() => deleteUser(u.id)}>Delete</button>
-            </td>
+            <th>User</th>
+            <th>Group</th>
+            <th>Sub Token</th>
+            <th>Status</th>
+            <th>Actions</th>
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each users as u}
+            <tr>
+              <td>
+                <strong>{u.username}</strong>
+                {#if u.notes}<span class="user-notes">{u.notes}</span>{/if}
+              </td>
+              <td><code>{groups.find(g => g.id === u.group_id)?.name || 'Default'}</code></td>
+              <td><code>{u.sub_token.slice(0, 8)}...</code></td>
+              <td>
+                <span class="badge {u.enabled ? 'badge-ok' : 'badge-err'}">
+                  {u.enabled ? 'Active' : 'Disabled'}
+                </span>
+              </td>
+              <td class="action-cell">
+                <button class="btn-sm" onclick={() => openSubModal(u)}>Sub Link</button>
+                <button class="btn-sm" onclick={() => toggleUser(u)}>{u.enabled ? 'Disable' : 'Enable'}</button>
+                <button class="btn-sm" onclick={() => rotateSubToken(u)}>Rotate</button>
+                <button class="btn-sm danger" onclick={() => deleteUser(u.id)}>Delete</button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </div>
 
@@ -204,30 +208,40 @@
 </Modal>
 
 <style>
-  .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-  .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; }
-  input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; }
-  .btn-primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-  .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
-  th { color: rgba(255,255,255,0.6); font-weight: 600; }
+  .view-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; gap: 16px; }
+  .view-header h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .header-desc { margin: 4px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
+
+  .card { background: rgba(20, 26, 36, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: #FF7A1A; letter-spacing: 0.05em; }
+
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto; gap: 12px; }
+  input, select { background: #0D121F; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 10px 14px; border-radius: 10px; font: inherit; min-height: 44px; box-sizing: border-box; }
+  
+  .btn-primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 18px; border-radius: 10px; cursor: pointer; min-height: 44px; }
+  .btn-sm { background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height: 36px; }
+  .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); background: rgba(255,77,77,0.1); }
+
+  .table-responsive { overflow-x: auto; width: 100%; }
+  table { width: 100%; border-collapse: collapse; min-width: 600px; }
+  th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+  th { color: rgba(255,255,255,0.55); font-weight: 600; font-size: 12px; text-transform: uppercase; }
   .user-notes { display: block; font-size: 12px; color: rgba(255,255,255,0.5); }
-  .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .badge-err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
-  .action-cell { display: flex; gap: 6px; }
-  .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 650; }
+  .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; border: 1px solid rgba(39,209,124,0.3); }
+  .badge-err { background: rgba(255,77,77,0.15); color: #FF4D4D; border: 1px solid rgba(255,77,77,0.3); }
+  .action-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+  .err-text { color: #FF4D4D; font-size: 13px; margin-top: 10px; }
   .muted { color: rgba(255,255,255,0.6); }
 
   .sub-modal-content { display: flex; flex-direction: column; gap: 16px; align-items: center; text-align: center; }
-  .format-tabs { display: flex; gap: 8px; background: #0F1420; padding: 4px; border-radius: 8px; }
-  .format-tabs button { background: none; border: none; color: rgba(255,255,255,0.6); padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; }
+  .format-tabs { display: flex; gap: 6px; background: #0D121F; padding: 4px; border-radius: 10px; flex-wrap: wrap; justify-content: center; }
+  .format-tabs button { background: none; border: none; color: rgba(255,255,255,0.6); padding: 8px 14px; font-size: 13px; border-radius: 8px; cursor: pointer; }
   .format-tabs button.active { background: #FF7A1A; color: #1a1204; font-weight: 700; }
-  .url-box { display: flex; gap: 8px; width: 100%; }
-  .url-box input { flex: 1; }
+  .url-box { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; }
+  .url-box input { flex: 1; min-width: 200px; }
+
+  @media (max-width: 768px) {
+    .form-grid { grid-template-columns: 1fr; }
+  }
 </style>
