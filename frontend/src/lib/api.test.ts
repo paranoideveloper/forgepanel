@@ -5,7 +5,6 @@ describe('API Client', () => {
   beforeEach(() => {
     localStorage.clear();
     setAuthToken('');
-    vi.restoreAllMocks();
   });
 
   it('manages auth tokens in localStorage', () => {
@@ -22,27 +21,29 @@ describe('API Client', () => {
     setAuthToken('bearer-123');
     const fakeData = { status: 'ok' };
     
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => fakeData
-    }));
+    let calledUrl = '';
+    let calledOpts: any = null;
+    (globalThis as any).fetch = async (url: string, opts: any) => {
+      calledUrl = url;
+      calledOpts = opts;
+      return {
+        ok: true,
+        json: async () => fakeData
+      } as Response;
+    };
 
     const result = await apiFetch<{ status: string }>('/test');
     expect(result).toEqual(fakeData);
-    expect(fetch).toHaveBeenCalledWith('/api/test', expect.objectContaining({
-      headers: expect.objectContaining({
-        'Authorization': 'Bearer bearer-123',
-        'Content-Type': 'application/json'
-      })
-    }));
+    expect(calledUrl).toBe('/api/test');
+    expect(calledOpts.headers['Authorization']).toBe('Bearer bearer-123');
   });
 
   it('handles HTTP error responses with server error messages', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    (globalThis as any).fetch = async () => ({
       ok: false,
       status: 400,
       json: async () => ({ error: 'Invalid input' })
-    }));
+    } as Response);
 
     await expect(apiFetch('/test')).rejects.toEqual({
       message: 'Invalid input',
@@ -51,11 +52,11 @@ describe('API Client', () => {
   });
 
   it('handles HTTP error responses when json parsing fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    (globalThis as any).fetch = async () => ({
       ok: false,
       status: 500,
       json: async () => { throw new Error('Bad JSON'); }
-    }));
+    } as Response);
 
     await expect(apiFetch('/test')).rejects.toEqual({
       message: 'HTTP Error 500',

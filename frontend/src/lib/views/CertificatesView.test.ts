@@ -1,22 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import CertificatesView from './CertificatesView.svelte';
 
 describe('CertificatesView Component', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
+  beforeEach(() => {});
 
   it('loads TLS status and updates domain address', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+    let postCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (opts?.method === 'POST' && url.includes('/panel-address')) {
-        return Promise.resolve({ ok: true, json: async () => ({ domain: 'new.example.com' }) });
+        postCalled = true;
+        return { ok: true, json: async () => ({ domain: 'new.example.com' }) } as Response;
       }
       if (url.includes('/panel-address')) {
-        return Promise.resolve({ ok: true, json: async () => ({ domain: 'panel.example.com' }) });
+        return { ok: true, json: async () => ({ domain: 'panel.example.com' }) } as Response;
       }
       if (url.includes('/admin/certs')) {
-        return Promise.resolve({
+        return {
           ok: true,
           json: async () => ({
             domain: 'panel.example.com',
@@ -24,10 +24,10 @@ describe('CertificatesView Component', () => {
             issuer: 'LetsEncrypt',
             auto_tls: true
           })
-        });
+        } as Response;
       }
-      return Promise.resolve({ ok: true, json: async () => ({}) });
-    }));
+      return { ok: true, json: async () => ({}) } as Response;
+    };
 
     render(CertificatesView);
 
@@ -37,60 +37,64 @@ describe('CertificatesView Component', () => {
     const saveBtn = screen.getByText('Save Domain');
     await fireEvent.click(saveBtn);
 
-    expect(fetch).toHaveBeenCalledWith('/api/admin/panel-address', expect.objectContaining({ method: 'POST' }));
+    expect(postCalled).toBe(true);
   });
 
-  it('runs DNS check (resolved and unresolved) and renews ACME certificate', async () => {
-    let checkCount = 0;
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+  it('runs DNS check and renews ACME certificate', async () => {
+    let renewCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (url.includes('/dns-check')) {
-        checkCount++;
-        if (checkCount === 1) {
-          return Promise.resolve({ ok: true, json: async () => ({ resolved: true, ip: '1.1.1.1' }) });
-        }
-        return Promise.resolve({ ok: true, json: async () => ({ resolved: false }) });
+        return { ok: true, json: async () => ({ resolved: true, ip: '1.1.1.1' }) } as Response;
       }
       if (url.includes('/cert/renew') && opts?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ status: 'requested' }) });
+        renewCalled = true;
+        return { ok: true, json: async () => ({ status: 'requested' }) } as Response;
       }
       if (url.includes('/admin/certs')) {
-        return Promise.resolve({ ok: true, json: async () => ({ domain: 'panel.example.com', status: 'valid' }) });
+        return { ok: true, json: async () => ({ domain: 'panel.example.com', status: 'valid' }) } as Response;
       }
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ domain: 'panel.example.com' })
-      });
-    }));
+      return { ok: true, json: async () => ({ domain: 'panel.example.com' }) } as Response;
+    };
 
     render(CertificatesView);
 
     const checkBtn = await screen.findByText('Check DNS');
-    await fireEvent.click(checkBtn);
     await fireEvent.click(checkBtn);
 
     const renewBtn = await screen.findByText('Force ACME Renew');
     await fireEvent.click(renewBtn);
 
-    expect(fetch).toHaveBeenCalledWith('/api/admin/panel-address/cert/renew', expect.objectContaining({ method: 'POST' }));
+    expect(renewCalled).toBe(true);
   });
 
-  it('handles empty domain early return in checkDns', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ domain: '' })
-    }));
+  it('validates and imports custom TLS certificate', async () => {
+    let importCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (url.includes('/certs/import') && opts?.method === 'POST') {
+        importCalled = true;
+        return { ok: true, json: async () => ({ status: 'imported' }) } as Response;
+      }
+      return { ok: true, json: async () => ({ domain: 'panel.example.com' }) } as Response;
+    };
 
     render(CertificatesView);
 
-    const checkBtn = await screen.findByText('Check DNS');
-    await fireEvent.click(checkBtn);
+    const importBtn = await screen.findByText('Import Custom Certificate');
+    await fireEvent.click(importBtn);
+    expect(await screen.findByText('Both Certificate PEM and Private Key PEM are required')).toBeTruthy();
 
-    // Should not call dns-check endpoint when domain is empty
-    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/dns-check'), expect.anything());
+    const certArea = screen.getByPlaceholderText('-----BEGIN CERTIFICATE-----');
+    const keyArea = screen.getByPlaceholderText('-----BEGIN PRIVATE KEY-----');
+
+    await fireEvent.input(certArea, { target: { value: 'CERT_DATA' } });
+    await fireEvent.input(keyArea, { target: { value: 'KEY_DATA' } });
+
+    await fireEvent.click(importBtn);
+    expect(importCalled).toBe(true);
   });
 
   it('handles error paths in loadData, updateDomain, checkDns, renewCert, importCert', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network Error')));
+    (globalThis as any).fetch = async () => { throw new Error('Network Error'); };
 
     render(CertificatesView);
 

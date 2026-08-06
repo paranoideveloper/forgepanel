@@ -1,36 +1,39 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import StudioView from './StudioView.svelte';
 
 describe('StudioView Component', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.stubGlobal('navigator', {
+    (globalThis as any).navigator = {
       clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined)
+        writeText: async () => {}
       }
-    });
+    };
   });
 
   it('loads presets, selects preset, updates input forms, generates keypair, and copies JSON', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+    let keygenCalled = false;
+    let copyCalled = false;
+    (globalThis as any).navigator.clipboard.writeText = async () => { copyCalled = true; };
+    (globalThis as any).fetch = async (url: string) => {
       if (url.includes('/keygen')) {
-        return Promise.resolve({
+        keygenCalled = true;
+        return {
           ok: true,
           json: async () => ({
             public_key: 'pub_key_123',
             private_key: 'priv_key_456'
           })
-        });
+        } as Response;
       }
-      return Promise.resolve({
+      return {
         ok: true,
         json: async () => [
           { id: 'vless-reality', name: 'VLESS Reality', engine: 'xray', description: 'VLESS protocol', config: {} },
           { id: 'tuic-v5', name: 'TUIC v5', engine: 'tuic', description: 'TUIC protocol', config: {} }
         ]
-      });
-    }));
+      } as Response;
+    };
 
     render(StudioView);
 
@@ -45,11 +48,12 @@ describe('StudioView Component', () => {
     const keygenBtn = screen.getByText('Generate Keypair');
     await fireEvent.click(keygenBtn);
 
+    expect(keygenCalled).toBe(true);
     expect(await screen.findByText('pub_key_123')).toBeTruthy();
 
     const copyBtn = screen.getByText('Copy JSON');
     await fireEvent.click(copyBtn);
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalled();
+    expect(copyCalled).toBe(true);
   });
 });

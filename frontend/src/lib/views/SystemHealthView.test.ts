@@ -1,17 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import SystemHealthView from './SystemHealthView.svelte';
 
 describe('SystemHealthView Component', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.stubGlobal('confirm', () => true);
+    (globalThis as any).confirm = () => true;
   });
 
   it('loads health details and audit logs including unhealthy subsystems', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+    (globalThis as any).fetch = async (url: string) => {
       if (url.includes('/admin/health/detail')) {
-        return Promise.resolve({
+        return {
           ok: true,
           json: async () => ({
             subsystems: [
@@ -19,16 +18,16 @@ describe('SystemHealthView Component', () => {
               { name: 'Xray Core', healthy: false, detail: 'Core process stopped' }
             ]
           })
-        });
+        } as Response;
       }
       if (url.includes('/admin/stats')) {
-        return Promise.resolve({ ok: true, json: async () => [] });
+        return { ok: true, json: async () => [] } as Response;
       }
       if (url.includes('/admin/me')) {
-        return Promise.resolve({ ok: true, json: async () => ({ two_factor_enabled: false }) });
+        return { ok: true, json: async () => ({ two_factor_enabled: false }) } as Response;
       }
-      return Promise.resolve({ ok: true, json: async () => ({}) });
-    }));
+      return { ok: true, json: async () => ({}) } as Response;
+    };
 
     render(SystemHealthView);
 
@@ -38,24 +37,28 @@ describe('SystemHealthView Component', () => {
   });
 
   it('sets up 2FA TOTP, verifies code, and disables 2FA', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+    let enableCalled = false;
+    let disableCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (url.includes('/admin/2fa/setup') && opts?.method === 'POST') {
-        return Promise.resolve({
+        return {
           ok: true,
           json: async () => ({ secret: 'MYSECRET123', qr_code_url: 'otpauth://totp/test' })
-        });
+        } as Response;
       }
       if (url.includes('/admin/2fa/enable') && opts?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ enabled: true }) });
+        enableCalled = true;
+        return { ok: true, json: async () => ({ enabled: true }) } as Response;
       }
       if (url.includes('/admin/2fa/disable') && opts?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ enabled: false }) });
+        disableCalled = true;
+        return { ok: true, json: async () => ({ enabled: false }) } as Response;
       }
       if (url.includes('/admin/me')) {
-        return Promise.resolve({ ok: true, json: async () => ({ two_factor_enabled: false }) });
+        return { ok: true, json: async () => ({ two_factor_enabled: false }) } as Response;
       }
-      return Promise.resolve({ ok: true, json: async () => ({ subsystems: [] }) });
-    }));
+      return { ok: true, json: async () => ({ subsystems: [] }) } as Response;
+    };
 
     render(SystemHealthView);
 
@@ -71,32 +74,36 @@ describe('SystemHealthView Component', () => {
     const verifyBtn = screen.getByText('Verify & Activate');
     await fireEvent.click(verifyBtn);
 
-    expect(fetch).toHaveBeenCalledWith('/api/admin/2fa/enable', expect.objectContaining({ method: 'POST' }));
+    expect(enableCalled).toBe(true);
   });
 
   it('handles 2FA disable confirm cancel and errors', async () => {
-    vi.stubGlobal('confirm', () => false);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+    let disableCalled = false;
+    (globalThis as any).confirm = () => false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'POST' && url.includes('/2fa/disable')) disableCalled = true;
       if (url.includes('/admin/me')) {
-        return Promise.resolve({ ok: true, json: async () => ({ two_factor_enabled: true }) });
+        return { ok: true, json: async () => ({ two_factor_enabled: true }) } as Response;
       }
-      return Promise.resolve({ ok: true, json: async () => ({ subsystems: [] }) });
-    }));
+      return { ok: true, json: async () => ({ subsystems: [] }) } as Response;
+    };
 
     render(SystemHealthView);
 
     const disableBtn = await screen.findByText('Disable 2FA');
     await fireEvent.click(disableBtn);
-    expect(fetch).not.toHaveBeenCalledWith('/api/admin/2fa/disable', expect.objectContaining({ method: 'POST' }));
+    expect(disableCalled).toBe(false);
   });
 
   it('changes admin password with validation and error handling', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+    let passCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (url.includes('/admin/change-password') && opts?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ success: true }) });
+        passCalled = true;
+        return { ok: true, json: async () => ({ success: true }) } as Response;
       }
-      return Promise.resolve({ ok: true, json: async () => ({ subsystems: [] }) });
-    }));
+      return { ok: true, json: async () => ({ subsystems: [] }) } as Response;
+    };
 
     render(SystemHealthView);
 
@@ -111,21 +118,21 @@ describe('SystemHealthView Component', () => {
     await fireEvent.input(newInput, { target: { value: 'newsecret' } });
 
     await fireEvent.click(updateBtn);
-    expect(fetch).toHaveBeenCalledWith('/api/admin/change-password', expect.objectContaining({ method: 'POST' }));
+    expect(passCalled).toBe(true);
   });
 
   it('generates Docker Compose YAML configuration and handles error paths', async () => {
     let callCount = 0;
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+    (globalThis as any).fetch = async (url: string) => {
       if (url.includes('/deploy/compose')) {
         callCount++;
         if (callCount === 1) {
-          return Promise.resolve({ ok: true, json: async () => ({ compose: 'services:\n  forgepanel:\n    image: forgepanel' }) });
+          return { ok: true, json: async () => ({ compose: 'services:\n  forgepanel:\n    image: forgepanel' }) } as Response;
         }
-        return Promise.reject(new Error('Compose API failed'));
+        throw new Error('Compose API failed');
       }
-      return Promise.resolve({ ok: true, json: async () => ({ subsystems: [] }) });
-    }));
+      return { ok: true, json: async () => ({ subsystems: [] }) } as Response;
+    };
 
     render(SystemHealthView);
 

@@ -1,31 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import NodesView from './NodesView.svelte';
 
 describe('NodesView Component', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.stubGlobal('confirm', () => true);
-    vi.stubGlobal('navigator', {
+    (globalThis as any).confirm = () => true;
+    (globalThis as any).navigator = {
       clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined)
+        writeText: async () => {}
       }
-    });
+    };
   });
 
   it('loads node list (online and offline nodes) and registers node', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+    let postCalled = false;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (opts?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ id: 1, name: 'EU-Node' }) });
+        postCalled = true;
+        return { ok: true, json: async () => ({ id: 1, name: 'EU-Node' }) } as Response;
       }
-      return Promise.resolve({
+      return {
         ok: true,
         json: async () => [
           { id: 1, name: 'EU-Node', address: '1.2.3.4', cpu: 10, mem_mb: 512, healthy: true },
           { id: 2, name: 'Stale-Node', address: '2.2.2.2', cpu: 0, mem_mb: 0, healthy: false }
         ]
-      });
-    }));
+      } as Response;
+    };
 
     render(NodesView);
 
@@ -42,7 +43,7 @@ describe('NodesView Component', () => {
     const registerBtn = screen.getByText('Register Node');
     await fireEvent.click(registerBtn);
 
-    expect(fetch).toHaveBeenCalledWith('/api/admin/nodes', expect.objectContaining({ method: 'POST' }));
+    expect(postCalled).toBe(true);
   });
 
   it('validates node registration inputs', async () => {
@@ -53,23 +54,27 @@ describe('NodesView Component', () => {
   });
 
   it('deletes a node and opens install script modal', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+    let deleteCalled = false;
+    let copyCalled = false;
+    (globalThis as any).navigator.clipboard.writeText = async () => { copyCalled = true; };
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (opts?.method === 'DELETE') {
-        return Promise.resolve({ ok: true, json: async () => ({ deleted: 1 }) });
+        deleteCalled = true;
+        return { ok: true, json: async () => ({ deleted: 1 }) } as Response;
       }
-      return Promise.resolve({
+      return {
         ok: true,
         json: async () => [
           { id: 1, name: 'EU-Node', address: '1.2.3.4', healthy: true }
         ]
-      });
-    }));
+      } as Response;
+    };
 
     render(NodesView);
 
     const deleteBtn = await screen.findByText('Remove');
     await fireEvent.click(deleteBtn);
-    expect(fetch).toHaveBeenCalledWith('/api/admin/nodes/1', expect.objectContaining({ method: 'DELETE' }));
+    expect(deleteCalled).toBe(true);
 
     const scriptBtn = screen.getByText('Install Agent Script');
     await fireEvent.click(scriptBtn);
@@ -78,26 +83,30 @@ describe('NodesView Component', () => {
 
     const copyBtn = screen.getByText('Copy Command');
     await fireEvent.click(copyBtn);
-    expect(navigator.clipboard.writeText).toHaveBeenCalled();
+    expect(copyCalled).toBe(true);
   });
 
   it('handles confirmation cancel and clipboard error in script copy', async () => {
-    vi.stubGlobal('confirm', () => false);
-    vi.stubGlobal('navigator', {
+    let deleteCalled = false;
+    (globalThis as any).confirm = () => false;
+    (globalThis as any).navigator = {
       clipboard: {
-        writeText: vi.fn().mockRejectedValue(new Error('Copy error'))
+        writeText: async () => { throw new Error('Copy error'); }
       }
-    });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [{ id: 1, name: 'EU-Node', address: '1.2.3.4', healthy: true }]
-    }));
+    };
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'DELETE') deleteCalled = true;
+      return {
+        ok: true,
+        json: async () => [{ id: 1, name: 'EU-Node', address: '1.2.3.4', healthy: true }]
+      } as Response;
+    };
 
     render(NodesView);
 
     const deleteBtn = await screen.findByText('Remove');
     await fireEvent.click(deleteBtn);
-    expect(fetch).not.toHaveBeenCalledWith('/api/admin/nodes/1', expect.objectContaining({ method: 'DELETE' }));
+    expect(deleteCalled).toBe(false);
 
     const scriptBtn = screen.getByText('Install Agent Script');
     await fireEvent.click(scriptBtn);
@@ -107,7 +116,7 @@ describe('NodesView Component', () => {
   });
 
   it('handles error responses in loadNodes and registerNode', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Node API failure')));
+    (globalThis as any).fetch = async () => { throw new Error('Node API failure'); };
 
     render(NodesView);
 
