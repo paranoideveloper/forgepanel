@@ -67,3 +67,15 @@ func TestAWGEngineForRouting(t *testing.T) {
 		t.Fatal("awg must route to the amneziawg engine, not sing-box")
 	}
 }
+
+func TestAWGModuleReadyCheck(t *testing.T) {
+	// awgModuleReady should safely run without panicking on any environment
+	err := awgModuleReady()
+	// st check should return boolean flags
+	m := NewAWGManager(t.TempDir())
+	st := m.KernelStatus()
+	if _, ok := st["module_loaded"].(bool); !ok {
+		t.Fatal("module_loaded should be a boolean")
+	}
+	_ = err
+}

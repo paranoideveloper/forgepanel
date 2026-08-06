@@ -34,7 +34,9 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
       go build -trimpath -ldflags="${LD}" -o /out/forgepanel ./cmd/forgepanel && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-      go build -trimpath -ldflags="${LD} -X main.version=${VERSION}" -o /out/forgectl ./cmd/forgectl
+      go build -trimpath -ldflags="${LD} -X main.version=${VERSION}" -o /out/forgectl ./cmd/forgectl && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+      go build -trimpath -ldflags="${LD} -X main.version=${VERSION}" -o /out/forgenode ./cmd/forgenode
 
 # ---- runtime ----------------------------------------------------------------
 # Alpine rather than distroless: the panel is an operations tool, and having a
@@ -57,10 +59,11 @@ LABEL org.opencontainers.image.title="ForgePanel" \
 
 # ca-certificates: required to talk to Let's Encrypt and any outbound HTTPS.
 # libcap: to grant the narrow port-binding capability below.
-RUN apk add --no-cache ca-certificates tzdata libcap
+RUN apk add --no-cache ca-certificates tzdata libcap wireguard-tools iptables nftables iproute2
 
 COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
 COPY --from=build /out/forgectl   /usr/local/bin/forgectl
+COPY --from=build /out/forgenode /usr/local/bin/forgenode
 
 # PRIVILEGES. The container runs as a non-root user. The panel still needs to
 # bind privileged ports (80/443 for ACME and HTTPS, 53/udp for ForgeDNS), so it
@@ -73,8 +76,7 @@ COPY --from=build /out/forgectl   /usr/local/bin/forgectl
 #                         redirect rules), and some ForgeDNS setups.
 # Without it the panel runs normally; those specific features report an error
 # rather than failing silently.
-RUN setcap cap_net_bind_service=+ep /usr/local/bin/forgepanel && \
-    addgroup -g 65532 -S forge && \
+RUN addgroup -g 65532 -S forge && \
     adduser -u 65532 -S -G forge -h /var/lib/forgepanel forge && \
     mkdir -p /var/lib/forgepanel && \
     chown -R forge:forge /var/lib/forgepanel && \
@@ -103,4 +105,4 @@ HEALTHCHECK --interval=30s --timeout=12s --start-period=10s --retries=3 \
 # shutdown (it stops the engines and releases the data-directory lock).
 # No credentials or state are generated at build time: the first-run setup token
 # is minted on first boot, is single-use and expires on a timer.
-ENTRYPOINT ["/usr/local/bin/forgepanel"]
+CMD ["/usr/local/bin/forgepanel"]

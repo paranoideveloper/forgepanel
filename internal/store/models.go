@@ -135,6 +135,7 @@ type User struct {
 // canonical node is stored as JSON in NodeJSON and rehydrated on read.
 type Inbound struct {
 	Base
+	NodeID   uint   `gorm:"index" json:"node_id"` 
 	Remark   string `gorm:"index" json:"remark"`
 	Protocol string `json:"protocol"`
 	Port     int    `json:"port"`
@@ -177,7 +178,7 @@ type AuditLog struct {
 
 // AllModels is the migration set.
 func AllModels() []any {
-	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
+	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &NodeClientTraffic{},
 		&ForgeDNSZone{}, &UserInbound{}}
 }
 
@@ -186,15 +187,17 @@ func AllModels() []any {
 // one-time secret printed in the `curl | bash` enrollment command.
 type Node struct {
 	Base
-	Name        string     `gorm:"uniqueIndex;not null" json:"name"`
-	Address     string     `json:"address"`
-	EnrollToken string     `gorm:"uniqueIndex" json:"-"`
-	Enrolled    bool       `json:"enrolled"`
-	LastSeen    *time.Time `json:"last_seen"`
-	CoreVersion string     `json:"core_version"`
-	CPU         float64    `json:"cpu"`
-	MemMB       int        `json:"mem_mb"`
-	Healthy     bool       `json:"healthy"`
+	Name          string     `gorm:"uniqueIndex;not null" json:"name"`
+	Address       string     `json:"address"`
+	EnrollToken   string     `gorm:"uniqueIndex" json:"-"`
+	Enrolled      bool       `json:"enrolled"`
+	LastSeen      *time.Time `json:"last_seen"`
+	CoreVersion   string     `json:"core_version"`
+	CPU           float64    `json:"cpu"`
+	MemMB         int        `json:"mem_mb"`
+	Healthy       bool       `json:"healthy"`
+	ConfigDirty   bool       `json:"config_dirty"`
+	ConfigDirtyAt *time.Time `json:"config_dirty_at"`
 }
 
 // ForgeDNSZone is a panel-managed DNS-tunnel zone (spec §5). The operator creates
@@ -264,4 +267,12 @@ type ForgeDNSZone struct {
 	// text columns, so an existing database picks them up empty.
 	OverrideTOML       string `gorm:"type:text" json:"-"`
 	ClientOverrideTOML string `gorm:"type:text" json:"-"`
+}
+
+// NodeClientTraffic tracks per-node cumulative traffic baselines per user tag
+// to prevent double-counting across heartbeat cycles or node restarts.
+type NodeClientTraffic struct {
+	NodeID       uint   `gorm:"primaryKey;index:idx_node_client" json:"node_id"`
+	Username     string `gorm:"primaryKey;index:idx_node_client" json:"username"`
+	LastRecorded int64  `json:"last_recorded"`
 }

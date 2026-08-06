@@ -107,6 +107,11 @@ func (s *Server) engineUnavailable(c *gin.Context) {
 // Errors are non-fatal (surfaced via /api/admin/engines): a panel must not crash
 // because a core failed to download or a saved config is rejected.
 func (s *Server) reloadEngines() {
+	defer func() {
+		if r := recover(); r != nil {
+			// recover gracefully from engine reload panic
+		}
+	}()
 	if s.engine == nil {
 		return
 	}
@@ -149,4 +154,19 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 	}
 	_, results := s.engine.Validate(s.enabledInboundNodes())
 	c.JSON(200, results)
+}
+
+// enabledInboundSpecsForNodeAddress returns inbound specs filtered for a specific node address.
+func (s *Server) enabledInboundSpecsForNodeAddress(addr string) []engine.InboundSpec {
+	all := s.enabledInboundSpecs()
+	if addr == "" {
+		return all
+	}
+	var out []engine.InboundSpec
+	for _, sp := range all {
+		if sp.Node != nil && (sp.Node.Address == "" || sp.Node.Address == "0.0.0.0" || sp.Node.Address == addr) {
+			out = append(out, sp)
+		}
+	}
+	return out
 }

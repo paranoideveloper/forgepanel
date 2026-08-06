@@ -89,6 +89,9 @@ func (s *Store) InboundByID(id uint) (*Inbound, error) {
 // DeleteInbound removes an inbound.
 func (s *Store) DeleteInbound(id uint) error { return s.db.Delete(&Inbound{}, id).Error }
 
+// SaveInbound updates an inbound.
+func (s *Store) SaveInbound(in *Inbound) error { return s.db.Save(in).Error }
+
 // --- groups & users -------------------------------------------------------
 
 // CreateGroup persists a group.
@@ -317,6 +320,15 @@ func (s *Store) ListNodes() ([]Node, error) {
 	return out, s.db.Order("id").Find(&out).Error
 }
 
+// NodeByID resolves a node by ID.
+func (s *Store) NodeByID(id uint) (*Node, error) {
+	var n Node
+	if err := s.db.First(&n, id).Error; err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
 // NodeByToken resolves an enroll/auth token to a node.
 func (s *Store) NodeByToken(token string) (*Node, error) {
 	var n Node
@@ -439,4 +451,29 @@ func (s *Store) ConsumeRecoveryCode(adminID uint, matches func(hash string) bool
 		return tx.Model(&Admin{}).Where("id = ?", adminID).Update("recovery_codes", string(raw)).Error
 	})
 	return used, remaining, err
+}
+
+// GetNodeClientTraffic retrieves baseline traffic for (nodeID, username).
+func (s *Store) GetNodeClientTraffic(nodeID uint, username string) (*NodeClientTraffic, error) {
+	var nt NodeClientTraffic
+	err := s.db.Where("node_id = ? AND username = ?", nodeID, username).First(&nt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &nt, nil
+}
+
+// SaveNodeClientTraffic saves baseline traffic for (nodeID, username).
+func (s *Store) SaveNodeClientTraffic(nt *NodeClientTraffic) error {
+	return s.db.Save(nt).Error
+}
+
+// PurgeUserNodeClientTraffic deletes baseline records for a user across all nodes.
+func (s *Store) PurgeUserNodeClientTraffic(username string) error {
+	return s.db.Where("username = ?", username).Delete(&NodeClientTraffic{}).Error
+}
+
+// PurgeNodeClientTraffic deletes baseline records for a node across all users.
+func (s *Store) PurgeNodeClientTraffic(nodeID uint) error {
+	return s.db.Where("node_id = ?", nodeID).Delete(&NodeClientTraffic{}).Error
 }

@@ -285,6 +285,10 @@ func (s *Store) DefaultGroup() *Group {
 // orphan assignment rows survive to be re-applied to a recycled ID.
 func (s *Store) DeleteUserCascade(userID uint) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		var u User
+		if err := tx.First(&u, userID).Error; err == nil && u.Username != "" {
+			_ = tx.Where("username = ?", u.Username).Delete(&NodeClientTraffic{}).Error
+		}
 		if err := tx.Where("user_id = ?", userID).Delete(&UserInbound{}).Error; err != nil {
 			return err
 		}

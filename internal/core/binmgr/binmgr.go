@@ -10,7 +10,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -210,17 +209,6 @@ func download(url string) ([]byte, error) {
 		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
-}
-
-// verifyInDigest confirms the file's SHA-256 appears in the published digest
-// text (xray ships a multi-hash .dgst file).
-func verifyInDigest(data []byte, dgst string) error {
-	sum := sha256.Sum256(data)
-	hexsum := hex.EncodeToString(sum[:])
-	if !strings.Contains(strings.ToLower(dgst), hexsum) {
-		return errors.New("binmgr: SHA-256 mismatch against published .dgst")
-	}
-	return nil
 }
 
 func extractZipFile(data []byte, want, dst string) error {

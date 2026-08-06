@@ -239,6 +239,14 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "inbound not found"})
 		return
 	}
+	for i := range ins {
+		if ins[i].ID == id && ins[i].NodeID > 0 {
+			if node, err := s.db.NodeByID(ins[i].NodeID); err == nil && node.Address != "" {
+				n.Address = node.Address
+			}
+			break
+		}
+	}
 	s.substituteAddr(n, hostOnly(c.Request.Host))
 	s.applyExportDefaults(n)
 	if n.Protocol == model.ProtoWireGuard {
@@ -416,7 +424,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 
 func (s *Server) handleDeleteUser(c *gin.Context) {
 	id := parseID(c)
-	if err := s.db.DeleteUser(id); err != nil {
+	if err := s.db.DeleteUserCascade(id); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -468,6 +476,11 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 			continue
 		}
 		stampIdentity(n, u)
+		if in.NodeID > 0 {
+			if node, err := s.db.NodeByID(in.NodeID); err == nil && node.Address != "" {
+				n.Address = node.Address
+			}
+		}
 		s.substituteAddr(n, hostFromCtx)
 		s.applyExportDefaults(n)
 		out = append(out, n)

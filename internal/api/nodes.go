@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -61,6 +62,10 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 	now := time.Now()
 	n.Enrolled = true
 	n.Healthy = true
+	if n.LastSeen != nil && now.Before(*n.LastSeen) {
+		c.JSON(200, gin.H{"xray_config": ""})
+		return
+	}
 	n.LastSeen = &now
 	n.CoreVersion = req.CoreVersion
 	_ = s.db.SaveNode(n)
@@ -94,7 +99,10 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	// A control-plane-only panel has no local engine; the heartbeat still
 	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
 	var xrayCfg string
-	if s.engine != nil {
+	specs := s.enabledInboundSpecsForNodeAddress(n.Address)
+	if b, err := engine.BuildMulti(specs, 10085, "", ""); err == nil && b != nil {
+		xrayCfg = string(b.Xray)
+	} else if s.engine != nil {
 		if b := s.engine.LastBundle(); b != nil {
 			xrayCfg = string(b.Xray)
 		}
