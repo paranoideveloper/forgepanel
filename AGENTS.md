@@ -55,8 +55,9 @@ ForgePanel is a Go-based server management panel and node orchestration platform
 Before submitting or updating any Pull Request, agents **MUST** execute and pass all verification steps:
 
 ```bash
-# 1. Code Formatting & Dependency Hygiene
+# 1. Code Formatting, Frontend & Dependency Hygiene
 UNFORMATTED=$(gofmt -l .) && test -z "$UNFORMATTED"
+(cd frontend && bun run check && bun run test --coverage)
 go mod tidy && git diff --exit-code go.mod go.sum
 
 # 2. Decoupled Matrix & Randomized Test Execution

@@ -16,8 +16,10 @@ WORKDIR /src
 # module cache layer.
 COPY go.mod go.sum ./
 RUN go mod download
-
+RUN apk add --no-cache curl unzip && curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
 COPY . .
+RUN cd frontend && bun install && bun run build
 
 # Build identity, passed by the release workflow so a container reports the same
 # version as the binaries cut from the same tag. The defaults keep a local

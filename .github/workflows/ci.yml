@@ -252,6 +252,27 @@ jobs:
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgectl-${{ matrix.goarch }} ./cmd/forgectl
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgenode-${{ matrix.goarch }} ./cmd/forgenode
 
+  test-frontend-svelte-suite:
+    name: Frontend Svelte 5 & TypeScript Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && bun install
+
+      - name: Svelte TypeScript Type Check
+        run: cd frontend && bun run check
+
+      - name: Run Vitest Unit Tests & Coverage
+        run: cd frontend && bun run test --coverage
+
   docker-build:
     name: Docker Container Build
     runs-on: ubuntu-latest
@@ -273,6 +294,7 @@ jobs:
       - test-forgedns-transport-stack
       - test-lifecycle-config-backup
       - test-cli-node-binaries
+      - test-frontend-svelte-suite
       - race-detector
       - govulncheck
       - e2e-smoke-test
