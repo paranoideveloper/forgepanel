@@ -64,7 +64,6 @@ func TestNodeAgentHeartbeatAndApplyConfig(t *testing.T) {
 	}
 }
 
-
 func TestNodeAgentRejectsInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
 

@@ -170,7 +170,6 @@ func TestSingboxUserNameNeverLeaksCredentials(t *testing.T) {
 	}
 }
 
-
 func TestBuildMultiZeroClientsRendersEmptyArray(t *testing.T) {
 	n := &model.Node{Protocol: model.ProtoVLESS, Address: "0.0.0.0", Port: 443, UUID: "tmpl", Transport: model.Transport{Network: model.NetTCP}}
 	n.Normalize()

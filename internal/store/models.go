@@ -135,7 +135,7 @@ type User struct {
 // canonical node is stored as JSON in NodeJSON and rehydrated on read.
 type Inbound struct {
 	Base
-	NodeID   uint   `gorm:"index" json:"node_id"` 
+	NodeID   uint   `gorm:"index" json:"node_id"`
 	Remark   string `gorm:"index" json:"remark"`
 	Protocol string `json:"protocol"`
 	Port     int    `json:"port"`

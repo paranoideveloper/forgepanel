@@ -307,7 +307,6 @@ func TestStore_SettingsAndAudit(t *testing.T) {
 	s.Audit(&AuditLog{Actor: "admin", Action: "user.create", IP: "1.2.3.4", Target: "bob"})
 }
 
-
 func TestDeleteUserCascadePurgesNodeClientTraffic(t *testing.T) {
 	s := newTestStore(t)
 	u := &User{Username: "purge_test_user"}

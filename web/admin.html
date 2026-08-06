@@ -1088,6 +1088,7 @@ VIEWS.inbounds=async function(content){
       const act=h('td');
       act.appendChild(h('div',{class:'t-actions'},[
         h('button',{class:'btn sm ghost',html:icon('qr'),title:'Client preview',onClick:()=>previewInbound(r)}),
+        h('button',{class:'btn sm ghost',html:icon('edit'),title:'Edit inbound',onClick:()=>openInboundModal(load,Object.assign({},r.node,{id:r.id}))}),
         h('button',{class:'btn sm ghost',html:icon('swap'),title:'Switch protocol',onClick:()=>switchProtocolModal(r,load)}),
         h('button',{class:'btn sm danger',html:icon('trash'),onClick:async()=>{ if(await confirmDialog('Delete inbound "'+(r.remark||r.id)+'"? Active users on it will stop connecting.')){
           try{ await api('/api/admin/inbounds/'+r.id,{method:'DELETE'}); toast('Inbound deleted','success'); load(); }catch(e){ toast(e.message,'error'); } } }})]));
@@ -1373,9 +1374,12 @@ function openInboundModal(onSaved,seed){
   }
 
   buildDyn(); drawPreview();
-  modal({title:t('newInbound'),wide:true,body,okText:t('create'),cancelText:t('cancel'),
+  const isEdit=!!seed&&typeof seed==='object'&&!!seed.id;
+  modal({title:isEdit?'Edit inbound':t('newInbound'),wide:true,body,okText:isEdit?'Save changes':t('create'),cancelText:t('cancel'),
     onOk:async()=>{ const p=Number(base.port); if(!p||p<1||p>65535){ toast('Port must be 1–65535','error'); return false; }
-      await api('/api/admin/inbounds',{method:'POST',body:buildNode()}); toast('Inbound created','success'); if(onSaved) onSaved(); }});
+      if(isEdit){ await api('/api/admin/inbounds/'+seed.id,{method:'PUT',body:buildNode()}); toast('Inbound updated','success'); }
+      else{ await api('/api/admin/inbounds',{method:'POST',body:buildNode()}); toast('Inbound created','success'); }
+      if(onSaved) onSaved(); }});
   schedule();
 }
 
