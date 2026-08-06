@@ -66,15 +66,21 @@ curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VE
 sudo dnf install "./$ASSET"
 ```
 
-### Docker image
+### Docker
 
 ```bash
 VERSION=v1.2.0
+git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
+cd forgepanel
+docker build -t forgepanel:$VERSION \
+  --build-arg VERSION=$VERSION \
+  --build-arg COMMIT="$(git rev-parse HEAD)" \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
 docker volume create forgepanel-data
 docker run -d --name forgepanel --restart unless-stopped \
   -p 2053:2053 -p 2054:2054 -p 2096:2096 \
   -v forgepanel-data:/var/lib/forgepanel \
-  ghcr.io/paranoideveloper/forgepanel:$VERSION
+  forgepanel:$VERSION
 docker logs -f forgepanel
 ```
 
@@ -90,7 +96,7 @@ in a named volume and accepts an explicit image version.
 VERSION=v1.2.0
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-FORGEPANEL_VERSION=$VERSION docker compose up -d
+FORGEPANEL_VERSION=$VERSION docker compose up -d --build
 docker compose logs -f forgepanel
 ```
 

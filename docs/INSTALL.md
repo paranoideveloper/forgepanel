@@ -1,10 +1,9 @@
 # Installing ForgePanel
 
-Every release publishes two artifact sets from the same commit and the same test
-run: static binaries on the GitHub Release, and a matching multi-architecture
-image in GHCR (`linux/amd64` and `linux/arm64`). Both carry the same version
-metadata, use the same database schema and migrations, and share the same
-first-run setup flow, so you can move between them.
+Every release publishes static Linux binaries and native Debian/RPM packages
+from the same commit and test run. The Dockerfile builds the same application
+from a pinned release tag and uses the same database schema, migrations, and
+first-run setup flow.
 
 ## One command (Linux, systemd)
 
@@ -82,26 +81,16 @@ later repair or explicit purge.
 ## Docker
 
 ```bash
-docker run -d \
-  --name forgepanel \
-  --restart unless-stopped \
-  -p 2053:2053 \
-  -v forgepanel-data:/var/lib/forgepanel \
-  ghcr.io/paranoideveloper/forgepanel:v1.2.0
+VERSION=v1.2.0
+git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
+cd forgepanel
+FORGEPANEL_VERSION=$VERSION docker compose up -d --build
 ```
 
-Or with Compose — `docker-compose.yml` in the repository is a production example
-pinned to an explicit release:
-
-```bash
-docker compose up -d
-docker compose logs -f forgepanel     # first boot prints the setup token
-```
-
-**Pin the version.** `latest` exists and only ever points at a stable release
-(never a prerelease), but a production deployment should name the version it
-runs, so `docker compose pull` cannot move it across a major version while you
-are not looking.
+The checked-in Compose file builds a local image tagged with
+`FORGEPANEL_VERSION`. Pin the Git checkout and that variable to the same release
+tag; a production update is then an explicit checkout and rebuild, never an
+implicit floating-image pull.
 
 ### What the container needs
 
@@ -123,16 +112,11 @@ are not looking.
 - **Signals**: the panel is PID 1 and handles `SIGTERM`, so `docker stop` shuts
   the engines down cleanly.
 
-### Verifying an image
-
-Images are signed with keyless Sigstore and ship build provenance and an SBOM:
+### Verifying a local image
 
 ```bash
-cosign verify ghcr.io/paranoideveloper/forgepanel:v1.2.0 \
-  --certificate-identity-regexp '^https://github.com/paranoideveloper/forgepanel/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-
-docker buildx imagetools inspect ghcr.io/paranoideveloper/forgepanel:v1.2.0
+docker image inspect forgepanel:v1.2.0
+docker run --rm --entrypoint /usr/local/bin/forgectl forgepanel:v1.2.0 version
 ```
 
 ## From source

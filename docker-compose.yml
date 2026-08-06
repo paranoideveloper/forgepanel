@@ -5,16 +5,19 @@
 #   docker compose up -d
 #   docker compose logs -f forgepanel     # first boot prints the setup token
 #
-# The image comes from GHCR and is PINNED to an explicit release. Pinning is the
-# point of a production example: `latest` would silently move a running
-# deployment to a new major version on the next `docker compose pull`. Bump this
-# line deliberately when you upgrade, and read the release notes first.
-#
-# To build from source instead, uncomment `build: .` and drop the tag.
+# Compose builds the checked-out, pinned release tag locally. This keeps the
+# deployment usable when a private registry is unavailable and lets the same
+# file build exactly the source you reviewed. Bump FORGEPANEL_VERSION only after
+# checking out the matching release tag and reading its release notes.
 services:
   forgepanel:
-    image: ghcr.io/paranoideveloper/forgepanel:${FORGEPANEL_VERSION:-v1.2.0}
-    # build: .
+    image: forgepanel:${FORGEPANEL_VERSION:-v1.2.0}
+    build:
+      context: .
+      args:
+        VERSION: ${FORGEPANEL_VERSION:-v1.2.0}
+        COMMIT: ${FORGEPANEL_COMMIT:-local}
+        BUILD_DATE: ${FORGEPANEL_BUILD_DATE:-local}
     container_name: forgepanel
     restart: unless-stopped
 
