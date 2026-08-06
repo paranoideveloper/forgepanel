@@ -45,6 +45,21 @@ func selfSignedCNOnly(t *testing.T, cn string) ([]byte, []byte) {
 	return cpem, kpem
 }
 
+func selfSignedNoDomains(t *testing.T) ([]byte, []byte) {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(48 * time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	kb, _ := x509.MarshalECPrivateKey(key)
+	kpem := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})
+	return cpem, kpem
+}
+
 func TestImportAndExpiry(t *testing.T) {
 	s := NewStore(t.TempDir(), true, nil)
 	cpem, kpem := selfSigned(t, "panel.example.com")
@@ -82,9 +97,15 @@ func TestImportEdgeCases(t *testing.T) {
 		t.Fatalf("expected cnonly.local domain, got %v", imp.Domains)
 	}
 
+	// Cert with no domains or common name
+	nodomCert, nodomKey := selfSignedNoDomains(t)
+	if _, err := s.Import(nodomCert, nodomKey); err == nil {
+		t.Fatal("expected error importing cert with no domains")
+	}
+
 	// Invalid cert PEM block
-	if _, err := s.Import([]byte("-----BEGIN FOO-----\n1234\n-----END FOO-----"), kpem); err == nil {
-		t.Fatal("expected error on invalid PEM block type")
+	if _, err := s.Import([]byte("-----BEGIN CERTIFICATE-----\nINVALIDBASE64\n-----END CERTIFICATE-----"), kpem); err == nil {
+		t.Fatal("expected error on invalid certificate bytes inside PEM block")
 	}
 
 	// Invalid key PEM

@@ -114,3 +114,77 @@ func TestValidEmailAndApplyDetails(t *testing.T) {
 		t.Fatalf("Apply result mismatch: %+v", res.New)
 	}
 }
+
+func TestSettingsAllEdgeCases(t *testing.T) {
+	// NormalizeDomain empty
+	if NormalizeDomain("") != "" {
+		t.Fatal("NormalizeDomain(\"\") should be empty")
+	}
+
+	// ValidEmail edge cases
+	if !ValidEmail("") {
+		t.Fatal("empty email should be valid (cleared)")
+	}
+	if ValidEmail("invalid space@domain.com") || ValidEmail("user@") || ValidEmail("user@bad_domain") {
+		t.Fatal("ValidEmail invalid cases failed")
+	}
+
+	// PortFree out of bounds
+	if PortFree("127.0.0.1", 0) || PortFree("127.0.0.1", 70000) {
+		t.Fatal("PortFree out of bounds should return false")
+	}
+
+	dir := t.TempDir()
+	cfg, err := config.LoadFromDataDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(cfg)
+	svc.PortOK = func(string, int) bool { return true }
+
+	// Invalid BindAddress
+	badBind := "not-an-ip"
+	if _, err := svc.Apply(Change{BindAddress: &badBind}); err == nil {
+		t.Fatal("expected error for invalid BindAddress")
+	}
+
+	// Port out of range
+	badPort := 99999
+	if _, err := svc.Apply(Change{Port: &badPort}); err == nil {
+		t.Fatal("expected error for invalid port range")
+	}
+
+	// HTTPS enabled without domain
+	httpsTrue := true
+	if _, err := svc.Apply(Change{HTTPSEnabled: &httpsTrue}); err == nil {
+		t.Fatal("expected error enabling HTTPS without domain")
+	}
+
+	// Invalid ACME email
+	badEmail := "bad email"
+	if _, err := svc.Apply(Change{ACMEEmail: &badEmail}); err == nil {
+		t.Fatal("expected error for invalid ACME email")
+	}
+
+	// Clear domain disables HTTPS
+	dom := "panel.example.com"
+	svc.Apply(Change{Domain: &dom})
+	emptyDom := ""
+	res, err := svc.Apply(Change{Domain: &emptyDom})
+	if err != nil || res.New.HTTPSEnabled || res.New.ACME.Enabled {
+		t.Fatalf("clearing domain should disable HTTPS: %+v", res.New)
+	}
+
+	// verifyDNS matching and non-matching tests
+	svc.Lookup = func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("192.0.2.1")}, nil }
+	svc.IPv4 = func() string { return "192.0.2.1" }
+	if err := svc.verifyDNS("panel.example.com"); err != nil {
+		t.Fatalf("verifyDNS matching IPv4 failed: %v", err)
+	}
+
+	svc.IPv4 = func() string { return "198.51.100.1" }
+	if err := svc.verifyDNS("panel.example.com"); err == nil {
+		t.Fatal("verifyDNS non-matching expected error")
+	}
+}

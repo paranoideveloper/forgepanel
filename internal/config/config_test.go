@@ -231,6 +231,11 @@ func TestConfigCloneAndRollback(t *testing.T) {
 	}
 
 	p := cfg.Panel()
+	nilCloned := ClonePanel(nil)
+	if nilCloned.Port != 0 {
+		t.Fatal("ClonePanel(nil) expected empty PanelSettings")
+	}
+	p.extra = map[string]json.RawMessage{"custom_key": []byte(`"value"`)}
 	cloned := ClonePanel(p)
 	if cloned.Port != p.Port || cloned.AdminPath != p.AdminPath {
 		t.Fatalf("ClonePanel mismatch: %+v vs %+v", cloned, p)
@@ -282,5 +287,56 @@ func TestDefaultDataDirFallback(t *testing.T) {
 	dd := defaultDataDir()
 	if dd == "" {
 		t.Fatal("defaultDataDir returned empty string")
+	}
+}
+
+func TestConfigMissingEdgeCases(t *testing.T) {
+	dir := t.TempDir()
+
+	// Corrupt panel.json
+	_ = os.WriteFile(filepath.Join(dir, "panel.json"), []byte("invalid json"), 0600)
+	if _, err := LoadFromDataDir(dir); err == nil {
+		t.Fatal("expected error loading corrupt panel.json")
+	}
+
+	// Load valid then corrupt panel.json to test ReloadPanel error
+	dir2 := t.TempDir()
+	cfg, err := LoadFromDataDir(dir2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir2, "panel.json"), []byte("corrupt"), 0600)
+	if err := cfg.ReloadPanel(); err == nil {
+		t.Fatal("expected ReloadPanel error with corrupt file")
+	}
+
+	// RestoreRollback missing file test
+	if RestoreRollback(t.TempDir()) {
+		t.Fatal("RestoreRollback should return false when no rollback exists")
+	}
+
+	// ClonePanel full copy test
+	p := cfg.Panel()
+	p.ACME.Email = "test@example.com"
+	p.ACME.Enabled = true
+	nilCloned := ClonePanel(nil)
+	if nilCloned.Port != 0 {
+		t.Fatal("ClonePanel(nil) expected empty PanelSettings")
+	}
+	p.extra = map[string]json.RawMessage{"custom_key": []byte(`"value"`)}
+	cloned := ClonePanel(p)
+	if cloned.ACME.Email != p.ACME.Email || !cloned.ACME.Enabled {
+		t.Fatalf("ClonePanel ACME copy failed: %+v", cloned)
+	}
+
+	// WriteRollback & SavePanel error paths
+	fileAsDir := filepath.Join(dir2, "regular_file")
+	_ = os.WriteFile(fileAsDir, []byte("x"), 0600)
+	cfg.DataDir = fileAsDir
+	if err := cfg.SavePanel(); err == nil {
+		t.Fatal("expected error saving panel to invalid path")
+	}
+	if err := cfg.WriteRollback(p); err == nil {
+		t.Fatal("expected error writing rollback to invalid path")
 	}
 }
