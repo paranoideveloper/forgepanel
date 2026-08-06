@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -18,7 +19,9 @@ import (
 
 // Store wraps the GORM DB and exposes typed repositories.
 type Store struct {
-	db *gorm.DB
+	db        *gorm.DB
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // Open opens (pure-Go) SQLite at path and auto-migrates. A dsn of ":memory:"
@@ -38,6 +41,22 @@ func Open(path string) (*Store, error) {
 
 // DB exposes the underlying handle for advanced queries.
 func (s *Store) DB() *gorm.DB { return s.db }
+
+// Close releases the SQLite connection pool. It is safe to call more than once.
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		db, err := s.db.DB()
+		if err != nil {
+			s.closeErr = err
+			return
+		}
+		s.closeErr = db.Close()
+	})
+	return s.closeErr
+}
 
 // --- admins ---------------------------------------------------------------
 

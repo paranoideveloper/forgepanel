@@ -27,6 +27,7 @@ func setupHardenedServer(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatalf("NewWithStore: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s, s.db
 }
 

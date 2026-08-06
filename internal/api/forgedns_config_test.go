@@ -42,6 +42,7 @@ func configTestServer(t *testing.T) (*Server, *gin.Engine, *store.ForgeDNSZone) 
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	s := &Server{db: db, router: gin.New()}
 	z := &store.ForgeDNSZone{
 		Zone: "v.example.com", Adapter: upstream.AdapterCottenDNS, Enabled: true,

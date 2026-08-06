@@ -20,6 +20,7 @@ func dbServerT(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	return &Server{cfg: &config.Config{}, db: db, router: gin.New(),
 		signer: auth.NewSigner([]byte("test")), login: newLoginLimiter(), subs: newLoginLimiter()}
 }

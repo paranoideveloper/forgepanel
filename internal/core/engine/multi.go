@@ -31,9 +31,10 @@ type InboundSpec struct {
 }
 
 // BuildMulti aggregates inbound specs into engine configs, expanding each xray
-// inbound to carry one client per user and enabling per-user stats. sing-box
-// inbounds get a users array likewise. Falls back to the template's own
-// credential when an inbound has no bound users (so a bare inbound still works).
+// inbound to carry one client per user and enabling per-user stats. Sing-box
+// inbounds get a users array likewise. An inbound without assigned users gets
+// an empty Xray allow-list, so a template credential can never bypass access
+// assignment.
 func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) (*Bundle, error) {
 	b := &Bundle{}
 	var xin, sin, sep []any

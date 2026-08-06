@@ -58,6 +58,22 @@ type ZoneSpec struct {
 // Upstream exposes the real-binary manager (bundles, explicit installs, health).
 func (c *ForgeDNSController) Upstream() *upstream.Manager { return c.up }
 
+// Stop shuts down the native listener and every supervised upstream zone.
+func (c *ForgeDNSController) Stop() {
+	c.mu.Lock()
+	srv := c.server
+	c.server = nil
+	c.started = false
+	up := c.up
+	c.mu.Unlock()
+	if srv != nil {
+		_ = srv.Shutdown()
+	}
+	if up != nil {
+		up.StopAll()
+	}
+}
+
 // SyncZones rebuilds the served zone set from the panel's enabled zones and
 // ensures the listener is running if there is at least one native zone. Upstream
 // zones are reconciled by their own supervisor. Returns the zone names now

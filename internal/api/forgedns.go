@@ -29,7 +29,7 @@ func (s *Server) syncForgeDNS() {
 			// recover gracefully from forgedns sync panic
 		}
 	}()
-	if s.fdns == nil || s.db == nil {
+	if s.isClosed() || s.fdns == nil || s.db == nil {
 		return
 	}
 	zones, err := s.db.ListZones()
@@ -283,7 +283,7 @@ func (s *Server) handleForgeDNSCreate(c *gin.Context) {
 		return
 	}
 	s.audit(c, "forgedns.zone.create", z.Zone)
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(201, z)
 }
 
@@ -315,7 +315,7 @@ func (s *Server) handleForgeDNSUpdate(c *gin.Context) {
 		return
 	}
 	s.audit(c, "forgedns.zone.update", z.Zone)
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, z)
 }
 
@@ -329,7 +329,7 @@ func (s *Server) handleForgeDNSToggle(c *gin.Context) {
 	z.Enabled = !z.Enabled
 	_ = s.db.SaveZone(z)
 	s.audit(c, "forgedns.zone.toggle", z.Zone)
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, z)
 }
 
@@ -343,7 +343,7 @@ func (s *Server) handleForgeDNSDelete(c *gin.Context) {
 	if z != nil {
 		s.audit(c, "forgedns.zone.delete", z.Zone)
 	}
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, gin.H{"deleted": parseID(c)})
 }
 
@@ -403,7 +403,7 @@ func (s *Server) handleForgeDNSInstall(c *gin.Context) {
 	z.PinnedTag = in.Tag
 	_ = s.db.SaveZone(z)
 	s.audit(c, "forgedns.zone.install", z.Zone+" "+in.Tag)
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, in)
 }
 

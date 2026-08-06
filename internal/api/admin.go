@@ -177,7 +177,7 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		return
 	}
 	s.audit(c, "inbound.create", in.Remark)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	c.JSON(201, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port})
 }
 
@@ -296,7 +296,7 @@ func (s *Server) handleDeleteInbound(c *gin.Context) {
 		return
 	}
 	s.audit(c, "inbound.delete", strconv.FormatUint(uint64(id), 10))
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"deleted": id})
 }
 
@@ -417,7 +417,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		return
 	}
 	s.audit(c, "user.create", u.Username)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	c.JSON(201, gin.H{"id": u.ID, "username": u.Username, "sub_token": u.SubToken,
 		"sub_url": subURL(c, u.SubToken), "uuid": u.UUID})
 }
@@ -429,7 +429,7 @@ func (s *Server) handleDeleteUser(c *gin.Context) {
 		return
 	}
 	s.audit(c, "user.delete", strconv.FormatUint(uint64(id), 10))
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"deleted": id})
 }
 

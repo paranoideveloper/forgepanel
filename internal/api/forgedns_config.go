@@ -221,7 +221,7 @@ func (s *Server) handleForgeDNSZoneOverride(c *gin.Context) {
 		return
 	}
 	s.audit(c, "forgedns.zone.override", z.Zone+" "+string(scope))
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, gin.H{
 		"zone": z.Zone, "scope": scope, "warnings": warnings,
 		"overridden_keys": e.Unknown, "ignored_keys": e.Ignored,
@@ -289,7 +289,7 @@ func (s *Server) handleForgeDNSZoneImport(c *gin.Context) {
 	}
 	result["applied"] = true
 	s.audit(c, "forgedns.zone.import", z.Zone+" "+string(scope))
-	go s.syncForgeDNS()
+	s.startBackground(s.syncForgeDNS)
 	c.JSON(200, result)
 }
 

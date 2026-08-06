@@ -28,6 +28,7 @@ func createComprehensiveTestServer(t *testing.T) (*Server, *store.Store, string)
 	if err != nil {
 		t.Fatalf("NewWithStore: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 
 	admin := &store.Admin{
 		Username:     "admin",

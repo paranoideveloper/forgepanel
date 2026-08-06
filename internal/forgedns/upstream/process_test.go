@@ -146,8 +146,19 @@ func TestStopReleasesPortBeforeReturning(t *testing.T) {
 // silently swallowed.
 func TestSlowShutdownIsForceKilled(t *testing.T) {
 	dir := t.TempDir()
-	exe := writeScript(t, dir, "stubborn.sh", "trap '' TERM\nwhile :; do sleep 0.1; done")
+	ready := filepath.Join(dir, "stubborn.ready")
+	exe := writeScript(t, dir, "stubborn.sh", "trap '' TERM\n: > "+ready+"\nwhile :; do sleep 0.1; done")
 	p := launch(t, dir, exe)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(ready); err != nil {
+		t.Fatalf("stubborn process never installed its SIGTERM trap: %v", err)
+	}
 	pid := p.snapshotPID()
 
 	start := time.Now()

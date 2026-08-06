@@ -85,6 +85,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(ctx)
+	_ = srv.Close()
+	releaseDataLock()
 }
 
 // start loads config, builds the server, and opens the panel listener. Splitting
@@ -117,6 +119,7 @@ func start() (*config.Config, *api.Server, net.Listener, error) {
 	dataUnlock = unlock
 	srv, err := api.NewWithStore(cfg)
 	if err != nil {
+		releaseDataLock()
 		return cfg, nil, nil, fmt.Errorf("store: %w", err)
 	}
 	p := cfg.Panel()
@@ -126,6 +129,8 @@ func start() (*config.Config, *api.Server, net.Listener, error) {
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(p.Port)))
 	if err != nil {
+		_ = srv.Close()
+		releaseDataLock()
 		return cfg, srv, nil, fmt.Errorf("listen on %s:%d: %w", p.BindAddress, p.Port, err)
 	}
 	return cfg, srv, ln, nil

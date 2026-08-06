@@ -206,7 +206,7 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 		return
 	}
 	s.audit(c, "user.update", u.Username)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 
 	fresh, _ := s.db.UserByID(u.ID)
 	a, _ := s.db.UserAssignments(u.ID)
@@ -291,7 +291,7 @@ func (s *Server) handleSetUserInbounds(c *gin.Context) {
 		return
 	}
 	s.audit(c, "user.inbounds.set", u.Username)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	a, _ := s.db.UserAssignments(u.ID)
 	c.JSON(200, gin.H{"assignments": a})
 }
@@ -334,7 +334,7 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 		return
 	}
 	s.audit(c, "user.credentials.reset", u.Username)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	fresh, _ := s.db.UserByID(u.ID)
 	c.JSON(200, gin.H{"user": fresh, "sub_url": subURL(c, fresh.SubToken)})
 }
@@ -436,7 +436,7 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 		}
 	}
 	s.audit(c, "group.update", g.Name)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	fresh, _ := s.db.GroupByID(g.ID)
 	members, _ := s.db.UsersInGroup(g.ID)
 	c.JSON(200, gin.H{"group": fresh, "members": members, "updated_at": fresh.UpdatedAt})
@@ -472,6 +472,6 @@ func (s *Server) handleDeleteGroup(c *gin.Context) {
 		return
 	}
 	s.audit(c, "group.delete", g.Name)
-	go s.reloadEngines()
+	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"deleted": true, "members_moved": moved})
 }

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,13 @@ type Server struct {
 	fdns    *core.ForgeDNSController // DNS-tunnel manager (spec §5)
 	domains *domain.Registry         // domain registry + DNS health (spec §7)
 	certs   *cert.Store              // cert store + ACME (spec §7)
+	stop    context.CancelFunc
+
+	lifecycleMu sync.Mutex
+	closed      bool
+	background  sync.WaitGroup
+	closeOnce   sync.Once
+	closeErr    error
 
 	// FirstAdminPassword is retained for API compatibility but is no longer used:
 	// fresh installs create the owner via the token-protected first-run setup flow
@@ -93,6 +101,7 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		p := cfg.Panel()
 		return p != nil && p.Domain != "" && strings.EqualFold(host, p.Domain)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		cfg: cfg, router: gin.New(), db: db, mem: NewNodeStore(),
 		signer:  auth.NewSigner([]byte(deriveSecret(cfg))),
@@ -102,6 +111,7 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		certs:   cert.NewStore(filepath.Join(cfg.DataDir, "acme"), staging, allowPanelHost),
 		login:   newLoginLimiter(),
 		subs:    newLoginLimiter(),
+		stop:    cancel,
 	}
 	// Honour session revocation: a token whose epoch is behind the account's
 	// current one was invalidated by a recovery-code login, a 2FA disable or a
@@ -114,14 +124,16 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		return epoch >= cur
 	})
 	if err := s.reconcileSetup(); err != nil {
+		cancel()
+		_ = db.Close()
 		return nil, err
 	}
 	s.router.Use(gin.Recovery(), securityHeaders())
 	s.routes()
 	// Best-effort: bring the engines up for already-persisted inbounds. A fresh
 	// or offline panel simply has nothing to start yet.
-	go s.reloadEngines()
-	go s.syncForgeDNS()
+	s.startBackground(s.reloadEngines)
+	s.startBackground(s.syncForgeDNS)
 	// Cron scheduler: poll traffic, enforce quotas/expiry, reset by strategy.
 	s.sched = job.New(job.Config{
 		DB:         db,
@@ -142,8 +154,58 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		},
 	})
 	s.sched.Start()
-	s.startBot(context.Background())
+	s.startBot(ctx)
 	return s, nil
+}
+
+// Close stops background workers and dependent services before closing storage.
+// It is safe to call more than once.
+func (s *Server) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.closed = true
+		s.lifecycleMu.Unlock()
+		if s.stop != nil {
+			s.stop()
+		}
+		if s.sched != nil {
+			s.sched.Stop()
+		}
+		s.background.Wait()
+		if s.engine != nil {
+			s.engine.StopAll()
+		}
+		if s.fdns != nil {
+			s.fdns.Stop()
+		}
+		if s.db != nil {
+			s.closeErr = s.db.Close()
+		}
+	})
+	return s.closeErr
+}
+
+func (s *Server) startBackground(fn func()) {
+	s.lifecycleMu.Lock()
+	if s.closed {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	s.background.Add(1)
+	s.lifecycleMu.Unlock()
+	go func() {
+		defer s.background.Done()
+		fn()
+	}()
+}
+
+func (s *Server) isClosed() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.closed
 }
 
 // deriveSecret returns HMAC secret material bound to the panel master key.

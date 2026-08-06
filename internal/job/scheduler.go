@@ -6,6 +6,7 @@ package job
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -33,6 +34,7 @@ type Scheduler struct {
 	reloadHook  func()                                     // called after a mutation to reapply engine configs
 	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
 	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 	now         func() time.Time // injectable clock (tests use a controllable one)
 }
 
@@ -64,8 +66,15 @@ func New(cfg Config) *Scheduler {
 func (s *Scheduler) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	go s.loop(ctx, s.pollEvery, s.pollAndAccount)
-	go s.loop(ctx, s.sweepEvery, s.sweep)
+	s.wg.Add(2)
+	go func() {
+		defer s.wg.Done()
+		s.loop(ctx, s.pollEvery, s.pollAndAccount)
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.loop(ctx, s.sweepEvery, s.sweep)
+	}()
 }
 
 // Stop halts the scheduler.
@@ -73,6 +82,7 @@ func (s *Scheduler) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.wg.Wait()
 }
 
 func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {

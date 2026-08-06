@@ -104,7 +104,12 @@ func TestFullMatrixConnectivity(t *testing.T) {
 func specsFor(nodes []*model.Node) []engine.InboundSpec {
 	out := make([]engine.InboundSpec, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, engine.InboundSpec{Node: n})
+		// BuildMulti deliberately renders zero-client inbounds with an empty
+		// allow-list. Materialize the matching test client just as the panel does
+		// for a user assigned to an inbound.
+		out = append(out, engine.InboundSpec{Node: n, Clients: []engine.ClientCred{{
+			Email: "matrix-test", UUID: n.UUID, Password: n.Password, Flow: n.Flow,
+		}}})
 	}
 	return out
 }

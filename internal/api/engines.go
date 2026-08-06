@@ -112,7 +112,7 @@ func (s *Server) reloadEngines() {
 			// recover gracefully from engine reload panic
 		}
 	}()
-	if s.engine == nil {
+	if s.isClosed() || s.engine == nil {
 		return
 	}
 	_, _ = s.engine.ReloadSpecs(s.enabledInboundSpecs())

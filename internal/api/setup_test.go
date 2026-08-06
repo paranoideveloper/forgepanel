@@ -31,6 +31,7 @@ func setupTestServer(t *testing.T) (*Server, *gin.Engine) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	s := &Server{cfg: cfg, db: db, router: gin.New(), signer: auth.NewSigner([]byte("test-secret")), login: newLoginLimiter()}
+	t.Cleanup(func() { _ = s.Close() })
 	if err := s.reconcileSetup(); err != nil {
 		t.Fatalf("reconcileSetup: %v", err)
 	}
@@ -142,6 +143,7 @@ func TestUpgradeMarksSetupCompleted(t *testing.T) {
 	t.Setenv("FORGEPANEL_DATA", dir)
 	cfg, _ := config.Load()
 	db, _ := store.Open(filepath.Join(dir, "forgepanel.db"))
+	t.Cleanup(func() { _ = db.Close() })
 	// Existing install: an admin already present before reconcile.
 	hash, _ := auth.HashPassword("Sup3rSecret!")
 	if err := db.CreateAdmin(&store.Admin{Username: "old", PasswordHash: hash, Role: store.RoleOwner}); err != nil {
