@@ -44,6 +44,13 @@ ForgePanel is a Go-based server management panel and node orchestration platform
 4. **Zero CGO Requirement**:
    - SQLite is driven via pure Go (`modernc.org/sqlite`).
    - Binaries must build cleanly with `CGO_ENABLED=0`.
+3. **Mandatory Testing & Quality Verification**:
+   - All tests must pass prior to opening or updating a PR.
+   - Run `go test ./...` and `go vet ./...` locally before submitting changes.
+
+4. **Zero CGO Requirement**:
+   - SQLite is driven via pure Go (`modernc.org/sqlite`).
+   - Binaries must build with `CGO_ENABLED=0`.
 
 5. **RTK Command Wrapper**:
    - When running CLI/shell commands in environments with RTK installed, prefix commands with `rtk` (e.g., `rtk go test ./...`, `rtk make build`).
@@ -74,6 +81,18 @@ rtk go test -race -v ./...
 rtk go vet ./...
 
 # 5. Build Compilation Check
+## 3. Mandatory Pre-Commit Checklist & Test Execution
+
+Before submitting a Pull Request, agents **MUST** execute and pass the following steps:
+
+```bash
+# 1. Run full unit and integration test suite
+rtk go test ./...
+
+# 2. Run Go static analyzer / linter
+rtk go vet ./...
+
+# 3. Verify static multi-binary build compilation
 rtk make build
 ```
 
@@ -85,3 +104,7 @@ Every pull request created or modified by an agent must follow `.github/PULL_REQ
 - Clear summary of changes and root-cause rationale.
 - Verification evidence covering formatting, matrix testing, race detection, static analysis, and builds.
 - Checklist confirming full compliance with `AGENTS.md` instructions and PR #3 CI matrix standards.
+Every pull request created by an agent must follow `.github/PULL_REQUEST_TEMPLATE.md`, providing:
+- Clear summary of changes and root-cause rationale.
+- Verification evidence (pasted output of test runs).
+- Checklist confirming `AGENTS.md` rules were followed.
