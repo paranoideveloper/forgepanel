@@ -2,6 +2,8 @@ package binmgr
 
 import (
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,5 +29,57 @@ func TestVerifyPinnedMandatory(t *testing.T) {
 		if b, err := hex.DecodeString(h); err != nil || len(b) != 32 {
 			t.Fatalf("pinned hash for %s is not a 32-byte hex sha256: %q", name, h)
 		}
+	}
+}
+
+func TestManagerPathAndEnsureInstalled(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir)
+
+	xrayPath := m.Path(EngineXray)
+	if !strings.Contains(xrayPath, "xray-"+XrayVersion) {
+		t.Fatalf("unexpected xray path: %s", xrayPath)
+	}
+
+	singPath := m.Path(EngineSingbox)
+	if !strings.Contains(singPath, "sing-box-"+SingboxVersion) {
+		t.Fatalf("unexpected singbox path: %s", singPath)
+	}
+
+	brookPath := m.Path(EngineBrook)
+	if !strings.Contains(brookPath, "brook-"+BrookVersion) {
+		t.Fatalf("unexpected brook path: %s", brookPath)
+	}
+
+	// Mock existing installed binary and test Ensure returns path without downloading
+	fakeBin := m.Path(EngineXray)
+	if err := os.MkdirAll(filepath.Dir(fakeBin), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho xray"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	gotPath, err := m.Ensure(EngineXray)
+	if err != nil || gotPath != fakeBin {
+		t.Fatalf("Ensure existing binary failed: %v, got %s", err, gotPath)
+	}
+}
+
+func TestVersionForAndAssetName(t *testing.T) {
+	if versionFor(EngineXray) != XrayVersion {
+		t.Fatal("versionFor(EngineXray) mismatch")
+	}
+	if versionFor(EngineSingbox) != SingboxVersion {
+		t.Fatal("versionFor(EngineSingbox) mismatch")
+	}
+
+	aName, err := xrayAsset()
+	if err != nil || len(aName) == 0 {
+		t.Fatalf("xrayAsset() failed: %v", err)
+	}
+
+	if len(goarchToSB()) == 0 {
+		t.Fatal("goarchToSB() returned empty")
 	}
 }

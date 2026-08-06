@@ -89,3 +89,68 @@ func TestSSHKeys(t *testing.T) {
 		t.Fatalf("bad fingerprint: %q", kp.Fingerprint256)
 	}
 }
+
+func TestShortIDAndPassword(t *testing.T) {
+	sid, err := ShortID(4)
+	if err != nil || len(sid) != 8 {
+		t.Fatalf("ShortID(4) failed: %v, got %q", err, sid)
+	}
+
+	if _, err := ShortID(0); err == nil {
+		t.Fatal("expected error for ShortID(0)")
+	}
+	if _, err := ShortID(9); err == nil {
+		t.Fatal("expected error for ShortID(9)")
+	}
+
+	pw, err := Password(16)
+	if err != nil || len(pw) == 0 {
+		t.Fatalf("Password(16) failed: %v", err)
+	}
+
+	// Test entropy clamp < 8
+	pwShort, err := Password(4)
+	if err != nil || len(pwShort) == 0 {
+		t.Fatalf("Password(4) failed: %v", err)
+	}
+
+	u := UUID()
+	if len(u) == 0 {
+		t.Fatal("UUID() returned empty string")
+	}
+}
+
+func TestWireGuardKeysAndSSHKeys(t *testing.T) {
+	wgKeys, err := WireGuardKeys()
+	if err != nil {
+		t.Fatalf("WireGuardKeys failed: %v", err)
+	}
+	if wgKeys.PrivateKey == "" || wgKeys.PublicKey == "" {
+		t.Fatalf("WireGuardKeys returned empty keypair")
+	}
+
+	sshKeys, err := SSHKeys()
+	if err != nil {
+		t.Fatalf("SSHKeys failed: %v", err)
+	}
+	if !strings.Contains(sshKeys.PrivateKeyPEM, "PRIVATE KEY") || !strings.Contains(sshKeys.AuthorizedKey, "ssh-ed25519") {
+		t.Fatalf("SSHKeys returned invalid format: %+v", sshKeys)
+	}
+
+	seed, err := MLDSA65Seed()
+	if err != nil || len(seed) == 0 {
+		t.Fatalf("MLDSA65Seed failed: %v", err)
+	}
+
+	fp := FingerprintCert([]byte("test cert der"))
+	if len(fp) == 0 {
+		t.Fatal("FingerprintCert returned empty string")
+	}
+}
+
+func TestEncodePEMHelper(t *testing.T) {
+	pemData := encodePEM([]byte("test der data"), "TEST BLOCK")
+	if !strings.Contains(string(pemData), "BEGIN TEST BLOCK") {
+		t.Fatalf("encodePEM failed: %s", string(pemData))
+	}
+}
