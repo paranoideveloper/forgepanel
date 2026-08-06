@@ -1,8 +1,8 @@
+import './bun-svelte-plugin';
 import { GlobalWindow } from 'happy-dom';
 
 const window = new GlobalWindow();
 
-// Register DOM globals onto globalThis for happy-dom
 (globalThis as any).window = window;
 (globalThis as any).document = window.document;
 (globalThis as any).localStorage = window.localStorage;
