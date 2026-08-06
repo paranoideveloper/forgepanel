@@ -221,6 +221,11 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
+      - name: Set up Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Build All Binaries
         run: make build
 
