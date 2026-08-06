@@ -55,6 +55,8 @@ func New(token string, adminIDs []int64, data PanelData) *Bot {
 func (b *Bot) Enabled() bool { return b.token != "" }
 
 // Send implements Sender via the Bot API.
+var apiBaseURL = "https://api.telegram.org"
+
 func (b *Bot) Send(chatID int64, text string) error {
 	if b.token == "" {
 		return nil
@@ -63,7 +65,7 @@ func (b *Bot) Send(chatID int64, text string) error {
 	v.Set("chat_id", strconv.FormatInt(chatID, 10))
 	v.Set("text", text)
 	v.Set("parse_mode", "Markdown")
-	resp, err := b.sendClient.PostForm("https://api.telegram.org/bot"+b.token+"/sendMessage", v)
+	resp, err := b.sendClient.PostForm(apiBaseURL+"/bot"+b.token+"/sendMessage", v)
 	if err != nil {
 		return err
 	}
@@ -170,7 +172,7 @@ func (b *Bot) getUpdates(ctx context.Context) ([]update, error) {
 	v.Set("timeout", "60")
 	v.Set("offset", strconv.FormatInt(b.offset, 10))
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://api.telegram.org/bot"+b.token+"/getUpdates?"+v.Encode(), nil)
+		apiBaseURL+"/bot"+b.token+"/getUpdates?"+v.Encode(), nil)
 	resp, err := b.client.Do(req)
 	if err != nil {
 		return nil, err

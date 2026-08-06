@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/api"
 	"github.com/forgepanel/forgepanel/internal/config"
 )
 
@@ -40,5 +41,6 @@ func TestBannerOutput(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer ts.Close()
 
-	banner(cfg, nil)
+	srv := api.New(cfg)
+	banner(cfg, srv)
 }

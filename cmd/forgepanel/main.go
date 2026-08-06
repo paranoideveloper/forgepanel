@@ -148,7 +148,9 @@ func banner(cfg *config.Config, srv *api.Server) {
 	// The build identity goes in the startup log so a support conversation can
 	// start from what is actually running rather than what was meant to be.
 	fmt.Printf("  %s\n", version.String("forgepanel"))
-	fmt.Printf("  Panel:  %s\n", srv.PublicURL())
+	if srv != nil {
+		fmt.Printf("  Panel:  %s\n", srv.PublicURL())
+	}
 	fmt.Printf("  Listen: %s://%s:%d  (data: %s)\n", scheme, orAll(p.BindAddress), p.Port, cfg.DataDir)
 	if srv.SetupToken != "" {
 		fmt.Println("  ── FIRST RUN — create your administrator account ──")

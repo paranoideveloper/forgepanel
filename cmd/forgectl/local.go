@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"bufio"
 	"crypto/rand"
@@ -315,11 +314,15 @@ func cmdSettingsSet(args []string) error {
 	return nil
 }
 
+var verifyHealth = func(cfg *config.Config) error {
+	return cmdHealth([]string{strconv.Itoa(cfg.Panel().Port)})
+}
+
 func restartAndVerify(cfg *config.Config) error {
 	if err := systemctl("restart", "forgepanel"); err != nil {
 		return err
 	}
-	return cmdHealth([]string{strconv.Itoa(cfg.Panel().Port)})
+	return verifyHealth(cfg)
 }
 
 func cmdDNSCheck(args []string) error {

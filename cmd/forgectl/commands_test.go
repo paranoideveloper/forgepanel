@@ -25,6 +25,7 @@ func setupMockGlobals(t *testing.T) string {
 	origInteractiveTerminal := interactiveTerminal
 	origLoadManifest := loadManifest
 	origLatestRelease := latestRelease
+	origVerifyHealth := verifyHealth
 
 	requireLocalAdmin = func() error { return nil }
 	systemctl = func(args ...string) error { return nil }
@@ -38,6 +39,7 @@ func setupMockGlobals(t *testing.T) string {
 	latestRelease = func() (releaseMetadata, error) {
 		return releaseMetadata{TagName: "v1.0.0"}, nil
 	}
+	verifyHealth = func(cfg *config.Config) error { return nil }
 
 	t.Cleanup(func() {
 		requireLocalAdmin = origRequireAdmin
@@ -48,6 +50,7 @@ func setupMockGlobals(t *testing.T) string {
 		interactiveTerminal = origInteractiveTerminal
 		loadManifest = origLoadManifest
 		latestRelease = origLatestRelease
+		verifyHealth = origVerifyHealth
 	})
 
 	cfg, err := config.LoadFromDataDir(dir)
@@ -268,7 +271,6 @@ func TestMenuAllChoices(t *testing.T) {
 		_ = runMenuChoice(choice, r)
 	}
 
-	
 }
 
 func TestCmdLogsAndSettingsAndDNSCheckAndUpdate(t *testing.T) {
