@@ -70,15 +70,12 @@ func healthURLs(target string) []string {
 }
 
 // healthPort resolves which port the panel is listening on: an explicit
-// argument, then the environment, then the persisted panel settings (an
-// operator can change the port from the UI, and the probe must follow it), then
-// the compiled-in default. Every lookup failure falls through silently -- a
+// argument, then the persisted panel settings (an operator can change the port
+// from the UI, and the probe must follow it), then a legacy bootstrap
+// environment value, then the compiled-in default. Every lookup failure falls through silently -- a
 // health probe must never fail because a config file was unreadable.
 func healthPort(arg string) int {
 	if n, err := strconv.Atoi(arg); err == nil && n > 0 && n < 65536 {
-		return n
-	}
-	if n, err := strconv.Atoi(os.Getenv("FORGEPANEL_PANEL_PORT")); err == nil && n > 0 && n < 65536 {
 		return n
 	}
 	if dir := os.Getenv("FORGEPANEL_DATA"); dir != "" {
@@ -91,6 +88,9 @@ func healthPort(arg string) int {
 				return panel.Port
 			}
 		}
+	}
+	if n, err := strconv.Atoi(os.Getenv("FORGEPANEL_PANEL_PORT")); err == nil && n > 0 && n < 65536 {
+		return n
 	}
 	return defaultPanelPort
 }

@@ -32,6 +32,7 @@ build:
 	  $(BUILDENV) $(GO) build $(BUILDFLAGS) -o $(BIN)/$$cmd ./cmd/$$cmd || exit 1; \
 	done
 
+ifneq ($(strip $(DESTDIR)),)
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 0755 $(BIN)/forgepanel $(DESTDIR)$(PREFIX)/bin/forgepanel
@@ -41,11 +42,17 @@ install: build
 	install -d $(DESTDIR)$(UNITDIR)
 	install -m 0644 packaging/systemd/forgepanel.service $(DESTDIR)$(UNITDIR)/forgepanel.service
 	@echo "Installed. Enable with: systemctl daemon-reload && systemctl enable --now forgepanel"
+else
+install:
+	@echo "Host installation is managed by the verified installer or a package; use sudo bash install.sh."
+	@exit 2
+endif
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/forgepanel $(DESTDIR)$(PREFIX)/bin/forgectl $(DESTDIR)$(PREFIX)/bin/forgenode
-	rm -f $(DESTDIR)$(UNITDIR)/forgepanel.service
-	@echo "Removed binaries and unit. Data left in $(DATADIR)."
+	@if [ -n "$(DESTDIR)" ]; then \
+	  echo "DESTDIR uninstall is intentionally unsupported; remove staged package files with the package manager."; exit 1; \
+	fi
+	@$(PREFIX)/bin/forgectl uninstall --keep-data
 
 check: vet test
 	@echo "make check passed"

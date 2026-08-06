@@ -17,6 +17,17 @@ func TestParseSpec(t *testing.T) {
 	}
 }
 
+func TestRuleHasOwnedCommentRequiresExactCommentField(t *testing.T) {
+	good := `-A PREROUTING -p udp -m comment --comment "forgepanel-porthop-443" -j REDIRECT --to-ports 443`
+	if !ruleHasOwnedComment(good, "forgepanel-porthop-") {
+		t.Fatal("managed rule was not recognized")
+	}
+	bad := `-A PREROUTING -m comment --comment "unrelated-forgepanel-porthop-443" -j ACCEPT`
+	if ruleHasOwnedComment(bad, "forgepanel-porthop-") {
+		t.Fatal("substring match must not claim an unrelated rule")
+	}
+}
+
 func TestConflicts(t *testing.T) {
 	ranges, _ := ParseSpec("20000-30000")
 	// listener 25000 is inside but excluded; 2053/443 outside; 22000 inside -> conflict.

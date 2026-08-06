@@ -8,7 +8,11 @@ case "${1:-}" in
   upgrade|1) exit 0 ;;
 esac
 
-if command -v systemctl >/dev/null 2>&1; then
+if [ -x /usr/local/bin/forgectl ]; then
+  /usr/local/bin/forgectl uninstall --keep-data --yes
+elif command -v systemctl >/dev/null 2>&1; then
+  # Legacy fallback: never infer file ownership or delete paths without the
+  # lifecycle command; only stop the known service.
   systemctl stop forgepanel >/dev/null 2>&1 || true
   systemctl disable forgepanel >/dev/null 2>&1 || true
 fi

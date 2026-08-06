@@ -32,8 +32,52 @@ administrator account with that token — no password is generated for you. The
 token is single-use and expires on a timer, so a host that is reachable before
 you finish setup cannot be claimed by someone else.
 
-Flags: `--uninstall`, `--update`, `--tui` (full-screen dialog UI instead of
-plain prompts).
+Useful installer flags: `--update`/`--repair`, `--dry-run`, `--uninstall`,
+`--uninstall --purge`, and `--tui` (full-screen dialog UI instead of plain
+prompts). The installer verifies every release binary against the release
+checksum before stopping the existing service, writes new binaries and unit
+files atomically, validates the service, and restores its recorded prior files
+if validation fails.
+
+## Local host management
+
+On a systemd host, run `sudo forgectl` with no arguments for the interactive
+menu. The same operations are scriptable:
+
+```bash
+sudo forgectl status --json
+sudo forgectl service restart
+sudo forgectl settings set --panel-port 8443
+sudo forgectl dns-check panel.example.com
+sudo forgectl cert status
+sudo forgectl backup create /root/forgepanel-backup.enc
+sudo forgectl update --check
+sudo forgectl update --yes
+```
+
+Backups are encrypted with the installed panel's master key. The key is read
+locally from `secrets.json`; no backup or restore command accepts a secret on
+its command line.
+
+## Uninstall and recovery
+
+Every verified installer and package installation writes
+`/etc/forgepanel/install-manifest.json` with the exact files, original backups,
+systemd changes and ForgePanel-owned firewall markers. `forgectl uninstall`
+stops only the ForgePanel service cgroup, removes only manifest-proven files,
+and removes only rules in the `forgepanel_porthop` nftables table or rules with
+the `forgepanel-porthop-` comment. It never flushes a firewall table.
+
+```bash
+sudo forgectl uninstall                 # preserve data, secrets and certificates
+sudo forgectl uninstall --dry-run       # show the exact actions
+sudo forgectl uninstall --purge --yes   # remove manifest-owned data too
+sudo forgectl repair                    # reload/enable/restart a recorded install
+```
+
+Changed files and legacy installations are retained and reported rather than
+deleted by guesswork. Keep the manifest when preserving data; it is needed for
+later repair or explicit purge.
 
 ## Docker
 

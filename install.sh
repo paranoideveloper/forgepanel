@@ -24,9 +24,11 @@ REPO="paranoideveloper/forgepanel"
 SERVICE="forgepanel"
 BIN_PATH="/usr/local/bin/forgepanel"
 CTL_PATH="/usr/local/bin/forgectl"
+NODE_PATH="/usr/local/bin/forgenode"
 UNIT_PATH="/etc/systemd/system/forgepanel.service"
 ENV_DIR="/etc/forgepanel"
 ENV_FILE="${ENV_DIR}/forgepanel.env"
+MANIFEST_PATH="${ENV_DIR}/install-manifest.json"
 DEFAULT_DATA="/var/lib/forgepanel"
 DEFAULT_PORT="2053"
 TITLE="ForgePanel Setup"
@@ -44,7 +46,20 @@ VERSION="${FORGEPANEL_VERSION:-}"
 ASSUME_YES="${FORGEPANEL_ASSUME_YES:-0}"
 UI_PREF="${FORGEPANEL_UI:-auto}"
 DO_UNINSTALL=0
+DO_PURGE=0
+DRY_RUN=0
+REPAIR=0
 HTTPS_FORCED=""
+PANEL_CONFIG_EXISTS=0
+PORT_EXPLICIT=0
+DOMAIN_EXPLICIT=0
+EMAIL_EXPLICIT=0
+HTTPS_EXPLICIT=0
+
+[[ -n "${FORGEPANEL_PANEL_PORT+x}" ]] && PORT_EXPLICIT=1
+[[ -n "${FORGEPANEL_DOMAIN+x}" ]] && DOMAIN_EXPLICIT=1
+[[ -n "${FORGEPANEL_ACME_EMAIL+x}" ]] && EMAIL_EXPLICIT=1
+[[ -n "${FORGEPANEL_HTTPS+x}" ]] && HTTPS_EXPLICIT=1
 
 # Runtime state
 ARCH=""
@@ -124,8 +139,12 @@ Options:
       --no-https         Force auto-HTTPS off
       --data <dir>       Data directory (default /var/lib/forgepanel)
       --version <tag>    Install a specific release tag instead of the latest
+      --update           Alias for --repair; update verified release assets
+      --repair           Reinstall matching binaries and repair the service
+      --dry-run          Print the installation plan without modifying the host
       --plain            Use plain text prompts (skip gum/whiptail/dialog)
-      --uninstall        Remove the service, unit file and binaries
+      --uninstall        Remove manifest-owned resources and preserve data
+      --purge            With --uninstall, also remove manifest-owned data
   -h, --help             Show this help
 
 Environment variables (same meaning as the flags):
@@ -142,21 +161,25 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -y|--yes)     ASSUME_YES=1; shift ;;
-      --port)       PANEL_PORT="${2:-}"; shift 2 ;;
-      --port=*)     PANEL_PORT="${1#*=}"; shift ;;
-      --domain)     PANEL_DOMAIN="${2:-}"; shift 2 ;;
-      --domain=*)   PANEL_DOMAIN="${1#*=}"; shift ;;
-      --email)      ACME_EMAIL="${2:-}"; shift 2 ;;
-      --email=*)    ACME_EMAIL="${1#*=}"; shift ;;
-      --https)      HTTPS_FORCED=1; shift ;;
-      --no-https)   HTTPS_FORCED=0; shift ;;
+      --port)       PANEL_PORT="${2:-}"; PORT_EXPLICIT=1; shift 2 ;;
+      --port=*)     PANEL_PORT="${1#*=}"; PORT_EXPLICIT=1; shift ;;
+      --domain)     PANEL_DOMAIN="${2:-}"; DOMAIN_EXPLICIT=1; shift 2 ;;
+      --domain=*)   PANEL_DOMAIN="${1#*=}"; DOMAIN_EXPLICIT=1; shift ;;
+      --email)      ACME_EMAIL="${2:-}"; EMAIL_EXPLICIT=1; shift 2 ;;
+      --email=*)    ACME_EMAIL="${1#*=}"; EMAIL_EXPLICIT=1; shift ;;
+      --https)      HTTPS_FORCED=1; HTTPS_EXPLICIT=1; shift ;;
+      --no-https)   HTTPS_FORCED=0; HTTPS_EXPLICIT=1; shift ;;
       --data)       DATA_DIR="${2:-}"; shift 2 ;;
       --data=*)     DATA_DIR="${1#*=}"; shift ;;
       --version)    VERSION="${2:-}"; shift 2 ;;
       --version=*)  VERSION="${1#*=}"; shift ;;
+      --repair)     REPAIR=1; shift ;;
+      --update)     REPAIR=1; shift ;;
+      --dry-run)    DRY_RUN=1; shift ;;
       --plain)      UI_PREF="plain"; shift ;;
       --tui)        UI_PREF="tui"; shift ;;
       --uninstall)  DO_UNINSTALL=1; shift ;;
+      --purge)      DO_PURGE=1; shift ;;
       -h|--help)    usage; exit 0 ;;
       *)            usage >&2; die "Unknown option: $1" ;;
     esac
@@ -349,6 +372,8 @@ require_tools() {
   if ! command -v systemctl >/dev/null 2>&1; then
     die "systemd (systemctl) was not found. This installer targets systemd hosts."
   fi
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required to verify release assets."
+  command -v file >/dev/null 2>&1 || die "file is required to validate release architecture."
 }
 
 detect_os() {
@@ -480,56 +505,21 @@ resolve_host() {
 # ---------------------------------------------------------------------------
 do_uninstall() {
   banner
-  printf ' %sRemoving ForgePanel from this server.%s\n\n' "$C_BOLD" "$C_RESET"
-
-  if [[ "$INTERACTIVE" == "1" ]]; then
-    if ! confirm "Stop and remove the ${SERVICE} service?" "yes"; then
-      info "Nothing was changed."
+  local args=(uninstall --data "$DATA_DIR" --manifest "$MANIFEST_PATH")
+  [[ "$DO_PURGE" == "1" ]] && args+=(--purge)
+  [[ "$DRY_RUN" == "1" ]] && args+=(--dry-run)
+  [[ "$ASSUME_YES" == "1" ]] && args+=(--yes)
+  if [[ -x "$CTL_PATH" ]]; then
+    # forgectl stops the service and removes only ForgePanel-owned
+    # forgepanel_porthop firewall state and manifest-proven files.
+    if "$CTL_PATH" "${args[@]}"; then
       exit 0
     fi
+    exit 1
   fi
-
-  info "Cleaning up firewall rules..."
-  if command -v nft >/dev/null 2>&1; then
-    nft delete table inet forgepanel_porthop >/dev/null 2>&1 || true
-  fi
-  if command -v iptables >/dev/null 2>&1; then
-    iptables-save 2>/dev/null | grep "forgepanel-porthop" | while read -r line; do
-      rule=$(echo "$line" | sed "s/-A/-D/")
-      iptables -t nat $rule >/dev/null 2>&1 || true
-    done
-  fi
-
-  info "Stopping service..."
-  systemctl stop "$SERVICE" >/dev/null 2>&1 || true
-  systemctl disable "$SERVICE" >/dev/null 2>&1 || true
-
-  info "Removing unit file and binaries..."
-  rm -f "$UNIT_PATH"
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
-  rm -f "$BIN_PATH" "$CTL_PATH"
-  rm -f "$ENV_FILE"
-  rmdir "$ENV_DIR" >/dev/null 2>&1 || true
-  ok "Service and binaries removed."
-
-  if [[ -d "$DATA_DIR" ]]; then
-    printf '\n'
-    warn "The data directory ${DATA_DIR} still holds your database and certificates."
-    if confirm "Delete ${DATA_DIR} and everything inside it?" "no"; then
-      rm -rf "${DATA_DIR:?}"
-      ok "Data directory deleted."
-    else
-      info "Kept ${DATA_DIR} — reinstalling later will pick it back up."
-    fi
-  fi
-
-  printf '\n'
-  rule "$C_GREEN"
-  printf ' %s%s ForgePanel has been uninstalled.%s\n' "$C_GREEN" "$TICK" "$C_RESET"
-  rule "$C_GREEN"
-  printf '\n'
-  exit 0
+  err "forgectl is required for a safe uninstall but is not installed."
+  printf '   The legacy installer will not guess ownership or delete files without a manifest.\n' >&2
+  exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -539,6 +529,12 @@ load_existing_config() {
   if [[ -f "$UNIT_PATH" || -x "$BIN_PATH" ]]; then
     UPGRADE=1
   fi
+  if [[ -s "${DATA_DIR}/panel.json" ]]; then
+    PANEL_CONFIG_EXISTS=1
+    return 0
+  fi
+  # Legacy releases persisted mutable values in the unit environment. Read
+  # those only once to migrate them into panel.json during this install.
   if [[ -r "$ENV_FILE" ]]; then
     PREV_PORT=$(sed -n 's/^FORGEPANEL_PANEL_PORT=//p' "$ENV_FILE" | head -n1)
     [[ -n "$PANEL_PORT"   ]] || PANEL_PORT="$PREV_PORT"
@@ -556,6 +552,9 @@ step_system() {
   ok "Architecture:     $(uname -m) ${C_DIM}(release: ${ARCH})${C_RESET}"
   if [[ "$UPGRADE" == "1" ]]; then
     info "An existing ForgePanel installation was found — this run will upgrade it."
+  fi
+  if [[ "$REPAIR" == "1" ]]; then
+    info "Repair mode will verify and replace the managed binaries, unit, and manifest."
   fi
 }
 
@@ -820,15 +819,15 @@ download_to() {
 
 write_unit() {
   mkdir -p "$ENV_DIR"
+  local env_tmp="${ENV_FILE}.tmp"
   {
     printf '# Generated by the ForgePanel installer on %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf '# Mutable panel address, domain, HTTPS and ACME settings live in panel.json.\n'
+    printf '# This file intentionally contains only immutable bootstrap state.\n'
     printf 'FORGEPANEL_DATA=%s\n' "$DATA_DIR"
-    printf 'FORGEPANEL_PANEL_PORT=%s\n' "$PANEL_PORT"
-    if [[ -n "$PANEL_DOMAIN" ]]; then printf 'FORGEPANEL_DOMAIN=%s\n' "$PANEL_DOMAIN"; fi
-    printf 'FORGEPANEL_HTTPS=%s\n' "$PANEL_HTTPS"
-    if [[ -n "$ACME_EMAIL" ]]; then printf 'FORGEPANEL_ACME_EMAIL=%s\n' "$ACME_EMAIL"; fi
-  } > "$ENV_FILE"
-  chmod 0600 "$ENV_FILE"
+  } > "$env_tmp"
+  chmod 0600 "$env_tmp"
+  mv -f "$env_tmp" "$ENV_FILE"
 
   # Kept deliberately in step with packaging/systemd/forgepanel.service so that a
   # curl-install and a deb/rpm install produce the same runtime behaviour.
@@ -846,9 +845,10 @@ write_unit() {
     /home/*|/root/*) protect_home="ProtectHome=false" ;;
   esac
 
-  cat > "$UNIT_PATH" <<UNIT
+  local unit_tmp="${UNIT_PATH}.tmp"
+  cat > "$unit_tmp" <<UNIT
 # Generated by the ForgePanel installer. Re-running the installer overwrites
-# this file; put your own overrides in ${ENV_FILE} instead.
+# this file; mutable settings belong in panel.json via the UI or forgectl.
 [Unit]
 Description=ForgePanel — proxy management panel
 Documentation=https://github.com/${REPO}
@@ -888,68 +888,165 @@ ReadWritePaths=${DATA_DIR} ${ENV_DIR}
 [Install]
 WantedBy=multi-user.target
 UNIT
-  chmod 0644 "$UNIT_PATH"
+  chmod 0644 "$unit_tmp"
+  mv -f "$unit_tmp" "$UNIT_PATH"
 }
 
 step_install() {
   step 7 "Installing"
 
   local base="https://github.com/${REPO}/releases/download/${VERSION}"
-  local tmp
+  local tmp data_created=0 was_active=0
   tmp=$(mktemp -d /tmp/forgepanel-install.XXXXXX)
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
 
-  info "Downloading forgepanel-linux-${ARCH} (${VERSION})..."
-  if ! download_to "${base}/forgepanel-linux-${ARCH}" "${tmp}/forgepanel"; then
-    err "Download failed: ${base}/forgepanel-linux-${ARCH}"
-    printf '   Verify the release %s%s%s publishes an asset for linux/%s.\n\n' \
-      "$C_BOLD" "$VERSION" "$C_RESET" "$ARCH" >&2
-    exit 1
-  fi
-  if [[ ! -s "${tmp}/forgepanel" ]]; then
-    die "Downloaded binary is empty — aborting before touching ${BIN_PATH}."
-  fi
-  ok "Downloaded $(du -h "${tmp}/forgepanel" 2>/dev/null | awk '{print $1}' || echo '') binary."
+  for asset in "forgepanel-linux-${ARCH}" "forgectl-linux-${ARCH}" "forgenode-linux-${ARCH}"; do
+    info "Downloading ${asset} (${VERSION})..."
+    download_to "${base}/${asset}" "${tmp}/${asset}" || die "Download failed: ${base}/${asset}"
+  done
+  download_to "${base}/checksums.txt" "${tmp}/checksums.txt" || die "Release checksums are unavailable; aborting before changing this host."
+  for asset in "forgepanel-linux-${ARCH}" "forgectl-linux-${ARCH}" "forgenode-linux-${ARCH}"; do
+    verify_release_asset "${tmp}/${asset}" "$asset" "${tmp}/checksums.txt" || die "Checksum verification failed for ${asset}."
+    validate_binary "${tmp}/${asset}" || die "${asset} is not a valid linux/${ARCH} executable."
+  done
+  ok "Release assets verified."
 
-  # The companion CLI is optional; a missing asset is not fatal.
-  if download_to "${base}/forgectl-linux-${ARCH}" "${tmp}/forgectl" 2>/dev/null \
-     && [[ -s "${tmp}/forgectl" ]]; then
-    install -m 0755 "${tmp}/forgectl" "$CTL_PATH"
-    ok "Installed the forgectl command-line helper."
+  if [[ "$DRY_RUN" == "1" ]]; then
+    info "Dry run: verified release assets would replace ${BIN_PATH}, ${CTL_PATH}, ${NODE_PATH}, ${UNIT_PATH}, and ${ENV_FILE}."
+    info "Dry run: no service, firewall, file, or configuration change was made."
+    return 0
+  fi
+
+  if [[ -d "$DATA_DIR" ]]; then
+    data_created=0
   else
-    info "No forgectl asset for this release — skipping (optional)."
+    data_created=1
+    mkdir -p "$DATA_DIR"
   fi
-
-  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    info "Stopping the running service before replacing the binary..."
-    systemctl stop "$SERVICE" >/dev/null 2>&1 || true
-  fi
-
-  install -m 0755 "${tmp}/forgepanel" "$BIN_PATH"
-  ok "Installed ${BIN_PATH}"
-
-  mkdir -p "$DATA_DIR"
   chmod 0700 "$DATA_DIR"
-  ok "Data directory ready at ${DATA_DIR}"
+  local backup_dir="${DATA_DIR}/install-backups/$(date -u '+%Y%m%dT%H%M%SZ')"
+  mkdir -p "$backup_dir"
+  chmod 0700 "$backup_dir"
+  local bin_backup ctl_backup node_backup unit_backup env_backup
+  bin_backup=$(backup_existing "$BIN_PATH" "${backup_dir}/forgepanel")
+  ctl_backup=$(backup_existing "$CTL_PATH" "${backup_dir}/forgectl")
+  node_backup=$(backup_existing "$NODE_PATH" "${backup_dir}/forgenode")
+  unit_backup=$(backup_existing "$UNIT_PATH" "${backup_dir}/forgepanel.service")
+  env_backup=$(backup_existing "$ENV_FILE" "${backup_dir}/forgepanel.env")
+  systemctl is-active --quiet "$SERVICE" 2>/dev/null && was_active=1 || true
 
-  info "Writing the systemd unit..."
-  write_unit
-  systemctl daemon-reload
-  ok "Unit installed at ${UNIT_PATH}"
-
-  info "Enabling and starting ${SERVICE}..."
-  if ! systemctl enable "$SERVICE" >/dev/null 2>&1; then
-    warn "Could not enable the service for boot; it will still be started now."
-  fi
-  if ! systemctl restart "$SERVICE"; then
-    err "The ${SERVICE} service failed to start."
-    printf '\n%sLast log lines:%s\n' "$C_BOLD" "$C_RESET" >&2
-    journalctl -u "$SERVICE" --no-pager -n 25 2>/dev/null >&2 || true
-    printf '\n   Inspect with: %sjournalctl -u %s -e%s\n\n' "$C_BOLD" "$SERVICE" "$C_RESET" >&2
+  rollback_install() {
+    err "Installation did not pass validation; restoring the previous state."
+    systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+    restore_or_remove "$BIN_PATH" "$bin_backup"
+    restore_or_remove "$CTL_PATH" "$ctl_backup"
+    restore_or_remove "$NODE_PATH" "$node_backup"
+    restore_or_remove "$UNIT_PATH" "$unit_backup"
+    restore_or_remove "$ENV_FILE" "$env_backup"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    [[ "$was_active" == "1" ]] && systemctl start "$SERVICE" >/dev/null 2>&1 || true
+    if [[ "$data_created" == "1" ]]; then rm -rf "${DATA_DIR:?}"; fi
     exit 1
+  }
+
+  if [[ "$was_active" == "1" ]]; then
+    info "Stopping the running service before replacing the binaries..."
+    systemctl stop "$SERVICE" || rollback_install
   fi
-  ok "Service started."
+  install_atomic "${tmp}/forgepanel-linux-${ARCH}" "$BIN_PATH" || rollback_install
+  install_atomic "${tmp}/forgectl-linux-${ARCH}" "$CTL_PATH" || rollback_install
+  install_atomic "${tmp}/forgenode-linux-${ARCH}" "$NODE_PATH" || rollback_install
+  write_unit || rollback_install
+  systemctl daemon-reload || rollback_install
+
+  # One-time migration of installer input into panel.json. The unit environment
+  # afterwards contains only FORGEPANEL_DATA, so web and terminal settings stay
+  # authoritative across reboots and upgrades.
+  local settings_args=(settings set --defer-restart --data "$DATA_DIR")
+  if [[ "$PANEL_CONFIG_EXISTS" == "0" ]]; then
+    settings_args+=(--bootstrap --panel-port "$PANEL_PORT" --domain "$PANEL_DOMAIN" --https "$PANEL_HTTPS" --acme-email "$ACME_EMAIL")
+  else
+    # Do not let an upgrade's wizard defaults overwrite persisted panel.json.
+    # Explicit command-line/environment input remains an intentional change.
+    [[ "$PORT_EXPLICIT" == "1" ]] && settings_args+=(--panel-port "$PANEL_PORT")
+    [[ "$DOMAIN_EXPLICIT" == "1" ]] && settings_args+=(--domain "$PANEL_DOMAIN")
+    [[ "$HTTPS_EXPLICIT" == "1" ]] && settings_args+=(--https "$PANEL_HTTPS")
+    [[ "$EMAIL_EXPLICIT" == "1" ]] && settings_args+=(--acme-email "$ACME_EMAIL")
+  fi
+  if (( ${#settings_args[@]} > 5 )); then
+    "$CTL_PATH" "${settings_args[@]}" || rollback_install
+  fi
+
+  "$BIN_PATH" --version | grep -Fq " ${VERSION} " || rollback_install
+  "$CTL_PATH" version | grep -Fq " ${VERSION} " || rollback_install
+  systemctl enable "$SERVICE" || rollback_install
+  systemctl restart "$SERVICE" || rollback_install
+  "$CTL_PATH" healthcheck "$PANEL_PORT" || rollback_install
+
+  local data_marker=""
+  [[ "$data_created" == "1" ]] && data_marker=x
+  local resources=(
+    --resource "binary:${BIN_PATH}:$(created_flag "$bin_backup")"
+    --resource "cli:${CTL_PATH}:$(created_flag "$ctl_backup")"
+    --resource "node:${NODE_PATH}:$(created_flag "$node_backup")"
+    --resource "unit:${UNIT_PATH}:$(created_flag "$unit_backup")"
+    --resource "env:${ENV_FILE}:$(created_flag "$env_backup")"
+    --resource "data_dir:${DATA_DIR}:$(created_flag "$data_marker")"
+  )
+  [[ -n "$bin_backup" ]] && resources+=(--backup "${BIN_PATH}=${bin_backup}")
+  [[ -n "$ctl_backup" ]] && resources+=(--backup "${CTL_PATH}=${ctl_backup}")
+  [[ -n "$node_backup" ]] && resources+=(--backup "${NODE_PATH}=${node_backup}")
+  [[ -n "$unit_backup" ]] && resources+=(--backup "${UNIT_PATH}=${unit_backup}")
+  [[ -n "$env_backup" ]] && resources+=(--backup "${ENV_FILE}=${env_backup}")
+  "$CTL_PATH" lifecycle record-install --method curl --version "$VERSION" --data "$DATA_DIR" --manifest "$MANIFEST_PATH" "${resources[@]}" || rollback_install
+  ok "Service started and health check passed."
+}
+
+verify_release_asset() {
+  local file="$1" asset="$2" checksums="$3" expected
+  expected=$(awk -v name="$asset" '$2 == name || $2 == ("*" name) { print $1; exit }' "$checksums")
+  [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || return 1
+  printf '%s  %s\n' "$expected" "$file" | sha256sum -c - >/dev/null
+}
+
+validate_binary() {
+  local file="$1" desc
+  [[ -s "$file" ]] || return 1
+  desc=$(file -Lb "$file" 2>/dev/null) || return 1
+  [[ "$desc" == *ELF* && "$desc" == *executable* ]] || return 1
+  case "$ARCH" in
+    amd64) [[ "$desc" == *x86-64* ]] ;;
+    arm64) [[ "$desc" == *aarch64* || "$desc" == *ARM\ aarch64* ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+backup_existing() {
+  local target="$1" backup="$2"
+  if [[ -e "$target" || -L "$target" ]]; then
+    cp -a "$target" "$backup"
+    printf '%s' "$backup"
+  fi
+}
+
+created_flag() {
+  [[ -z "$1" ]] && printf 'true' || printf 'false'
+}
+
+restore_or_remove() {
+  local target="$1" backup="$2"
+  if [[ -n "$backup" && -e "$backup" ]]; then
+    cp -a "$backup" "$target"
+  else
+    rm -f "$target"
+  fi
+}
+
+install_atomic() {
+  local source="$1" target="$2" temp="${2}.new"
+  install -m 0755 "$source" "$temp"
+  mv -f "$temp" "$target"
 }
 
 wait_for_first_boot() {
@@ -1063,6 +1160,9 @@ main() {
   if [[ "$DO_UNINSTALL" == "1" ]]; then
     do_uninstall
   fi
+  if [[ "$DO_PURGE" == "1" ]]; then
+    die "--purge is valid only together with --uninstall."
+  fi
 
   require_tools
   load_existing_config
@@ -1080,6 +1180,11 @@ main() {
   apply_https_override
   step_summary
   step_install
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    printf '\nDry run complete — no system state was changed.\n\n'
+    exit 0
+  fi
 
   local first_boot_ok=0
   wait_for_first_boot || first_boot_ok=1

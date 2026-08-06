@@ -9,10 +9,11 @@ Type=simple
 ExecStart=/usr/local/bin/forgepanel
 WorkingDirectory=/var/lib/forgepanel
 
-# Drop overrides here (FORGEPANEL_PANEL_PORT, FORGEPANEL_DOMAIN, …). The leading
-# dash keeps the unit working when the file is absent.
-EnvironmentFile=-/etc/forgepanel/forgepanel.env
+# The optional environment file may set only FORGEPANEL_DATA for a non-default
+# data directory. Mutable panel settings are stored atomically in panel.json.
+# The leading dash keeps the unit working when the file is absent.
 Environment=FORGEPANEL_DATA=/var/lib/forgepanel
+EnvironmentFile=-/etc/forgepanel/forgepanel.env
 
 Restart=on-failure
 RestartSec=3

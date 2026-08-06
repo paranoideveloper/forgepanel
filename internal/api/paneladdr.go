@@ -2,68 +2,32 @@ package api
 
 import (
 	"crypto/tls"
-	"encoding/json"
-	"fmt"
 	"net"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/config"
+	"github.com/forgepanel/forgepanel/internal/settings"
 )
 
 // domainRe validates a normalized hostname (labels of a-z0-9-, no leading or
 // trailing hyphen, at least one dot). Deliberately strict — it also blocks the
 // domain-injection surface (spaces, slashes, shell metacharacters) by rejecting
 // anything outside this character set.
-var domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
-
 // normalizeDomain strips a scheme, path, port, and trailing dots/slashes, and
 // lowercases the host — turning "HTTPS://Panel.Example.com:2053/x/" into
 // "panel.example.com". Empty input yields empty output (IP-only panel).
-func normalizeDomain(raw string) string {
-	d := strings.TrimSpace(raw)
-	if d == "" {
-		return ""
-	}
-	if i := strings.Index(d, "://"); i >= 0 {
-		d = d[i+3:]
-	}
-	if i := strings.IndexAny(d, "/?#"); i >= 0 {
-		d = d[:i]
-	}
-	// Strip a :port suffix (but not part of an IPv6 literal, which we don't allow
-	// as a panel domain anyway).
-	if i := strings.LastIndex(d, ":"); i >= 0 && !strings.Contains(d, "]") {
-		if _, err := strconv.Atoi(d[i+1:]); err == nil {
-			d = d[:i]
-		}
-	}
-	return strings.ToLower(strings.Trim(d, ". "))
-}
+func normalizeDomain(raw string) string { return settings.NormalizeDomain(raw) }
 
 // validDomain reports whether a normalized domain is a well-formed hostname.
-func validDomain(d string) bool { return domainRe.MatchString(d) }
+func validDomain(d string) bool { return settings.ValidDomain(d) }
 
 // portFree reports whether a TCP port can be bound on bindAddr right now. It is
 // the port-conflict probe used before persisting a port change (never leaves a
 // listener open).
-func portFree(bindAddr string, port int) bool {
-	if bindAddr == "" || bindAddr == "0.0.0.0" {
-		bindAddr = ""
-	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(port)))
-	if err != nil {
-		return false
-	}
-	_ = ln.Close()
-	return true
-}
+func portFree(bindAddr string, port int) bool { return settings.PortFree(bindAddr, port) }
 
 // detectServerIPv6 returns the primary outbound IPv6, or "" when the host has no
 // global IPv6 route. Sends no traffic (connected UDP socket route selection).
@@ -81,20 +45,7 @@ func detectServerIPv6() string {
 
 // resolveDomain splits a domain's resolved addresses into A (IPv4) and AAAA
 // (IPv6) records.
-func resolveDomain(domain string) (v4, v6 []string, err error) {
-	ips, err := net.LookupIP(domain)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, ip := range ips {
-		if ip.To4() != nil {
-			v4 = append(v4, ip.String())
-		} else {
-			v6 = append(v6, ip.String())
-		}
-	}
-	return v4, v6, nil
-}
+func resolveDomain(domain string) (v4, v6 []string, err error) { return settings.ResolveDomain(domain) }
 
 // certStatusFor reports the panel certificate state for the given domain without
 // triggering issuance.
@@ -203,92 +154,22 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid payload"})
 		return
 	}
-	p := s.cfg.Panel()
-	snapshot := *p // rollback point (value copy; extra map shared but untouched)
-	restartRequired := false
-
-	if req.Domain != nil {
-		d := normalizeDomain(*req.Domain)
-		if d != "" && !validDomain(d) {
-			c.JSON(400, gin.H{"error": "invalid domain"})
-			return
-		}
-		if d != "" && req.VerifyDNS {
-			v4, v6, err := resolveDomain(d)
-			if err != nil {
-				c.JSON(400, gin.H{"error": "domain does not resolve: " + err.Error()})
-				return
-			}
-			myV4, myV6 := detectServerIP(), detectServerIPv6()
-			ok := false
-			for _, ip := range append(v4, v6...) {
-				if ip == myV4 || (myV6 != "" && ip == myV6) {
-					ok = true
-				}
-			}
-			if !ok {
-				c.JSON(400, gin.H{"error": "domain does not point to this server (A/AAAA mismatch)"})
-				return
-			}
-		}
-		p.Domain = d
-		if d == "" { // removing the domain returns to IP-based HTTP
-			p.HTTPSEnabled = false
-			p.ACME.Enabled = false
-		}
-	}
-	if req.BindAddress != nil {
-		b := strings.TrimSpace(*req.BindAddress)
-		if b != "" && net.ParseIP(b) == nil {
-			c.JSON(400, gin.H{"error": "bind_address must be an IP"})
-			return
-		}
-		if b != p.BindAddress {
-			p.BindAddress = b
-			restartRequired = true
-		}
-	}
-	if req.Port != nil {
-		port := *req.Port
-		if port < 1 || port > 65535 {
-			c.JSON(400, gin.H{"error": "port must be in 1..65535"})
-			return
-		}
-		if port != p.Port {
-			if !portFree(p.BindAddress, port) {
-				c.JSON(409, gin.H{"error": fmt.Sprintf("port %d is already in use", port)})
-				return
-			}
-			p.Port = port
-			restartRequired = true
-		}
-	}
-	if req.HTTPSEnabled != nil {
-		if *req.HTTPSEnabled && p.Domain == "" {
-			c.JSON(400, gin.H{"error": "a domain is required to enable HTTPS"})
-			return
-		}
-		p.HTTPSEnabled = *req.HTTPSEnabled
-		p.ACME.Enabled = *req.HTTPSEnabled
-		restartRequired = true // switching HTTP<->HTTPS re-creates the listener
-	}
-	if req.ACMEEmail != nil {
-		p.ACME.Email = strings.TrimSpace(*req.ACMEEmail)
-	}
-
-	// Write a rollback snapshot next to panel.json, then persist. If persistence
-	// fails we restore the in-memory settings so the admin is never locked out.
-	s.writeRollback(&snapshot)
-	if err := s.cfg.SavePanel(); err != nil {
-		*p = snapshot
-		c.JSON(500, gin.H{"error": "failed to persist settings; reverted"})
+	shared := settings.New(s.cfg)
+	shared.IPv4 = detectServerIP
+	shared.IPv6 = detectServerIPv6
+	result, err := shared.Apply(settings.Change{
+		Domain: req.Domain, Port: req.Port, BindAddress: req.BindAddress,
+		HTTPSEnabled: req.HTTPSEnabled, ACMEEmail: req.ACMEEmail, VerifyDNS: req.VerifyDNS,
+	})
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 	s.writePublicURLFile()
-	s.audit(c, "panel.address.update", p.Domain)
+	s.audit(c, "panel.address.update", result.New.Domain)
 	c.JSON(200, gin.H{
-		"ok": true, "restart_required": restartRequired,
-		"public_url": s.PublicURL(), "https_enabled": p.HTTPSEnabled,
+		"ok": true, "restart_required": result.RestartRequired,
+		"public_url": s.PublicURL(), "https_enabled": result.New.HTTPSEnabled,
 	})
 }
 
@@ -296,6 +177,16 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 // domain by fetching it through the manager (autocert issues or renews as
 // needed). Returns the resulting status.
 func (s *Server) handlePanelCertRenew(c *gin.Context) {
+	release, err := config.LockSettings(s.cfg.DataDir)
+	if err != nil {
+		c.JSON(409, gin.H{"error": err.Error()})
+		return
+	}
+	defer release()
+	if err := s.cfg.ReloadPanel(); err != nil {
+		c.JSON(500, gin.H{"error": "reload panel settings: " + err.Error()})
+		return
+	}
 	p := s.cfg.Panel()
 	if p.Domain == "" || !p.HTTPSEnabled {
 		c.JSON(400, gin.H{"error": "configure a domain and enable HTTPS first"})
@@ -305,7 +196,7 @@ func (s *Server) handlePanelCertRenew(c *gin.Context) {
 		c.JSON(501, gin.H{"error": "certificate manager unavailable"})
 		return
 	}
-	_, err := s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: p.Domain})
+	_, err = s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: p.Domain})
 	p.ACME.LastRenewal = time.Now().Format(time.RFC3339)
 	if err != nil {
 		p.ACME.RenewalError = err.Error()
@@ -318,14 +209,4 @@ func (s *Server) handlePanelCertRenew(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"ok": true, "cert": s.certStatusFor(p.Domain)})
-}
-
-// writeRollback stores the pre-change panel settings as panel.json.bak (0600) so
-// a restart that fails to bind can restore the last-known-good configuration.
-func (s *Server) writeRollback(prev *config.PanelSettings) {
-	raw, err := json.MarshalIndent(prev, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(filepath.Join(s.cfg.DataDir, "panel.json.bak"), raw, 0o600)
 }

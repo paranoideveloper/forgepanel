@@ -1,8 +1,26 @@
 # Troubleshooting
 
-**Panel prints credentials only once.** They are in `<data>/secrets.json`
-(admin path) and were shown at first boot. Lost the password? Delete the admin
-row and restart to re-seed, or reset via `forgectl` (roadmap).
+**Panel path or credentials are lost.** The admin path is in
+`<data>/panel.json`. Reset a password or 2FA locally without exposing a secret
+on the command line:
+
+```
+sudo forgectl admin reset-password --user admin
+sudo forgectl admin reset-2fa --user admin
+sudo forgectl admin regenerate-path
+```
+
+**A port or address change made the panel unavailable.** The web UI and
+`forgectl settings set` save a rollback copy before restarting the service. A
+failed restart restores the previous settings. Inspect the service with
+`sudo forgectl status` and `journalctl -u forgepanel -e`; use
+`sudo forgectl repair` for a recorded installation.
+
+**A package or installer uninstall retained files.** This is intentional when
+a file changed after ForgePanel installed it or an older install has no manifest.
+Run `sudo forgectl uninstall --dry-run` to see the ownership evidence. Do not
+delete the listed files blindly; preserve the data directory unless an explicit
+`--purge --yes` is appropriate.
 
 **An engine shows `invalid_config`.** The panel never applies a config the core
 rejects. Open `GET /api/admin/engines/config` to see the generated config and the

@@ -115,15 +115,14 @@ func New() *Manager {
 // Backend returns the detected backend.
 func (m *Manager) Backend() Backend { return m.backend }
 
-// HasNetAdmin reports whether the process can manage firewall rules. It checks the
-// effective capability set and root.
+// HasNetAdmin reports whether the process can manage firewall rules. Root inside
+// a container can still have CAP_NET_ADMIN removed, so use the effective
+// capability set when the kernel exposes it and fall back to the UID only when
+// that information cannot be read.
 func HasNetAdmin() bool {
-	if os.Geteuid() == 0 {
-		return true
-	}
 	data, err := os.ReadFile("/proc/self/status")
 	if err != nil {
-		return false
+		return os.Geteuid() == 0
 	}
 	for _, ln := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(ln, "CapEff:") {
@@ -134,7 +133,7 @@ func HasNetAdmin() bool {
 			}
 		}
 	}
-	return false
+	return os.Geteuid() == 0
 }
 
 // Apply installs redirects for the UDP ranges -> listen (IPv4+IPv6 via the inet
@@ -216,33 +215,84 @@ func (m *Manager) applyIptables(listen int, ranges []PortRange) error {
 func (m *Manager) removeIptables(listen int) error {
 	comment := fmt.Sprintf("forgepanel-porthop-%d", listen)
 	for _, ipt := range []string{"iptables", "ip6tables"} {
-		if _, err := exec.LookPath(ipt); err != nil {
-			continue
-		}
-		// Delete every PREROUTING rule bearing our comment (loop until none remain).
-		for i := 0; i < 128; i++ {
-			out, _ := exec.Command(ipt, "-t", "nat", "-S", "PREROUTING").CombinedOutput()
-			line := findRule(string(out), comment)
-			if line == "" {
-				break
-			}
-			// Turn the "-A PREROUTING ..." spec into a delete.
-			args := append([]string{"-t", "nat", "-D"}, strings.Fields(strings.TrimPrefix(line, "-A "))...)
-			if err := run(ipt, args...); err != nil {
-				break
-			}
-		}
+		_ = removeIptablesRules(ipt, comment)
 	}
 	return nil
 }
 
+// CleanupOwned removes every rule marked with ForgePanel's exact comment prefix
+// from IPv4 and IPv6 nat tables, plus the table that ForgePanel creates for
+// nftables. It never flushes an existing table or executes reconstructed shell
+// text: list output is parsed into argv only after the comment is validated.
+func (m *Manager) CleanupOwned() error {
+	if !HasNetAdmin() {
+		return fmt.Errorf("porthop: no CAP_NET_ADMIN")
+	}
+	var firstErr error
+	if _, err := exec.LookPath("nft"); err == nil {
+		// A missing table means no ForgePanel nftables state remains. Do not turn
+		// that normal condition into an uninstall failure.
+		if _, err := exec.Command("nft", "list", "table", "inet", nftTable).CombinedOutput(); err == nil {
+			if err := run("nft", "delete", "table", "inet", nftTable); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	for _, ipt := range []string{"iptables", "ip6tables"} {
+		if err := removeIptablesRules(ipt, "forgepanel-porthop-"); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func removeIptablesRules(ipt, comment string) error {
+	if _, err := exec.LookPath(ipt); err != nil {
+		return nil
+	}
+	for i := 0; i < 128; i++ {
+		out, err := exec.Command(ipt, "-t", "nat", "-S", "PREROUTING").CombinedOutput()
+		if err != nil {
+			return nil // no nat table is equivalent to no ForgePanel rule
+		}
+		args, ok := deleteArgs(string(out), comment)
+		if !ok {
+			return nil
+		}
+		if err := run(ipt, args...); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("porthop: too many owned %s rules", ipt)
+}
+
 func findRule(dump, comment string) string {
 	for _, ln := range strings.Split(dump, "\n") {
-		if strings.Contains(ln, comment) {
+		if ruleHasOwnedComment(ln, comment) {
 			return strings.TrimSpace(ln)
 		}
 	}
 	return ""
+}
+
+func deleteArgs(dump, comment string) ([]string, bool) {
+	line := findRule(dump, comment)
+	if !strings.HasPrefix(line, "-A PREROUTING ") {
+		return nil, false
+	}
+	return append([]string{"-t", "nat", "-D"}, strings.Fields(strings.TrimPrefix(line, "-A "))...), true
+}
+
+func ruleHasOwnedComment(line, prefix string) bool {
+	fields := strings.Fields(line)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "--comment" {
+			continue
+		}
+		comment := strings.Trim(fields[i+1], `"`)
+		return strings.HasPrefix(comment, prefix) && strings.HasPrefix(comment, "forgepanel-porthop-")
+	}
+	return false
 }
 
 // Sync reconciles the installed redirects with the desired set (listenPort->spec):
@@ -286,10 +336,18 @@ func (m *Manager) ownedPorts() []int {
 			}
 		}
 	} else if m.backend == BackendIptables {
-		b, _ := exec.Command("iptables", "-t", "nat", "-S", "PREROUTING").CombinedOutput()
-		for _, ln := range strings.Split(string(b), "\n") {
-			if i := strings.Index(ln, "forgepanel-porthop-"); i >= 0 {
-				if p, err := strconv.Atoi(strings.Fields(ln[i+len("forgepanel-porthop-"):])[0]); err == nil {
+		for _, ipt := range []string{"iptables", "ip6tables"} {
+			b, _ := exec.Command(ipt, "-t", "nat", "-S", "PREROUTING").CombinedOutput()
+			for _, ln := range strings.Split(string(b), "\n") {
+				i := strings.Index(ln, "forgepanel-porthop-")
+				if i < 0 {
+					continue
+				}
+				fields := strings.Fields(ln[i+len("forgepanel-porthop-"):])
+				if len(fields) == 0 {
+					continue
+				}
+				if p, err := strconv.Atoi(strings.Trim(fields[0], `"`)); err == nil {
 					seen[p] = true
 				}
 			}
@@ -314,10 +372,12 @@ func (m *Manager) Rules() []string {
 			}
 		}
 	case BackendIptables:
-		b, _ := exec.Command("iptables", "-t", "nat", "-S", "PREROUTING").CombinedOutput()
-		for _, ln := range strings.Split(string(b), "\n") {
-			if strings.Contains(ln, "forgepanel-porthop-") {
-				out = append(out, strings.TrimSpace(ln))
+		for _, ipt := range []string{"iptables", "ip6tables"} {
+			b, _ := exec.Command(ipt, "-t", "nat", "-S", "PREROUTING").CombinedOutput()
+			for _, ln := range strings.Split(string(b), "\n") {
+				if ruleHasOwnedComment(ln, "forgepanel-porthop-") {
+					out = append(out, ipt+": "+strings.TrimSpace(ln))
+				}
 			}
 		}
 	}

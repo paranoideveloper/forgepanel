@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,13 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
+		if interactiveTerminal() {
+			if err := cmdMenu(nil); err != nil {
+				fmt.Fprintln(os.Stderr, "forgectl:", err)
+				os.Exit(1)
+			}
+			return
+		}
 		usage()
 		os.Exit(2)
 	}
@@ -38,11 +46,37 @@ func main() {
 	case "backup":
 		err = cmdBackup(os.Args[2:])
 	case "restore":
-		err = cmdRestore(os.Args[2:])
+		err = cmdBackup(append([]string{"restore"}, os.Args[2:]...))
 	case "migrate":
 		err = cmdMigrate(os.Args[2:])
 	case "healthcheck":
 		err = cmdHealth(os.Args[2:])
+	case "status":
+		err = cmdStatus(os.Args[2:])
+	case "service":
+		err = cmdService(os.Args[2:])
+	case "logs":
+		err = cmdLogs(os.Args[2:])
+	case "settings":
+		err = cmdSettings(os.Args[2:])
+	case "dns-check":
+		err = cmdDNSCheck(os.Args[2:])
+	case "cert":
+		err = cmdCert(os.Args[2:])
+	case "admin":
+		err = cmdAdmin(os.Args[2:])
+	case "firewall":
+		err = cmdFirewall(os.Args[2:])
+	case "uninstall":
+		err = cmdUninstall(os.Args[2:])
+	case "repair":
+		err = cmdRepair(os.Args[2:])
+	case "update":
+		err = cmdUpdate(os.Args[2:])
+	case "menu":
+		err = cmdMenu(os.Args[2:])
+	case "lifecycle":
+		err = cmdLifecycle(os.Args[2:])
 	case "version", "--version", "-v":
 		err = cmdVersion(os.Args[2:])
 	case "-h", "--help", "help":
@@ -62,6 +96,20 @@ func usage() {
 	fmt.Print(`forgectl — ForgePanel CLI
 
 Usage:
+  forgectl [menu]
+  forgectl status [--json] [--data <dir>]
+  forgectl service <start|stop|restart>
+  forgectl logs [--follow] [--lines <n>]
+  forgectl settings show [--json] [--data <dir>]
+  forgectl settings set [--panel-port <n>] [--domain <host>] [--bind-address <ip>] [--https=<bool>] [--acme-email <email>] [--verify-dns]
+  forgectl dns-check <domain> [--json]
+  forgectl cert <status|renew> [--data <dir>]
+  forgectl admin <reset-password|reset-2fa|regenerate-path> [--user <name>] [--data <dir>]
+  forgectl backup <create|restore> <path> [--data <dir>]
+  forgectl firewall <status|cleanup> [--json]
+  forgectl uninstall [--keep-data|--purge] [--dry-run] [--yes] [--force] [--json]
+  forgectl repair [--data <dir>]
+  forgectl update [--check] [--yes] [--data <dir>]
   forgectl keygen <reality|uuid|shortid|ss2022|wireguard|ssh|password|mldsa65> [method]
   forgectl convert <link> <uri|xray|singbox|clash>
   forgectl render <link> <xray|singbox>
@@ -182,35 +230,65 @@ func printJSON(v any) error {
 }
 
 func cmdBackup(args []string) error {
-	if len(args) < 3 {
-		return fmt.Errorf("backup needs <data-dir> <out.fpbk> <master-key>")
+	if err := requireLocalAdmin(); err != nil {
+		return err
 	}
-	dir, out, master := args[0], args[1], args[2]
-	files := []string{filepath.Join(dir, "forgepanel.db"), filepath.Join(dir, "secrets.json")}
-	blob, err := backup.Create(master, files)
+	if len(args) == 0 || (args[0] != "create" && args[0] != "restore") {
+		return fmt.Errorf("usage: forgectl backup <create|restore> <path> [--data <dir>]")
+	}
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	data := fs.String("data", defaultDataDir(), "panel data directory")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("backup %s needs exactly one file path", args[0])
+	}
+	cfg, err := loadLocalConfig(*data)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(out, blob, 0o600); err != nil {
-		return err
+	if cfg.MasterKey == "" {
+		return fmt.Errorf("backup: data directory has no master key")
 	}
-	fmt.Printf("wrote encrypted backup: %s (%d bytes)\n", out, len(blob))
-	return nil
-}
-
-func cmdRestore(args []string) error {
-	if len(args) < 3 {
-		return fmt.Errorf("restore needs <in.fpbk> <dest-dir> <master-key>")
+	path := fs.Arg(0)
+	switch args[0] {
+	case "create":
+		files := []string{
+			filepath.Join(cfg.DataDir, "forgepanel.db"),
+			filepath.Join(cfg.DataDir, "secrets.json"),
+			filepath.Join(cfg.DataDir, "panel.json"),
+		}
+		blob, err := backup.Create(cfg.MasterKey, files)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, blob, 0o600); err != nil {
+			return err
+		}
+		auditLocal(cfg, "backup.create", path, "ok")
+		fmt.Printf("wrote encrypted backup: %s (%d bytes)\n", path, len(blob))
+		return nil
+	case "restore":
+		blob, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := systemctl("stop", "forgepanel"); err != nil {
+			return err
+		}
+		files, err := backup.Restore(cfg.MasterKey, blob, cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		if err := systemctl("start", "forgepanel"); err != nil {
+			return err
+		}
+		auditLocal(cfg, "backup.restore", path, "ok")
+		fmt.Printf("restored %d files to %s\n", len(files), cfg.DataDir)
+		return nil
 	}
-	blob, err := os.ReadFile(args[0])
-	if err != nil {
-		return err
-	}
-	files, err := backup.Restore(args[2], blob, args[1])
-	if err != nil {
-		return err
-	}
-	fmt.Printf("restored %d files to %s\n", len(files), args[1])
 	return nil
 }
 

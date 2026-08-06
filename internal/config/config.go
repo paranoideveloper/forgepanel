@@ -97,7 +97,18 @@ func envBool(key string) bool {
 // panel.json holds the panel address, ACME and first-run setup state. On a
 // brand-new data dir both are minted and marked FirstBoot.
 func Load() (*Config, error) {
-	dataDir := envStr("FORGEPANEL_DATA", defaultDataDir())
+	return load(envStr("FORGEPANEL_DATA", defaultDataDir()), true)
+}
+
+// LoadFromDataDir reads an existing installation without consulting mutable
+// runtime environment variables. Local administration tools use this path so
+// their view matches panel.json, which is the source of truth for operator
+// settings after first boot.
+func LoadFromDataDir(dataDir string) (*Config, error) {
+	return load(dataDir, false)
+}
+
+func load(dataDir string, bootstrapFromEnv bool) (*Config, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
@@ -147,20 +158,27 @@ func Load() (*Config, error) {
 		// operators keep their credentials (spec: upgrade compatibility).
 		panel = &PanelSettings{
 			BindAddress:    "0.0.0.0",
-			Port:           envInt("FORGEPANEL_PANEL_PORT", 2053),
+			Port:           2053,
 			AdminPath:      legacyAdminPath,
 			SetupCompleted: false,
 			ACME: ACMESettings{
 				Provider:  "letsencrypt",
 				Challenge: "http-01",
-				Email:     envStr("FORGEPANEL_ACME_EMAIL", ""),
+				Email:     "",
 			},
 		}
-		if d := envStr("FORGEPANEL_DOMAIN", ""); d != "" {
-			panel.Domain = d
-			if envBool("FORGEPANEL_HTTPS") {
-				panel.HTTPSEnabled = true
-				panel.ACME.Enabled = true
+		// Mutable values from the environment are bootstrap-only. They seed a
+		// new panel.json for compatibility with existing installers, but never
+		// override a persisted setting on later starts.
+		if bootstrapFromEnv {
+			panel.Port = envInt("FORGEPANEL_PANEL_PORT", 2053)
+			panel.ACME.Email = envStr("FORGEPANEL_ACME_EMAIL", "")
+			if d := envStr("FORGEPANEL_DOMAIN", ""); d != "" {
+				panel.Domain = d
+				if envBool("FORGEPANEL_HTTPS") {
+					panel.HTTPSEnabled = true
+					panel.ACME.Enabled = true
+				}
 			}
 		}
 		cfg.firstBoot = secretsFresh && legacyAdminPath == ""
@@ -182,21 +200,6 @@ func Load() (*Config, error) {
 		panel.ACME.Challenge = "http-01"
 	}
 
-	// Env overrides always win at runtime (installer/systemd may pass them).
-	if v := envInt("FORGEPANEL_PANEL_PORT", 0); v != 0 {
-		panel.Port = v
-	}
-	if v := envStr("FORGEPANEL_DOMAIN", ""); v != "" {
-		panel.Domain = v
-		if envBool("FORGEPANEL_HTTPS") {
-			panel.HTTPSEnabled = true
-			panel.ACME.Enabled = true
-		}
-	}
-	if v := envStr("FORGEPANEL_ACME_EMAIL", ""); v != "" {
-		panel.ACME.Email = v
-	}
-
 	cfg.panel = panel
 	cfg.AdminPath = panel.AdminPath
 	cfg.PanelPort = panel.Port
@@ -208,6 +211,40 @@ func Load() (*Config, error) {
 
 // Panel returns the mutable panel settings (address, ACME, setup state).
 func (c *Config) Panel() *PanelSettings { return c.panel }
+
+// ReloadPanel replaces the in-memory panel settings from disk. It is used while
+// holding the short-lived settings lock, preventing a web request and a local
+// CLI command from applying changes to different stale snapshots.
+func (c *Config) ReloadPanel() error {
+	p, _, err := loadPanel(filepath.Join(c.DataDir, "panel.json"))
+	if err != nil {
+		return err
+	}
+	if p.AdminPath == "" {
+		p.AdminPath = c.AdminPath
+	}
+	c.panel = p
+	c.AdminPath = p.AdminPath
+	c.PanelPort = p.Port
+	return nil
+}
+
+// ClonePanel returns an independent settings value, including forward-compatible
+// keys, for callers that need to roll back an in-memory change after a failed
+// write.
+func ClonePanel(p *PanelSettings) PanelSettings {
+	if p == nil {
+		return PanelSettings{}
+	}
+	c := *p
+	if p.extra != nil {
+		c.extra = make(map[string]json.RawMessage, len(p.extra))
+		for k, v := range p.extra {
+			c.extra[k] = append(json.RawMessage(nil), v...)
+		}
+	}
+	return c
+}
 
 // RestoreRollback promotes panel.json.bak (the pre-change snapshot written before
 // a panel-address edit) back to panel.json. It is invoked when the panel fails
@@ -239,6 +276,20 @@ func (c *Config) SavePanel() error {
 	c.AdminPath = c.panel.AdminPath
 	c.PanelPort = c.panel.Port
 	return savePanel(filepath.Join(c.DataDir, "panel.json"), c.panel)
+}
+
+// WriteRollback snapshots panel.json before a settings transition. The snapshot
+// is consumed by RestoreRollback if the replacement configuration cannot bind
+// or pass a post-restart health check.
+func (c *Config) WriteRollback(previous *PanelSettings) error {
+	if previous == nil {
+		return nil
+	}
+	raw, err := marshalPanel(previous)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Join(c.DataDir, "panel.json.bak"), raw, 0o600)
 }
 
 // FirstBoot reports whether this Load initialized a brand-new panel (no prior
@@ -273,30 +324,40 @@ func loadPanel(path string) (*PanelSettings, bool, error) {
 // savePanel writes panel.json atomically (temp file + rename) with 0600 perms,
 // merging back any preserved unknown keys.
 func savePanel(path string, p *PanelSettings) error {
-	// Marshal known fields, then splice unknown keys back in.
-	base, err := json.Marshal(p)
+	out, err := marshalPanel(p)
 	if err != nil {
 		return err
 	}
+	return writeAtomic(path, out, 0o600)
+}
+
+func marshalPanel(p *PanelSettings) ([]byte, error) {
+	base, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
 	var merged map[string]json.RawMessage
 	if err := json.Unmarshal(base, &merged); err != nil {
-		return err
+		return nil, err
 	}
 	for k, v := range p.extra {
 		if _, taken := merged[k]; !taken {
 			merged[k] = v
 		}
 	}
-	out, err := json.MarshalIndent(merged, "", "  ")
-	if err != nil {
+	return json.MarshalIndent(merged, "", "  ")
+}
+
+func writeAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return fmt.Errorf("write panel.json: %w", err)
-	}
 	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("commit panel.json: %w", err)
+		return fmt.Errorf("commit %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }

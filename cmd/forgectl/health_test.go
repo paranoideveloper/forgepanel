@@ -26,14 +26,13 @@ func TestForgectl_HealthPort(t *testing.T) {
 		t.Fatalf("expected 9090, got %d", port)
 	}
 
-	// Env var
+	// Legacy bootstrap env var
 	t.Setenv("FORGEPANEL_PANEL_PORT", "3000")
 	if port := healthPort(""); port != 3000 {
 		t.Fatalf("expected 3000, got %d", port)
 	}
 
-	// Data dir file
-	t.Setenv("FORGEPANEL_PANEL_PORT", "")
+	// Persisted panel settings override an old environment value.
 	dir := t.TempDir()
 	t.Setenv("FORGEPANEL_DATA", dir)
 	os.WriteFile(filepath.Join(dir, "panel.json"), []byte(`{"port": 4000}`), 0644)

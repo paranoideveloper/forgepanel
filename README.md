@@ -88,7 +88,7 @@ config downloads as a ready-to-import `.conf`. The server needs the `amneziawg`
 module + `amneziawg-tools` installed (`modprobe amneziawg`); until then the panel
 still generates the configs and reports kernel-mode readiness in engine status.
 
-Full docs are in [`docs/`](docs/) — [Install](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md), [Protocols](docs/PROTOCOLS.md), [API](docs/API.md), [Security](docs/SECURITY.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
+Full docs are in [`docs/`](docs/) — [Install and local management](docs/INSTALL.md), [Configuration](docs/CONFIGURATION.md), [Protocols](docs/PROTOCOLS.md), [API](docs/API.md), [Security](docs/SECURITY.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Security notes
 

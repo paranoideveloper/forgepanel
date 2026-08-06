@@ -82,8 +82,7 @@ RUN addgroup -g 65532 -S forge && \
     chown -R forge:forge /var/lib/forgepanel && \
     chmod 700 /var/lib/forgepanel
 
-ENV FORGEPANEL_DATA=/var/lib/forgepanel \
-    FORGEPANEL_PANEL_PORT=2053
+ENV FORGEPANEL_DATA=/var/lib/forgepanel
 
 WORKDIR /var/lib/forgepanel
 VOLUME ["/var/lib/forgepanel"]

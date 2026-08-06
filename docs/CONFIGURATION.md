@@ -1,22 +1,33 @@
 # Configuration
 
-All configuration is via environment variables (sane defaults applied at boot).
+On a host installation, `<data>/panel.json` is the authoritative, atomically
+written source for the panel address, domain, HTTPS and ACME settings. Change it
+through the authenticated web UI or the root-only local command:
 
-| Variable | Default | Purpose |
+```bash
+sudo forgectl settings show
+sudo forgectl settings set --panel-port 8443
+sudo forgectl settings set --domain panel.example.com --https=true --acme-email ops@example.com --verify-dns
+```
+
+The systemd environment file is intentionally limited to `FORGEPANEL_DATA` for
+a non-default data directory. Legacy address environment variables are read only
+when creating a previously missing `panel.json`; they never override a saved
+setting on restart or upgrade.
+
+| Bootstrap/runtime variable | Default | Purpose |
 |---|---|---|
-| `FORGEPANEL_DATA` | `~/.forgepanel` | data + secrets dir (mode 0700) |
-| `FORGEPANEL_PANEL_PORT` | `2053` | HTTPS panel port |
-| `FORGEPANEL_SUB_PORT` | `2096` | subscription port |
-| `FORGEPANEL_API_PORT` | `2054` | REST API port |
-| `FORGEPANEL_DNS_PORT` | `53` | ForgeDNS authoritative listener (udp) |
-| `FORGEPANEL_ADMIN_USER` | `admin` | initial admin username |
+| `FORGEPANEL_DATA` | `~/.forgepanel` | data + secrets directory (mode 0700) |
+| `FORGEPANEL_SUB_PORT` | `2096` | subscription listener port |
+| `FORGEPANEL_API_PORT` | `2054` | REST API listener port |
+| `FORGEPANEL_DNS_PORT` | `53` | ForgeDNS authoritative listener port |
+| `FORGEPANEL_ADMIN_USER` | `admin` | initial administrator username |
 
-Secrets (admin path, master key) are generated on first boot into
-`<data>/secrets.json` and never leave the machine. The master key derives the JWT
-signing secret and the backup-encryption key.
-
-Engine binaries are downloaded and pinned into `<data>/bin/` on first use; the
-SQLite database is `<data>/forgepanel.db`.
+Secrets (master key and compatibility metadata) are generated on first boot in
+`<data>/secrets.json` and never leave the machine. The master key derives the
+JWT signing secret and backup-encryption key. The SQLite database is
+`<data>/forgepanel.db`; engine binaries are pinned under `<data>/bin/` on first
+use.
 
 ---
 

@@ -41,16 +41,6 @@ services:
 
     environment:
       FORGEPANEL_DATA: /var/lib/forgepanel
-      FORGEPANEL_PANEL_PORT: "2053"
-      FORGEPANEL_API_PORT: "2054"
-      FORGEPANEL_SUB_PORT: "2096"
-      # Set a domain to serve the panel over HTTPS with an automatically issued
-      # Let's Encrypt certificate. The domain must already resolve to this host
-      # and port 80 must be published above, or the challenge cannot complete.
-      # FORGEPANEL_DOMAIN: panel.example.com
-      # FORGEPANEL_HTTPS: "true"
-      # FORGEPANEL_ACME_EMAIL: admin@example.com
-      # FORGEPANEL_DNS_PORT: "53"
       #
       # If you put the panel behind a reverse proxy, list the proxy's addresses
       # so client IPs are read from X-Forwarded-For. Without this the panel

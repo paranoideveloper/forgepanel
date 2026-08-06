@@ -22,10 +22,22 @@ import (
 // without cleaning up; a stale lock file never blocks a restart. The returned
 // closer releases it.
 func LockDataDir(dir string) (func() error, error) {
+	return lockFile(filepath.Join(dir, "forgepanel.lock"), "another ForgePanel instance is already using")
+}
+
+// LockSettings serializes short configuration writes without taking the
+// long-lived runtime lock. The panel holds forgepanel.lock for its entire
+// lifetime, while the web API and forgectl only need mutual exclusion around a
+// read-validate-write transition of panel.json.
+func LockSettings(dir string) (func() error, error) {
+	return lockFile(filepath.Join(dir, "settings.lock"), "another ForgePanel settings change is in progress for")
+}
+
+func lockFile(path, prefix string) (func() error, error) {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "forgepanel.lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("config: open lock %s: %w", path, err)
@@ -36,11 +48,14 @@ func LockDataDir(dir string) (func() error, error) {
 			holder = " (held by pid " + string(b) + ")"
 		}
 		f.Close()
+		hint := " — retry after the current operation completes"
+		if prefix == "another ForgePanel instance is already using" {
+			hint = " — two instances must not share a data directory. Stop the other one (systemctl stop forgepanel, or docker stop forgepanel) and retry"
+		}
 		return nil, fmt.Errorf(
-			"another ForgePanel instance is already using %s%s — "+
-				"two instances must not share a data directory. Stop the other one "+
-				"(systemctl stop forgepanel, or docker stop forgepanel) and retry",
-			dir, holder)
+			"%s %s%s%s",
+			prefix,
+			dir, holder, hint)
 	}
 	// Record our pid so the next process can name the holder in its error.
 	if err := f.Truncate(0); err == nil {
