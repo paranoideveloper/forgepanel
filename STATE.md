@@ -3,6 +3,20 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.7 — ForgeDNS encryption-key mismatch (forgedns-key)
+
+A real MasterDNS zone exposed that the client config's `ENCRYPTION_KEY` (the
+panel's 64-hex key `4540…`) did not match the server's `encrypt_key.txt`
+(`065b…`, 32 hex). Empirically confirmed: MasterDNS rejects a wrong-length key,
+generates its own 16-byte key, and overwrites the file on every start (a fresh
+random key each time a wrong-length one is supplied); a correctly-sized key is
+kept. So client ≠ server → the tunnel can never decrypt. Fix: read the effective
+key back from the server and adopt it — `Manager.EffectiveKey()`, plus
+`adoptUpstreamKeys()` (post-sync poll, since the rewrite is async) and
+`adoptEffectiveKey()` at bundle-render time. Converges after one sync (the adopted
+key is a length the upstream keeps → stable). `looksLikeKey` hex-validates to
+avoid adopting a partial write; unit-tested.
+
 ## v1.5.6 — ForgeDNS delegation IP + port note (forgedns-net)
 
 Running a real zone (`s13.eshkaftak.vip`, masterdns) on the Docker host surfaced

@@ -92,6 +92,20 @@ func (m *Manager) Installer() *Installer { return m.inst }
 // it is sanitised before it becomes a path element.
 func (m *Manager) ZoneDir(zone string) string { return filepath.Join(m.dir, sanitize(zone)) }
 
+// EffectiveKey returns the encryption key the running upstream server actually
+// uses, read from the zone's key file. It matters because some upstreams
+// (MasterDNS) reject a key whose length does not fit the cipher and silently
+// write their own — so the key the panel handed the client would never decrypt.
+// Reading the file back lets the caller re-sync the client bundle to the key the
+// server truly holds. Returns "" when the file is absent or unreadable.
+func (m *Manager) EffectiveKey(zone string) string {
+	b, err := os.ReadFile(filepath.Join(m.ZoneDir(zone), EncryptKeyFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // proc is one supervised zone process.
 type proc struct {
 	zone, adapter string

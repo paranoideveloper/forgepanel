@@ -1,3 +1,23 @@
+# ForgePanel v1.5.7 — Release Notes
+
+Fixes a silent ForgeDNS tunnel breaker found by running a real MasterDNS zone: the
+client config advertised a key the server never used.
+
+## Fix
+
+- **Encryption-key mismatch (client ≠ server).** The panel mints a 32-byte key and
+  writes it to the server's `encrypt_key.txt`, but MasterDNS rejects a key whose
+  length doesn't fit its cipher, generates its own 16-byte key, and overwrites the
+  file on every start. The client bundle kept advertising the panel's key, so the
+  two ends could never decrypt each other's traffic. The panel now **reads the
+  effective key back** from the running server and adopts it — during the
+  post-sync reconcile and again when the delegation bundle is rendered — so the
+  client config always carries the key the server actually holds. It converges
+  after one sync (the adopted key is a length the upstream keeps, so subsequent
+  starts are stable). A partial/garbage key file is never adopted (hex-validated).
+
+---
+
 # ForgePanel v1.5.6 — Release Notes
 
 Follow-up to v1.5.5 after running a real ForgeDNS zone end-to-end on a Docker

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -59,6 +60,80 @@ func (s *Server) syncForgeDNS() {
 	}
 	_, _ = s.fdns.SyncZones(specs)
 	s.pinUpstreamTags(zones)
+	s.adoptUpstreamKeys(zones)
+}
+
+// looksLikeKey reports whether s is a plausible hex encryption key, so a
+// truncated or partially-written key file is never adopted.
+func looksLikeKey(s string) bool {
+	if len(s) < 16 || len(s) > 256 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// adoptUpstreamKeys reconciles each upstream zone's stored key with the key the
+// running server actually holds. Some upstreams (MasterDNS) reject a key whose
+// length does not fit the cipher and write their own a moment after start, so the
+// key the panel minted would never decrypt the client's traffic. Polling the key
+// file and adopting the effective key makes the client bundle match the server;
+// it converges after one sync (the adopted key is the right length, so the next
+// start keeps it). Runs in syncForgeDNS's background goroutine, so the short
+// waits are fine.
+func (s *Server) adoptUpstreamKeys(zones []store.ForgeDNSZone) {
+	mgr := s.upstreamManager()
+	if mgr == nil || s.db == nil {
+		return
+	}
+	pending := map[string]*store.ForgeDNSZone{}
+	for i := range zones {
+		z := &zones[i]
+		if z.Enabled && upstream.IsUpstream(z.Adapter) {
+			pending[z.Zone] = z
+		}
+	}
+	for attempt := 0; attempt < 12 && len(pending) > 0; attempt++ {
+		if s.isClosed() {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		for zone, z := range pending {
+			eff := mgr.EffectiveKey(zone)
+			if eff == "" || !looksLikeKey(eff) {
+				continue // not written yet — keep polling
+			}
+			if eff != z.EncryptKey {
+				z.EncryptKey = eff
+				_ = s.db.SaveZone(z)
+			}
+			delete(pending, zone) // effective key present and now matches
+		}
+	}
+}
+
+// adoptEffectiveKey (single-shot) syncs one zone's stored key to the running
+// server's key before its bundle is rendered, so "Setup Info" never shows a key
+// that cannot decrypt. Returns true when it adopted a new key.
+func (s *Server) adoptEffectiveKey(z *store.ForgeDNSZone) bool {
+	if s.db == nil || !upstream.IsUpstream(z.Adapter) {
+		return false
+	}
+	mgr := s.upstreamManager()
+	if mgr == nil {
+		return false
+	}
+	eff := mgr.EffectiveKey(z.Zone)
+	if eff == "" || eff == z.EncryptKey || !looksLikeKey(eff) {
+		return false
+	}
+	z.EncryptKey = eff
+	_ = s.db.SaveZone(z)
+	return true
 }
 
 // pinUpstreamTags records the release tag each upstream zone actually resolved
@@ -445,6 +520,9 @@ func (s *Server) handleForgeDNSBundle(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "zone not found"})
 		return
 	}
+	// The upstream may have rewritten its key (see adoptUpstreamKeys); reconcile
+	// before rendering so the client config carries the key the server truly uses.
+	s.adoptEffectiveKey(z)
 	// Default the delegation A-record target to this server's public IP when the
 	// caller didn't pin one, so the NS records the UI shows are usable as-is
 	// instead of pointing at an empty address.

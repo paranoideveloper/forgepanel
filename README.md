@@ -25,7 +25,7 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 
 ## Install
 
-Every published mode uses the same release version. Replace `v1.5.6` with the
+Every published mode uses the same release version. Replace `v1.5.7` with the
 version you intend to run and keep it pinned in production.
 
 ### Verified Linux installer (recommended)
@@ -35,7 +35,7 @@ access. It installs the three matching binaries, records ownership in an
 installation manifest, starts the service, and prints the one-time setup token.
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 curl -fsSLO "$BASE/install.sh"
 curl -fsSLO "$BASE/install.sh.sha256"
@@ -49,7 +49,7 @@ preserves data by default; `--purge --yes` is explicit.
 ### Debian and Ubuntu package
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 ARCH=$(dpkg --print-architecture)       # amd64 or arm64
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.deb
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -59,7 +59,7 @@ sudo apt install "./$ASSET"
 ### Fedora, RHEL, Rocky, and AlmaLinux package
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.rpm
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -69,7 +69,7 @@ sudo dnf install "./$ASSET"
 ### Docker
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 docker build -t forgepanel:$VERSION \
@@ -93,7 +93,7 @@ Requires Docker with the Compose plugin. The checked-in Compose file keeps data
 in a named volume and accepts an explicit image version.
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 FORGEPANEL_VERSION=$VERSION docker compose up -d --build
@@ -106,7 +106,7 @@ Use this mode for a foreground process, testing, or custom supervision. The
 systemd installer or package remains the supported VPS management path.
 
 ```bash
-VERSION=v1.5.6
+VERSION=v1.5.7
 ARCH=amd64                         # use arm64 on 64-bit ARM
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 for bin in forgepanel forgectl forgenode; do
@@ -123,7 +123,7 @@ Requires Go 1.25+ and is intended for development or a custom supervisor.
 ```bash
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-git checkout v1.5.6
+git checkout v1.5.7
 make build
 FORGEPANEL_DATA="$PWD/forgepanel-data" ./bin/forgepanel
 ```

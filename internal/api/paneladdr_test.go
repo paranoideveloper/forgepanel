@@ -26,6 +26,30 @@ func TestIsPrivateIP(t *testing.T) {
 	}
 }
 
+func TestLooksLikeKey(t *testing.T) {
+	good := []string{
+		"065b883074970af6bee6a192eb0e3df6",                                 // 16-byte hex (MasterDNS)
+		"4540e390ff726fa6a24b6859d007f373262ec1c2503347634eb58b5a2873c8d9", // 32-byte hex
+		"ABCDEF0123456789ABCDEF0123456789",
+	}
+	bad := []string{
+		"", "short", "0123456789abcde",           // too short (<16)
+		"065b883074970af6bee6a192eb0e3dg6",        // non-hex char 'g'
+		"065b8830 74970af6bee6a192eb0e3df6",       // space (partial write)
+		"065b883074970af6bee6a192eb0e3df6\ntrail", // embedded newline/garbage
+	}
+	for _, k := range good {
+		if !looksLikeKey(k) {
+			t.Errorf("looksLikeKey(%q) = false, want true", k)
+		}
+	}
+	for _, k := range bad {
+		if looksLikeKey(k) {
+			t.Errorf("looksLikeKey(%q) = true, want false", k)
+		}
+	}
+}
+
 func TestNormalizeDomain(t *testing.T) {
 	cases := map[string]string{
 		"panel.example.com":                 "panel.example.com",
