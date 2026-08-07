@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -379,6 +380,90 @@ func findSingbox() string {
 		return p
 	}
 	for _, p := range []string{"/usr/bin/sing-box", "/usr/local/bin/sing-box"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// TestXraySubscriptionAcceptedByCore feeds the emitted xray client config to the
+// real `xray run -test`, the authority on validity. Skips when xray is absent.
+func TestXraySubscriptionAcceptedByCore(t *testing.T) {
+	bin := findXray()
+	if bin == "" {
+		t.Skip("xray binary not found; skipping semantic validation")
+	}
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoVMess, Address: "b.example.com", Port: 443, UUID: "66666666-7777-8888-9999-000000000000"},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xray.json")
+	if err := os.WriteFile(cfg, xraySubscription(nodes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("xray rejected the config: %v\n%s", err, out)
+	}
+}
+
+// TestXraySubscriptionHasUniqueTags: xray also refuses duplicate outbound tags.
+func TestXraySubscriptionHasUniqueTags(t *testing.T) {
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoVMess, Address: "b", Port: 443, UUID: "66666666-7777-8888-9999-000000000000"},
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(xraySubscription(nodes), &doc); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, o := range doc.Outbounds {
+		tag, _ := o["tag"].(string)
+		if tag == "" || seen[tag] {
+			t.Fatalf("empty or duplicate outbound tag %q", tag)
+		}
+		seen[tag] = true
+	}
+	if !seen["direct"] || !seen["block"] {
+		t.Fatal("missing freedom/blackhole outbounds")
+	}
+}
+
+// TestSubscriptionUserinfoReflectsDB is the regression for the all-zeros header:
+// it must report the user's real used/limit/expire.
+func TestSubscriptionUserinfoReflectsDB(t *testing.T) {
+	s := dbServerT(t)
+	exp := time.Now().Add(48 * time.Hour)
+	u := &store.User{
+		Username: "quotauser", SubToken: "quotatok123", Status: store.StatusActive,
+		UsedTraffic: 5 << 30, DataLimit: 100 << 30, ExpireAt: &exp,
+	}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	got := s.subscriptionUserinfo("quotatok123")
+	if !strings.Contains(got, "download=5368709120") {
+		t.Errorf("used traffic missing from header: %q", got)
+	}
+	if !strings.Contains(got, "total=107374182400") {
+		t.Errorf("data limit missing from header: %q", got)
+	}
+	if strings.Contains(got, "expire=0") {
+		t.Errorf("expiry not reported: %q", got)
+	}
+}
+
+func findXray() string {
+	if p, err := exec.LookPath("xray"); err == nil {
+		return p
+	}
+	for _, p := range []string{"/usr/local/bin/xray", "/usr/bin/xray"} {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

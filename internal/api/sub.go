@@ -16,20 +16,26 @@ import (
 
 // subFormats are the subscription formats this endpoint can render, listed for
 // the error message when a client asks for something else.
-var subFormats = []string{"v2ray", "clash", "sing-box", "links", "json"}
+var subFormats = []string{"v2ray", "clash", "sing-box", "xray", "links", "json"}
 
 // canonicalSubFormat maps a requested format (and its aliases) to the single
 // name the renderer switch uses. It returns "" for anything unsupported, so an
 // explicit request for a format we do not have becomes a clear error instead of
 // silently returning a different one the client cannot parse.
+//
+// Shadowrocket is a true alias of the base64 link list — that is exactly what it
+// imports — so it maps to "v2ray" rather than pretending to be a distinct
+// renderer.
 func canonicalSubFormat(f string) string {
 	switch strings.ToLower(strings.TrimSpace(f)) {
-	case "v2ray", "v2rayn", "v2rayng", "base64":
+	case "v2ray", "v2rayn", "v2rayng", "base64", "shadowrocket":
 		return "v2ray"
-	case "clash", "clash-meta", "clashmeta":
+	case "clash", "clash-meta", "clashmeta", "mihomo":
 		return "clash"
 	case "sing-box", "singbox", "sb":
 		return "sing-box"
+	case "xray", "xray-json", "v2ray-json":
+		return "xray"
 	case "links", "raw", "uri", "plain":
 		return "links"
 	case "json":
@@ -95,7 +101,10 @@ func (s *Server) handleSub(c *gin.Context) {
 	nodes = redactNodesForClient(nodes)
 
 	c.Header("Profile-Update-Interval", "12")
-	c.Header("Subscription-Userinfo", "upload=0; download=0; total=0; expire=0")
+	// Real usage/quota/expiry from the DB, not a hardcoded zero line. Clients
+	// render this as "X of Y used, expires Z"; emitting all-zeros told every user
+	// they had unlimited quota and no expiry regardless of their account.
+	c.Header("Subscription-Userinfo", s.subscriptionUserinfo(token))
 	c.Header("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte("ForgePanel")))
 	c.Header("Access-Control-Allow-Origin", "*")
 
@@ -113,10 +122,93 @@ func (s *Server) handleSub(c *gin.Context) {
 		c.JSON(200, nodes)
 	case "sing-box":
 		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes))
-	default: // v2ray/base64 subscription
+	case "xray":
+		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes))
+	default: // v2ray/base64 subscription (also Shadowrocket)
 		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))
 		c.Data(200, "text/plain; charset=utf-8", []byte(b64))
 	}
+}
+
+// subscriptionUserinfo builds the SIP008-style Subscription-Userinfo header from
+// the user's real DB record. ForgePanel accounts a single combined byte total,
+// so it is reported under download with upload=0; total is the data limit (0 =
+// unlimited, which clients show as no cap); expire is the unix expiry (0 = never).
+func (s *Server) subscriptionUserinfo(token string) string {
+	if s.db == nil {
+		return "upload=0; download=0; total=0; expire=0"
+	}
+	u, err := s.db.UserBySubToken(token)
+	if err != nil {
+		return "upload=0; download=0; total=0; expire=0"
+	}
+	var expire int64
+	if u.ExpireAt != nil {
+		expire = u.ExpireAt.Unix()
+	}
+	return fmt.Sprintf("upload=0; download=%d; total=%d; expire=%d",
+		u.UsedTraffic, u.DataLimit, expire)
+}
+
+// xraySubscription renders a complete, runnable Xray CLIENT config: a local
+// SOCKS+HTTP inbound, the per-node outbounds (canonical render.XrayOutbound),
+// plus freedom/blackhole, and a routing block selecting the first proxy. Some
+// clients (v2rayN and others) import a raw Xray JSON directly; this is that, and
+// it is accepted by `xray run -test`. Tags are de-duplicated the same way the
+// sing-box builder reserves its own, so no two outbounds collide.
+func xraySubscription(nodes []*model.Node) []byte {
+	const (
+		xrayDirectTag = "direct"
+		xrayBlockTag  = "block"
+	)
+	outs := make([]any, 0, len(nodes)+2)
+	seen := map[string]int{xrayDirectTag: 1, xrayBlockTag: 1}
+	var proxyTags []string
+	for i, n := range nodes {
+		o, err := render.XrayOutbound(n)
+		if err != nil {
+			continue
+		}
+		tag, _ := o["tag"].(string)
+		if tag == "" {
+			tag = fmt.Sprintf("proxy-%d", i)
+		}
+		if k, dup := seen[tag]; dup {
+			seen[tag] = k + 1
+			tag = fmt.Sprintf("%s-%d", tag, k+1)
+		} else {
+			seen[tag] = 1
+		}
+		o["tag"] = tag
+		proxyTags = append(proxyTags, tag)
+		outs = append(outs, o)
+	}
+	outs = append(outs,
+		map[string]any{"protocol": "freedom", "tag": xrayDirectTag},
+		map[string]any{"protocol": "blackhole", "tag": xrayBlockTag},
+	)
+	rules := []any{}
+	if len(proxyTags) > 0 {
+		rules = append(rules, map[string]any{
+			"type": "field", "outboundTag": proxyTags[0], "network": "tcp,udp",
+		})
+	}
+	doc := map[string]any{
+		"log": map[string]any{"loglevel": "warning"},
+		"inbounds": []any{
+			map[string]any{
+				"tag": "socks", "port": 10808, "listen": "127.0.0.1", "protocol": "socks",
+				"settings": map[string]any{"udp": true, "auth": "noauth"},
+			},
+			map[string]any{
+				"tag": "http", "port": 10809, "listen": "127.0.0.1", "protocol": "http",
+			},
+		},
+		"outbounds": outs,
+		"routing":   map[string]any{"domainStrategy": "AsIs", "rules": rules},
+	}
+	b, _ := json.MarshalIndent(doc, "", "  ")
+	return b
 }
 
 // singboxSubscription renders a minimal, valid sing-box CLIENT config whose
