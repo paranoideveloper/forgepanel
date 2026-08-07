@@ -59,8 +59,12 @@ func main() {
 	}
 	go func() {
 		var serveErr error
-		if p.HTTPSEnabled && p.Domain != "" {
-			httpSrv.TLSConfig = srv.CertTLSConfig()
+		// HTTPS by default: the panel always serves TLS. With a domain it uses the
+		// ACME/imported certificate; with no domain it falls back to a self-signed
+		// cert (browser warning, but the admin session and every config secret are
+		// still encrypted rather than crossing the wire in cleartext).
+		httpSrv.TLSConfig = srv.CertTLSConfig()
+		if p.Domain != "" {
 			// :80 helper answers ACME HTTP-01 challenges and redirects to HTTPS.
 			go func() {
 				h := &http.Server{Addr: ":80", Handler: srv.ACMEHTTPHandler(), ReadHeaderTimeout: 10 * time.Second}
@@ -68,10 +72,8 @@ func main() {
 					fmt.Fprintln(os.Stderr, "forgepanel: :80 ACME helper:", e)
 				}
 			}()
-			serveErr = httpSrv.ServeTLS(ln, "", "")
-		} else {
-			serveErr = httpSrv.Serve(ln)
 		}
+		serveErr = httpSrv.ServeTLS(ln, "", "")
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "forgepanel: serve:", serveErr)
 			os.Exit(1)
@@ -138,10 +140,7 @@ func start() (*config.Config, *api.Server, net.Listener, error) {
 
 func banner(cfg *config.Config, srv *api.Server) {
 	p := cfg.Panel()
-	scheme := "http"
-	if p.HTTPSEnabled && p.Domain != "" {
-		scheme = "https"
-	}
+	scheme := "https" // the panel always serves TLS (self-signed without a domain)
 	fmt.Println("┌─────────────────────────────────────────────┐")
 	fmt.Println("│  ⚡ ForgePanel                               │")
 	fmt.Println("└─────────────────────────────────────────────┘")

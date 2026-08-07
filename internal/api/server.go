@@ -296,10 +296,8 @@ func (s *Server) writePublicURLFile() {
 // panel settings, falling back to the detected server IP when no domain is set.
 func (s *Server) PublicURL() string {
 	p := s.cfg.Panel()
-	scheme, defPort := "http", 80
-	if p.HTTPSEnabled && p.Domain != "" {
-		scheme, defPort = "https", 443
-	}
+	// The panel always serves TLS (self-signed with no domain, ACME with one).
+	scheme, defPort := "https", 443
 	host := p.Domain
 	if host == "" {
 		host = detectServerIP()

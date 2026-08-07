@@ -37,6 +37,29 @@ type Store struct {
 	imported map[string]*Imported
 	acme     *autocert.Manager
 	cacheDir string
+
+	ssOnce sync.Once
+	ss     *tls.Certificate // self-signed fallback so the panel can serve HTTPS with no domain
+}
+
+// selfSignedCert lazily generates (once) and returns the panel's self-signed
+// certificate, so TLSConfig can always complete a handshake — even on an IP with
+// no domain and no ACME cert. It is the same cert the proxy engine serves for
+// TLS inbounds without a real cert (under <dataDir>/certs).
+func (s *Store) selfSignedCert() *tls.Certificate {
+	s.ssOnce.Do(func() {
+		dir := filepath.Join(filepath.Dir(s.cacheDir), "certs")
+		cp, kp, err := EnsureSelfSigned(dir)
+		if err != nil {
+			return
+		}
+		c, err := tls.LoadX509KeyPair(cp, kp)
+		if err != nil {
+			return
+		}
+		s.ss = &c
+	})
+	return s.ss
 }
 
 // NewStore creates a cert store whose ACME cache lives at cacheDir and whose
@@ -121,6 +144,12 @@ func (s *Store) CachedInfo(domain string) (*Imported, bool) {
 func (s *Store) TLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			// ACME TLS-ALPN-01 challenges MUST be answered by autocert.
+			for _, proto := range hello.SupportedProtos {
+				if proto == acme.ALPNProto {
+					return s.acme.GetCertificate(hello)
+				}
+			}
 			sni := normalizeSNI(hello.ServerName)
 			s.mu.RLock()
 			var exact, wild *tls.Certificate
@@ -148,7 +177,17 @@ func (s *Store) TLSConfig() *tls.Config {
 			if wild != nil {
 				return wild, nil
 			}
-			return s.acme.GetCertificate(hello)
+			// A real domain with an ACME cert wins; otherwise (IP access, no
+			// domain, or issuance not yet complete) fall back to the self-signed
+			// cert so the panel always serves HTTPS instead of failing the
+			// handshake and appearing offline.
+			if c, err := s.acme.GetCertificate(hello); err == nil && c != nil {
+				return c, nil
+			}
+			if ss := s.selfSignedCert(); ss != nil {
+				return ss, nil
+			}
+			return nil, fmt.Errorf("cert: no certificate available for %q", sni)
 		},
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"h2", "http/1.1", acme.ALPNProto},
