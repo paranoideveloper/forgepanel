@@ -3,6 +3,16 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.8 — Certificates page: truthful trust banner (cert-honesty)
+
+On a server exposing only :2053 (80/443 closed), ACME failed with
+`acme/autocert: missing certificate` — HTTP-01 can't reach a closed :80. The
+panel made it worse: the green "viewing over the domain — browser-trusted"
+banner keyed off hostname match only, so it claimed trust while the browser said
+"Not Secure". Fixed the banner to key off `cert.available` (green only when a
+trusted cert is live; otherwise explains the port-80 requirement + the
+save-domain-needs-restart caveat). Domain hint now states the port-80 need too.
+
 ## v1.5.7 — ForgeDNS encryption-key mismatch (forgedns-key)
 
 A real MasterDNS zone exposed that the client config's `ENCRYPTION_KEY` (the

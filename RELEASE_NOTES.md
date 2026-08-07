@@ -1,3 +1,22 @@
+# ForgePanel v1.5.8 — Release Notes
+
+Honesty fix for the Certificates page after an ACME failure on a server where only
+the panel port was open.
+
+## Fix
+
+- **"Browser-trusted" banner no longer lies.** The green "you are viewing over the
+  domain — browser-trusted certificate" banner was decided purely by hostname
+  match, so it claimed trust even while the browser showed "Not Secure" (ACME
+  still pending, self-signed served). It now checks the real cert state: it turns
+  green only when a trusted cert is actually live, and otherwise explains that no
+  cert has been issued yet and that Let's Encrypt needs **port 80** reachable from
+  the internet (and, on Docker, published `80:80`) — plus that a domain saved
+  after startup needs one panel restart to start the ACME helper.
+- The domain-setup hint now states the port-80 requirement up front.
+
+---
+
 # ForgePanel v1.5.7 — Release Notes
 
 Fixes a silent ForgeDNS tunnel breaker found by running a real MasterDNS zone: the

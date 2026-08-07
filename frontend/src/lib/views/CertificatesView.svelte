@@ -104,9 +104,11 @@
 </div>
 
 {#if addr?.domain}
-  <div class="banner {onDomain ? 'ok' : 'warn'}" data-testid="access-banner">
-    {#if onDomain}
-      ✅ You are viewing the panel over its domain — this session uses the browser-trusted certificate.
+  <div class="banner {onDomain && addr.cert?.available ? 'ok' : 'warn'}" data-testid="access-banner">
+    {#if onDomain && addr.cert?.available}
+      ✅ You are viewing the panel over its domain with a browser-trusted certificate.
+    {:else if onDomain}
+      ⚠️ You are on the domain, but no trusted certificate has been issued yet — the browser still shows the self-signed fallback (“Not Secure”). Click <strong>Force ACME Issue / Renew</strong> below. If it keeps failing, Let's Encrypt must reach <strong>port 80</strong> of this server from the internet to validate the domain (open it in the firewall, and on Docker publish <code>80:80</code>); a domain saved after startup also needs one panel restart to start the ACME helper.
     {:else}
       ⚠️ You are viewing the panel by IP ({viewingHost}), so the browser shows the self-signed fallback and marks it “Not Secure”.
       Open your panel at its domain for a trusted certificate:
@@ -117,7 +119,7 @@
 
 <div class="card">
   <h3>Panel Domain &amp; Auto TLS (Let's Encrypt / ACME)</h3>
-  <p class="hint">Point an A record for your domain at <code>{addr?.server_ipv4 || 'this server'}</code>, save it here, then reopen the panel via the domain. A Let's Encrypt certificate is issued automatically.</p>
+  <p class="hint">Point an A record for your domain at <code>{addr?.server_ipv4 || 'this server'}</code>, save it here, then reopen the panel via the domain. A Let's Encrypt certificate is issued automatically — this needs <strong>port 80</strong> reachable from the internet (open it in the firewall; on Docker publish <code>80:80</code>).</p>
   <div class="form-row">
     <input type="text" bind:value={panelDomain} placeholder="panel.example.com" data-testid="domain-input" />
     <button class="btn-primary" onclick={updateDomain} data-testid="save-domain">Save Domain</button>
