@@ -11,3 +11,10 @@ third_party/
 /forgectl
 .claude-flow/
 e2e/.paneldata
+
+# e2e run artifacts
+e2e/forgepanel-test
+e2e/test-results/
+e2e/.panel.pid
+e2e/.paneldata
+e2e/.auth.json
