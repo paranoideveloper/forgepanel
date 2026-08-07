@@ -506,7 +506,17 @@ func (s *Server) routes() {
 	r.GET("/", serveAdmin)
 	r.GET("/studio", serveStudio)
 	if s.cfg.AdminPath != "" && s.cfg.AdminPath != "/" {
-		r.GET(s.cfg.AdminPath, serveAdmin)
+		// Serve the panel at "<path>/" and redirect the bare "<path>" to it. The
+		// SvelteKit shell derives its base from `new URL(".", location)`; opened at
+		// "/panel/<secret>" (no trailing slash) that base collapses to "/panel", so
+		// the router looks for a route named after the secret segment and mounts
+		// nothing — a blank page. With the trailing slash the base is the full
+		// secret path and the route is "/", so the app mounts and its relative
+		// "./_app/…" assets resolve under the secret path (served by serveSPA).
+		r.GET(s.cfg.AdminPath, func(c *gin.Context) {
+			c.Redirect(http.StatusMovedPermanently, s.cfg.AdminPath+"/")
+		})
+		r.GET(s.cfg.AdminPath+"/", serveAdmin)
 	}
 	// ForgeDNS admin page — clickable tunnel management, no terminal (spec §5).
 	if s.db != nil {
@@ -531,6 +541,18 @@ func (s *Server) serveSPA(entry []byte) gin.HandlerFunc {
 		if strings.HasPrefix(p, "api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
+		}
+		// SvelteKit references its content-hashed bundle relatively ("./_app/…"),
+		// so when the panel is opened under /panel/<secret>/ the browser requests
+		// /panel/<secret>/_app/…. Those files live at web/_app/… in the embed FS;
+		// serve them by their "_app/…" suffix regardless of the leading path, or
+		// the secret-path prefix turns every script into the SPA shell and the
+		// browser rejects it as a bad module — a blank panel.
+		if i := strings.Index(p, "_app/"); i >= 0 {
+			if b, err := fs.ReadFile(sub, p[i:]); err == nil {
+				c.Data(http.StatusOK, contentTypeFor(p), b)
+				return
+			}
 		}
 		if p != "" {
 			if b, err := fs.ReadFile(sub, p); err == nil {
