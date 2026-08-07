@@ -75,6 +75,28 @@ test('an inbound can be edited (remark + port) and it persists', async ({ page }
   await expect(page.locator('[data-testid=inbound-row]', { hasText: '47011' })).toBeVisible();
 });
 
+test('bulk operations disable multiple inbounds at once', async ({ page }) => {
+  await login(page);
+  await nav(page, 'Inbounds');
+  // create two inbounds
+  for (const [name, port] of [['bulk-a', '47020'], ['bulk-b', '47021']] as const) {
+    await page.getByTestId('create-inbound').click();
+    await page.getByTestId('proto-select').selectOption('vless');
+    await page.getByTestId('field-remark').fill(name);
+    await page.getByTestId('field-port').fill(port);
+    for (let i = 0; i < await page.locator('[data-testid^=gen-]').count(); i++) await page.locator('[data-testid^=gen-]').nth(i).click();
+    await page.getByTestId('save-inbound').click();
+    await expect(page.locator('[data-testid=inbound-row]', { hasText: name })).toBeVisible();
+  }
+  // select all → bulk disable
+  await page.getByTestId('select-all').check();
+  await expect(page.getByTestId('bulk-bar')).toBeVisible();
+  await page.locator('[data-testid=bulk-bar] button', { hasText: 'Disable' }).click();
+  await page.waitForTimeout(1000);
+  // POSITIVE: both rows now show Disabled.
+  await expect(page.locator('[data-testid=inbound-row]', { hasText: 'bulk-a' }).locator('.badge', { hasText: 'Disabled' })).toBeVisible({ timeout: 8_000 });
+});
+
 test('a group can be created with inbounds assigned', async ({ page }) => {
   await login(page);
   await nav(page, 'Users');

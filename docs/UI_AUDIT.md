@@ -36,7 +36,7 @@ what is now built and what is still owed, so it can be checked against the panel
 | Overview / System & Security | **BUILT** | health, stats. |
 | Panel **Doctor** panel | **BUILT (this round)** | System & Security surfaces `/admin/doctor` (subsystem health) — see below. |
 | **Paste-Anything importer** | **BUILT (this round)** | Config Studio → Import: paste a link/sub, `/import` parses it into the builder. |
-| Bulk operations | **PARTIAL** | backend `/admin/inbounds/bulk` exists; UI exposes per-row enable/disable/delete/clone but not multi-select bulk yet. |
+| Bulk operations | **BUILT** | Inbounds list has a select-all + multi-select bar → enable/disable/delete via `/admin/inbounds/bulk`. |
 | ForgeEdge deployment UI | **MISSING** | backend + `forgectl edge` exist; no in-panel deploy screen yet (needs a live Cloudflare account to be meaningful). |
 | Template library (20+) | **PARTIAL** | Config Studio ships 10 one-click presets; the schema drives every option of every protocol, so "templates" are starting points rather than a fixed catalogue. |
 | Live Connection Explorer | **MISSING** | not built; ForgeDNS has a sessions view but there is no global live-connections screen. |

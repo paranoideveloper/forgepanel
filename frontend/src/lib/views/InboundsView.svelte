@@ -16,6 +16,24 @@
   let loading = $state(true);
   let creating = $state(false);
   let editRow = $state<Row | null>(null);
+  let selected = $state<Set<number>>(new Set());
+
+  function toggleSel(id: number) {
+    const s = new Set(selected); if (s.has(id)) s.delete(id); else s.add(id); selected = s;
+  }
+  function toggleAll() {
+    selected = selected.size === rows.length ? new Set() : new Set(rows.map(r => r.id));
+  }
+  async function bulk(action: 'enable' | 'disable' | 'delete') {
+    if (selected.size === 0) return;
+    if (action === 'delete' && !confirm(`Delete ${selected.size} inbound(s)?`)) return;
+    try {
+      await apiFetch('/admin/inbounds/bulk', { method: 'POST', body: JSON.stringify({ action, ids: [...selected] }) });
+      showToast(`${action} ${selected.size} inbound(s)`, 'success');
+      selected = new Set();
+      load();
+    } catch (e: any) { showToast(e.message || 'bulk action failed', 'error'); }
+  }
   let verifyResults = $state<Record<number, { pass: boolean; latency?: number; detail?: string }>>({});
 
   let cfgOpen = $state(false);
@@ -172,13 +190,22 @@
   {:else if rows.length === 0}
     <p class="muted" data-testid="inbounds-empty">No inbounds yet. Click <strong>Create Inbound</strong> or <strong>One-click REALITY</strong> to add one.</p>
   {:else}
+    {#if selected.size > 0}
+      <div class="bulkbar" data-testid="bulk-bar">
+        <span>{selected.size} selected</span>
+        <button class="sm" data-testid="bulk-enable" onclick={() => bulk('enable')}>Enable</button>
+        <button class="sm" onclick={() => bulk('disable')}>Disable</button>
+        <button class="sm danger" data-testid="bulk-delete" onclick={() => bulk('delete')}>Delete</button>
+      </div>
+    {/if}
     <table data-testid="inbounds-table">
       <thead>
-        <tr><th>#</th><th>Remark</th><th>Protocol</th><th>Transport</th><th>Security</th><th>Port</th><th>Status</th><th>Verify</th><th>Actions</th></tr>
+        <tr><th><input type="checkbox" data-testid="select-all" checked={selected.size === rows.length && rows.length > 0} onchange={toggleAll} /></th><th>#</th><th>Remark</th><th>Protocol</th><th>Transport</th><th>Security</th><th>Port</th><th>Status</th><th>Verify</th><th>Actions</th></tr>
       </thead>
       <tbody>
         {#each rows as r (r.id)}
           <tr data-testid="inbound-row" data-proto={r.protocol}>
+            <td><input type="checkbox" checked={selected.has(r.id)} onchange={() => toggleSel(r.id)} /></td>
             <td>{r.id}</td>
             <td><strong>{r.remark || '—'}</strong></td>
             <td><span class="proto">{r.protocol}</span></td>
@@ -252,6 +279,7 @@
   .sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
   .sm.danger { background: rgba(255,77,77,0.15); color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
   .muted { color: rgba(255,255,255,0.45); }
+  .bulkbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 12px; background: rgba(255,122,26,0.1); border: 1px solid rgba(255,122,26,0.3); border-radius: 8px; font-size: 13px; }
   .cfg { display: flex; flex-direction: column; gap: 10px; }
   .cfg .lbl { font-size: 12px; color: rgba(255,255,255,0.6); }
   textarea { width: 100%; box-sizing: border-box; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-bottom: 10px; }
