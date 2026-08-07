@@ -595,10 +595,20 @@ func stampIdentity(n *model.Node, u *store.User) {
 		if u.Password != "" {
 			n.Password = u.Password
 		}
-	case model.ProtoTrojan, model.ProtoHysteria2, model.ProtoAnyTLS, model.ProtoShadowsocks:
+	case model.ProtoTrojan, model.ProtoHysteria2, model.ProtoAnyTLS:
 		if u.Password != "" {
 			n.Password = u.Password
 		}
+	case model.ProtoShadowsocks:
+		// Shadowsocks authenticates against the inbound's shared key, which the
+		// engine holds verbatim (there is no per-user client expansion for SS).
+		// Overwriting it with the user's password breaks the config outright: a
+		// 2022-blake3 method needs an exact-length standard-base64 PSK, but a
+		// user password is arbitrary base64url — xray refuses it at parse time
+		// ("decode key: illegal base64 data") and even a legacy method would
+		// hand the client a key the single-key server does not hold. So keep the
+		// inbound's own credential; per-user SS identity needs server-side
+		// multi-PSK support, tracked separately.
 	case model.ProtoSOCKS, model.ProtoHTTP:
 		if u.Username != "" {
 			n.Username = u.Username

@@ -77,7 +77,10 @@ func applyCreateDefaults(n *model.Node) {
 		}
 	}
 
-	if n.Security.Type == model.SecTLS && n.Security.Fingerprint == "" {
+	// A uTLS fingerprint only applies to TCP-TLS handshakes. QUIC protocols
+	// (Hysteria2, TUIC) have their own TLS stack and reject a uTLS block, so do
+	// not stamp one on them.
+	if n.Security.Type == model.SecTLS && n.Security.Fingerprint == "" && !n.Protocol.IsQUICBased() {
 		n.Security.Fingerprint = "chrome"
 	}
 

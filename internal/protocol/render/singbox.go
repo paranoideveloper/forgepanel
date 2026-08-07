@@ -432,7 +432,11 @@ func sbTLS(n *model.Node, force bool) jobj {
 		// the client cannot produce the ClientHello the server expects.
 		fp = firstNonEmpty(fp, "chrome")
 	}
-	if fp != "" {
+	// uTLS is a TCP-TLS ClientHello fingerprint. QUIC protocols (Hysteria2, TUIC)
+	// run their own TLS 1.3 stack, and sing-box rejects a utls block on them
+	// ("unsupported usage for uTLS"), so never emit it there — even when
+	// applyCreateDefaults has stamped a default fingerprint on the node.
+	if fp != "" && !n.Protocol.IsQUICBased() {
 		tls["utls"] = jobj{"enabled": true, "fingerprint": fp}
 	}
 	if e := s.ECH; e != nil && (e.Enabled || e.ConfigList != "" || e.AutoFetch) {
