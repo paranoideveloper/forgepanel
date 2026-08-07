@@ -254,7 +254,9 @@ func TestEdgeFeed_DisabledAndRevokedUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"alice": true, "bob": false, "carol": false, "dave": false, "erin": true}
+	// erin is over her data limit (StatusLimited): the edge must report her
+	// disabled so it stops carrying traffic the VPS has already cut off.
+	want := map[string]bool{"alice": true, "bob": false, "carol": false, "dave": false, "erin": false}
 	got := map[string]bool{}
 	for _, u := range doc.Users {
 		got[u.Email] = u.Enabled

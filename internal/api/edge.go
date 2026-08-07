@@ -117,13 +117,16 @@ func (s *Server) EdgeFeed() (*EdgeFeedDoc, error) {
 }
 
 // edgeUserEnabled mirrors what subscriptionNodes() will actually return: a
-// revoked, disabled or expired account gets an empty list, so reporting it as
-// enabled would tell the edge to serve a subscription that resolves to nothing.
-// A "limited" (over-quota) account stays enabled, exactly as it does on the VPS.
+// revoked, disabled, expired, or over-quota (limited) account gets an empty list,
+// so reporting it as enabled would tell the edge to serve a subscription that
+// resolves to nothing — and, for a limited account, would let the edge keep
+// carrying traffic the VPS has already cut off. The VPS enforces the same set in
+// enabledInboundSpecs, so the two planes agree on who is served.
 func edgeUserEnabled(u *store.User) bool {
 	return u.SubRevoked == nil &&
 		u.Status != store.StatusDisabled &&
-		u.Status != store.StatusExpired
+		u.Status != store.StatusExpired &&
+		u.Status != store.StatusLimited
 }
 
 // edgeSharedNodes are the nodes every subscriber receives in addition to their

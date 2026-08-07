@@ -53,7 +53,11 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		groupInbounds[g.ID] = []uint(g.InboundIDs)
 	}
 	for _, u := range users {
-		if u.Status == store.StatusDisabled || u.Status == store.StatusExpired {
+		// A user who is disabled, expired, OR over their data limit (StatusLimited)
+		// must not have their client credential materialized into any inbound, so
+		// the core refuses their traffic. Skipping only Disabled/Expired let an
+		// over-quota account keep transferring until the next engine reload.
+		if u.Status == store.StatusDisabled || u.Status == store.StatusExpired || u.Status == store.StatusLimited {
 			continue
 		}
 		seen := map[uint]bool{}
