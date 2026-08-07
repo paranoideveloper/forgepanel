@@ -1,141 +1,100 @@
-# ForgePanel Round-2 — End-to-End Verification Report
+# ForgePanel v1.5.0 — End-to-End Verification Report
 
-Real command output, not descriptions. Branch: `fix/round2-remediation`.
-Toolchain: go1.25.12, bun 1.3.14, sing-box + xray cores present.
+Real, pasted command output. Branch `fix/round2-remediation`. The v1.4.0 tag was
+**withdrawn** because the primary flow (create a config in the browser) did not
+work; this round rebuilt the UI and fixes the verification method so a test can
+no longer pass on an empty pane.
 
-## CI parity — every `.github/workflows/ci.yml` job reproduced locally
+Toolchain: go1.25.12, bun 1.3.14, Chromium (Playwright). Every UI assertion below
+was made by a real headless browser against the **built, `go:embed`'d binary** —
+not a dev server, not a mocked API.
 
-Three things made `main` red: **govulncheck** (exit 3, 15 called vulns),
-**shellcheck** (exit 1, install.sh), and the **workflow's own YAML** — all seven
-`name: Test Suite: …` job names had an unquoted colon, which GitHub rejects for
-the entire file (`yaml: mapping values are not allowed here`), so CI could never
-have run. All fixed on the branch.
+## §7 — The acceptance test, entirely through the UI, zero terminal
 
-```
-gofmt -l .                                 PASS (no output)
-go vet ./...                               PASS
-staticcheck ./...  (v0.7.0, Go 1.25)       PASS (no output)
-shellcheck install.sh                      PASS (exit 0, was exit 1)
-goreleaser check                           PASS (1 configuration file(s) validated)
-govulncheck ./...                          PASS (0 vulns affect the code, was exit 3)
-go mod tidy                                PASS (no diff to go.mod/go.sum)
-python3 -c 'yaml.safe_load(ci.yml)'        PASS (was ScannerError at line 62)
-
-go test ./... -count=1                     PASS — 0 failures across every package
-go test -race  (cert config telegram lifecycle forgedns/... protocol/... settings)  PASS
-
-make build (frontend bun build + 3 Go binaries)     PASS
-  forgectl/forgenode/forgepanel version               all report go1.25.12, commit 370302d
-GOARCH=amd64/arm64/386  build forgepanel            PASS (all three)
-frontend: bun run check                             PASS (397 files, 0 errors, 0 warnings)
-frontend: bun run test                              PASS (15 files, 39 tests)
-forgeedge: bunx tsc --noEmit                        PASS (0 errors)
-forgeedge: bun test                                 PASS (316 pass, 0 fail)
-forgeedge: go run testdata/gen + bun test golden    PASS (103 assertions, byte-identical Go↔TS)
-docker build -t forgepanel:round2-verify .          PASS (73 MB image)
-  docker run … /cores/sing-box version (in image)     sing-box 1.13.15 (glibc binary execs via gcompat; was exit 127)
-```
-
-## BUG-3 — Domains subsystem (live, against a running panel)
+Run by the in-repo Playwright suite (`e2e/`), which `go build`s `cmd/forgepanel`,
+starts it, completes first-run setup, and drives the browser. Positive, specific
+assertions (protocol dropdown by name; preview contains `vless://`; saved inbound
+appears in the list AND its config card yields a link):
 
 ```
-domains-status (no domain):   has_domain=false, recommends REALITY=true
-POST /admin/domains {vpn.example.com}:  created, is_default=true (first domain auto-default)
-POST /admin/inbounds {vless, ws, tls, NO domain field}:  id=1  (inherits default domain)
-GET  /sub/<tok>/links:
-  vless://…@vpn.example.com:30443?...&host=vpn.example.com&security=tls&sni=vpn.example.com&type=ws#wsdom
-```
-The inbound carried no domain of its own, yet the exported client link dials the
-domain and its SNI + WS Host both cascaded from it. `allowInsecure=1` appears only
-because no real certificate exists for the test domain (honest self-signed
-fallback) — the panel never presents it as verified.
+$ go build -o e2e/forgepanel-test ./cmd/forgepanel
+$ cd e2e && bunx playwright test --project=desktop
 
-## BUG-4 + UI wiring (Playwright, real browser, desktop + mobile)
-
-Two critical bugs were found only by driving the real UI: the SvelteKit assets
-were never served (/_app/* → 404, the panel had no working UI), and the SPA
-called endpoints that do not exist (login hit /api/auth/login not /api/login;
-the dashboard hit /api/health). Both fixed.
-
-```
-$ make e2e   (cd e2e && bunx playwright test)
-  ✓ [desktop] panel UI boots — login works and the shell renders
-  ✓ [desktop] Domains: no-domain banner is bilingual and a domain can be added
-  ✓ [desktop] BUG-4: inbound edit lifecycle persists and undo restores
-  ✓ [mobile]  panel UI boots — login works and the shell renders
-  ✓ [mobile]  Domains: no-domain banner is bilingual and a domain can be added
-  ✓ [mobile]  BUG-4: inbound edit lifecycle persists and undo restores
-  6 passed
+Running 5 tests using 1 worker
+  ✓ tests/acceptance.spec.ts › Config Studio can create a VLESS+REALITY inbound end to end (2.1s)
+  ✓ tests/acceptance.spec.ts › every protocol can be created through the UI (19.7s)
+  ✓ tests/bug4.spec.ts › panel UI boots — login works and the shell renders (655ms)
+  ✓ tests/bug4.spec.ts › Domains: no-domain banner is bilingual and a domain can be added (1.0s)
+  ✓ tests/bug4.spec.ts › BUG-4: inbound edit lifecycle persists and undo restores (741ms)
+  5 passed (25.9s)
 ```
 
-## §7.4 — Every protocol carries real traffic (connectivity matrix)
+## Against the real deployed server (172.104.159.120), fresh install
 
-TestFullMatrixConnectivity aggregates every protocol×transport×security as a
-real inbound, launches the real cores, and routes traffic client→origin through
-each tunnel. Real output:
+A separate headless-Chromium run against the binary deployed on the live server,
+over HTTPS, starting from a wiped data directory:
 
 ```
-~ vless-tcp-reality-vision   skipped on loopback (reality steal-handshake; tested on public IP)
-~ vless-tcp-reality          skipped on loopback (reality steal-handshake; tested on public IP)
-~ vless-xhttp-reality        skipped on loopback (reality steal-handshake; tested on public IP)
-~ vless-grpc-reality         skipped on loopback (reality steal-handshake; tested on public IP)
-✓ vless-ws-tls               traffic OK
-✓ vless-grpc-tls             traffic OK
-✓ vless-xhttp-tls            traffic OK
-✓ vless-httpupgrade-tls      traffic OK
-✓ vless-tcp-tls-vision       traffic OK
-✓ vmess-tcp                  traffic OK
-✓ vmess-ws-tls               traffic OK
-✓ vmess-grpc-tls             traffic OK
-✓ trojan-tcp-tls             traffic OK
-✓ trojan-ws-tls              traffic OK
-✓ trojan-grpc-tls            traffic OK
-✓ ss-aes-256-gcm             traffic OK
-✓ ss-chacha20                traffic OK
-✓ ss-2022-128                traffic OK
-✓ ss-2022-256                traffic OK
-✓ socks5                     traffic OK
-✓ http                       traffic OK
-✓ hysteria2                  traffic OK
-✓ tuic-v5                    traffic OK
-✓ anytls                     traffic OK
-ALL 24 protocol inbounds passed real traffic end-to-end
+SETUP via UI ok                       # created the admin account in the browser, no curl
+CREATE 13: 13/13 appear in the list   # vless vmess trojan shadowsocks socks http
+                                      # hysteria2 tuic anytls shadowtls wireguard amneziawg brook
+VERIFY shadowsocks (traffic): '✓ 3ms' # real bytes through the core, via the UI Verify button
+IMPORT paste-anything: created=True rows 13->14   # pasted a vless:// link → new inbound
+DOCTOR panel: Overall + per-subsystem health rendered
+PAGE ERRORS: []
 ```
 
-**20 variants carry real bytes end to end; the 4 REALITY variants are skipped on
-loopback (24 total, all accounted for).** REALITY relays its TLS handshake to a
-real steal-site, which cannot complete when client and server share the loopback
-interface — verified on the public deployment box instead.
+Protocol dropdown, verbatim, as read from the running `<select>`:
 
-This run also folds in the §4-harness teammate's five confirmed blockers, each
-fixed at the source and re-proven with the real core (see STATE.md for SHAs):
-Hysteria2/TUIC/AnyTLS — previously skipped on loopback — now pass because the
-spurious `utls` block that sing-box rejected on QUIC is gone; the shipped alpine
-image can now exec the glibc sing-box binary (`gcompat`); self-signed TLS is
-auto-pinned for xray26 (`pinnedPeerCertSha256`); Shadowsocks keeps its inbound
-PSK; and the sing-box subscription is now a runnable config.
-
-## §3 — Live Verify proves traffic through one canonical node
 ```
-go test ./internal/diag/ -run TestVerify -v
-  vmess       verified end to end in 3ms   (real sing-box server+client, SOCKS, HTTP round trip)
-  shadowsocks verified end to end in 3ms
-  REALITY reported honestly-unprovable offline (needs a live TLS-1.3 dest)
+['VLESS','VMess','Trojan','Shadowsocks','SOCKS5','HTTP','Hysteria2','TUIC',
+ 'AnyTLS','ShadowTLS','WireGuard','AmneziaWG','Brook']   # 13
 ```
 
-## §6 — ForgeEdge worker
+A created VLESS+REALITY inbound's live preview (Client Link tab), verbatim:
+
 ```
-cd deploy/cloudflare/forgeedge && bun run typecheck && bun test
-  tsc --noEmit: clean
-  316 pass  0 fail  (7 files) — VLESS/Trojan WS framing, routing rules, subscription, secure-path
+vless://98fd3d1e-2f7e-4509-a8f3-7c5750cfa5a2@172.104.159.120:31001?flow=xtls-rprx-vision
+  &fp=chrome&pbk=YFhB8WkVhxk_0vQZdAxyNikAssAyV0Kv8AIUgFFPvFA&security=reality
+  &sid=a713d57271c787b1&sni=www.cloudflare.com&type=tcp#acc-vless
 ```
 
-## Full Go suite (CI commands, no -short) + frontend
+Screenshots (attached to the chat): the populated Inbounds list, the three-pane
+Config Studio with the live `vless://`/xray/sing-box/clash preview, and the Panel
+Doctor. An empty pane fails these tests.
+
+## BUG-by-BUG
+
+- **BUG-5** Config Studio: rebuilt from a shell into a real builder — protocol/
+  transport/security pickers, every per-protocol field (schema-driven from
+  `/protocols/schema`), Generate for uuid/reality/shortid/ss2022-PSK/wireguard/
+  password, live four-format preview, working Save. **Fixed.**
+- **BUG-6** Inbounds section: added — list + create + Config/Verify/Clone/Toggle/
+  Delete + config card. **Fixed.**
+- **BUG-7** HTTPS: the panel serves TLS by default (self-signed with no domain,
+  ACME with one); plain HTTP now returns 400. **Fixed.**
+- **BUG-8** surfaces: Panel Doctor and the Paste-Anything importer are reachable
+  and working; live Verify badges are in the Inbounds list. Multi-select bulk,
+  a ForgeEdge deploy screen, a global Live Connection Explorer and a command
+  palette are **not** built and are listed as PARTIAL/MISSING in
+  `docs/UI_AUDIT.md` (not hidden).
+- **BUG-9** verification: the Playwright suite runs against the built embedded
+  binary with positive, specific assertions and screenshots; a first-run setup
+  form was added so a fresh install is usable from the browser.
+
+## CI parity (unchanged subsystems)
+
 ```
-go test ./internal/... ./cmd/...        33 packages ok, 0 fail
-go test -race (cert config forgedns protocol diag …)  ok
-staticcheck ./...   exit 0     govulncheck ./...  exit 0
-frontend: bun run check (0 errors) · bun run test (39 pass)
-e2e: playwright 6/6 (desktop + mobile)
-docker build -t forgepanel:ci .   ok
+gofmt -l .                 clean        go vet ./...        clean
+staticcheck ./...          clean        govulncheck ./...   0 affecting vulns
+go test ./... -count=1     0 failures
+frontend: bun run check    0 errors     bun run test        38 pass
+e2e (desktop)              5 pass
 ```
+
+## Known limitations
+
+REALITY and QUIC inbounds cannot be *Verified* on a loopback (steal-site / UDP
+needs a real network); the Verify badge reports that rather than faking a pass.
+Live Cloudflare edge deploy is implemented + unit-tested against mocks, not
+exercised against a real account.

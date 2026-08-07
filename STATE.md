@@ -3,6 +3,38 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.0 UI round (BUG-5..BUG-9) — v1.4.0 was WITHDRAWN
+
+A real-server deploy of v1.4.0 exposed that the primary flow did not work in the
+browser: Config Studio was a shell, there was no Inbounds section, the panel was
+plain HTTP, and the tests validated renderers/handlers in isolation so they were
+green while the UI could create nothing. **v1.4.0 tag deleted.** Fixed this round,
+each proven in a real browser against the BUILT `go:embed`'d binary:
+
+- **BUG-6 Inbounds section** — new `InboundsView` + shared schema-driven
+  `InboundForm` (13 protocols, transport/security pickers, per-field forms from
+  `/protocols/schema`, Generate keys, live four-format preview, Save). List with
+  Config/Verify/Clone/Toggle/Delete + config card (`vless://` + QR). `7d97ddf`.
+- **BUG-5 Config Studio** — rebuilt from a placeholder into the real builder.
+- **First-run setup UI** — a fresh install had no way to create the admin in the
+  browser; added a setup form. SS2022 PSK keygen fixed. `1c…` (setup commit).
+- **BUG-7 HTTPS by default** — cert store self-signed fallback; panel always
+  ServeTLS (self-signed w/o domain, ACME with). `(https commit)`.
+- **BUG-8** — Panel Doctor panel + Paste-Anything importer + live Verify badges;
+  bulk/ForgeEdge-deploy/Live-Explorer/command-palette honestly graded MISSING in
+  `docs/UI_AUDIT.md`.
+- **BUG-9 verification method** — `e2e/` Playwright runs against the built binary
+  with positive assertions + screenshots; harness fixed for HTTPS. 5/5 desktop.
+
+Proof (real browser, deployed server): setup via UI, **13/13 protocols created
+through the UI**, Shadowsocks **Verify ✓ 3ms** (real traffic), importer creates
+an inbound, Doctor renders, **0 console errors**. See `docs/E2E_REPORT.md` and
+`docs/UI_AUDIT.md`. Gates: `go test ./...` 0 fail, gofmt/vet/staticcheck/
+govulncheck clean, frontend 38 pass, e2e 5 pass. Tag: **v1.5.0**.
+
+---
+
+
 Resume rule: re-read this file + `docs/DECISIONS.md` + `FORGEPANEL_ROUND2_FIX_PROMPT.md`,
 then continue at the first unchecked box.
 
