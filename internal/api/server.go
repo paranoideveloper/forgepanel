@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -478,6 +479,61 @@ func (s *Server) routes() {
 	if s.db != nil {
 		fdnsPage := s.assetOr("web/forgedns.html", "")
 		r.GET("/forgedns", func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", fdnsPage) })
+	}
+
+	// Serve the SvelteKit build's static assets (/_app/immutable/…, favicon, …)
+	// and fall back to the SPA entry for client-side routes. Without this the
+	// panel's HTML loaded but every /_app/*.js and *.css returned 404, so the UI
+	// was completely dead — the single most important thing the panel does.
+	r.NoRoute(s.serveSPA(adminPage))
+}
+
+// serveSPA returns the catch-all handler for the embedded SvelteKit build: a
+// real file under web/ is served with its correct content type; an /api/* miss
+// stays a JSON 404; anything else is a client-side route and gets the SPA entry.
+func (s *Server) serveSPA(entry []byte) gin.HandlerFunc {
+	sub, _ := fs.Sub(webFS, "web")
+	return func(c *gin.Context) {
+		p := strings.TrimPrefix(path.Clean(c.Request.URL.Path), "/")
+		if strings.HasPrefix(p, "api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		if p != "" {
+			if b, err := fs.ReadFile(sub, p); err == nil {
+				c.Data(http.StatusOK, contentTypeFor(p), b)
+				return
+			}
+		}
+		// Client-side route (e.g. /admin, /users): serve the SPA entry so the
+		// router can take over.
+		c.Data(http.StatusOK, "text/html; charset=utf-8", entry)
+	}
+}
+
+// contentTypeFor maps a static asset's extension to its MIME type. The immutable
+// SvelteKit bundle is mostly .js and .css; getting these right matters because a
+// browser refuses to execute a script served as text/plain.
+func contentTypeFor(p string) string {
+	switch {
+	case strings.HasSuffix(p, ".js"):
+		return "text/javascript; charset=utf-8"
+	case strings.HasSuffix(p, ".css"):
+		return "text/css; charset=utf-8"
+	case strings.HasSuffix(p, ".json"):
+		return "application/json; charset=utf-8"
+	case strings.HasSuffix(p, ".svg"):
+		return "image/svg+xml"
+	case strings.HasSuffix(p, ".png"):
+		return "image/png"
+	case strings.HasSuffix(p, ".ico"):
+		return "image/x-icon"
+	case strings.HasSuffix(p, ".woff2"):
+		return "font/woff2"
+	case strings.HasSuffix(p, ".html"):
+		return "text/html; charset=utf-8"
+	default:
+		return "application/octet-stream"
 	}
 }
 
