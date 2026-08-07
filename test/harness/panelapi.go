@@ -9,6 +9,7 @@ package harness
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,12 @@ type Panel struct {
 	BaseURL string // e.g. http://panel:2053
 	HTTP    *http.Client
 	token   string
+	// Credentials are retained so an expired access token can be renewed
+	// mid-run. auth.AccessTTL is 15 minutes and a full matrix run takes longer
+	// than that; without renewal every case past the fifteen-minute mark fails
+	// with HTTP 401 and the matrix reports a panel defect that is really a
+	// defect in the harness.
+	user, pass string
 }
 
 // NewPanel returns a session with sane timeouts. Login must be called before
@@ -57,6 +64,21 @@ func (e *APIError) Error() string {
 }
 
 func (p *Panel) do(method, path string, in, out any) error {
+	err := p.doOnce(method, path, in, out)
+	// A 401 on an authenticated route means the 15-minute access token aged out
+	// during the run. Sign in again and retry once; a second 401 is a real
+	// authentication failure and is returned as such.
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusUnauthorized && p.user != "" {
+		if lerr := p.Login(p.user, p.pass); lerr != nil {
+			return fmt.Errorf("%w (renewing the session also failed: %v)", err, lerr)
+		}
+		return p.doOnce(method, path, in, out)
+	}
+	return err
+}
+
+func (p *Panel) doOnce(method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -137,7 +159,7 @@ func (p *Panel) Login(user, pass string) error {
 	var v struct {
 		AccessToken string `json:"access_token"`
 	}
-	if err := p.do(http.MethodPost, "/api/login", map[string]any{
+	if err := p.doOnce(http.MethodPost, "/api/login", map[string]any{
 		"username": user, "password": pass,
 	}, &v); err != nil {
 		return err
@@ -146,6 +168,7 @@ func (p *Panel) Login(user, pass string) error {
 		return fmt.Errorf("login returned no access token")
 	}
 	p.token = v.AccessToken
+	p.user, p.pass = user, pass
 	return nil
 }
 

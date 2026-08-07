@@ -6,3 +6,8 @@ web/dist/
 *.db
 .env
 third_party/
+
+# build artifacts / local run state
+forgectl
+.claude-flow/
+e2e/.paneldata
