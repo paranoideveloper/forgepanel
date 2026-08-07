@@ -7,6 +7,7 @@
 package store
 
 import (
+	"strings"
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -193,10 +194,47 @@ type Domain struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// EdgeDeployment is a ForgeEdge Cloudflare Worker (or Pages project) this panel
+// feeds (§6, deploy/cloudflare/forgeedge/docs/GO_WIRING.md §2.3). The panel is
+// the source of truth for users; the edge holds a copy of the canonical feed so
+// one subscription URL can carry both VPS inbounds and edge entries.
+//
+// Registering a deployment here does not create anything at Cloudflare, and
+// deleting the row does not destroy the Worker — the two lifecycles are kept
+// separate on purpose, so forgetting an edge in the panel can never take a live
+// subscription offline by accident.
+type EdgeDeployment struct {
+	Base
+	Name   string `gorm:"uniqueIndex;not null" json:"name"` // worker / pages project name
+	Target string `gorm:"default:workers" json:"target"`    // workers | pages
+	Origin string `gorm:"not null" json:"origin"`           // https://name.acct.workers.dev
+	// SecurePath is the unguessable path prefix the Worker mints (or is given at
+	// deploy time). It is not a secret on its own — the password is — but it is
+	// what keeps the panel and every subscription URL off a scanner's radar.
+	SecurePath string `json:"secure_path"`
+	// PushToken authorises `POST <origin>/<secure_path>/feed`. It is a bearer
+	// credential, so it never appears in an API response; the operator reads it
+	// from the Worker's own status page.
+	PushToken  string     `json:"-"`
+	AccountID  string     `json:"account_id,omitempty"`
+	LastPushAt *time.Time `json:"last_push_at"`
+	LastStatus string     `json:"last_status"`
+}
+
+// FeedURL is the endpoint a canonical feed is POSTed to.
+func (e *EdgeDeployment) FeedURL() string {
+	return strings.TrimSuffix(e.Origin, "/") + "/" + strings.Trim(e.SecurePath, "/") + "/feed"
+}
+
+// StatusURL is the Worker's own status endpoint (session-authenticated).
+func (e *EdgeDeployment) StatusURL() string {
+	return strings.TrimSuffix(e.Origin, "/") + "/" + strings.Trim(e.SecurePath, "/") + "/api/status"
+}
+
 // AllModels is the migration set.
 func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &NodeClientTraffic{},
-		&ForgeDNSZone{}, &UserInbound{}, &Domain{}}
+		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of
