@@ -5,33 +5,35 @@ Toolchain: go1.25.12, bun 1.3.14, sing-box + xray cores present.
 
 ## CI parity — every `.github/workflows/ci.yml` job reproduced locally
 
-The two failures that made `main` red were **govulncheck** (exit 3, 15 called
-vulns) and **shellcheck** (exit 1, install.sh). Both fixed on the branch.
+Three things made `main` red: **govulncheck** (exit 3, 15 called vulns),
+**shellcheck** (exit 1, install.sh), and the **workflow's own YAML** — all seven
+`name: Test Suite: …` job names had an unquoted colon, which GitHub rejects for
+the entire file (`yaml: mapping values are not allowed here`), so CI could never
+have run. All fixed on the branch.
 
 ```
 gofmt -l .                                 PASS (no output)
 go vet ./...                               PASS
-staticcheck ./...                          PASS (no output)
+staticcheck ./...  (v0.7.0, Go 1.25)       PASS (no output)
 shellcheck install.sh                      PASS (exit 0, was exit 1)
 goreleaser check                           PASS (1 configuration file(s) validated)
-govulncheck ./...                          PASS (exit 0, was exit 3)
+govulncheck ./...                          PASS (0 vulns affect the code, was exit 3)
 go mod tidy                                PASS (no diff to go.mod/go.sum)
+python3 -c 'yaml.safe_load(ci.yml)'        PASS (was ScannerError at line 62)
 
-go test -shuffle=on -count=1 ./internal/protocol/...                         PASS
-go test -shuffle=on -count=1 ./internal/store/... ./internal/migrate/...     PASS
-go test -shuffle=on -count=1 ./internal/core/... ./internal/deploy/...       PASS
-go test -shuffle=on -count=1 ./internal/api/... ./internal/auth/... ./internal/service/... ./internal/settings/...  PASS
-go test -shuffle=on -count=1 ./internal/forgedns/...                         PASS
-go test -shuffle=on -count=1 ./internal/backup/... ./internal/cert/... ./internal/config/... ./internal/job/... ./internal/lifecycle/... ./internal/telegram/... ./internal/version/...  PASS
-go test -shuffle=on -count=1 ./cmd/...                                       PASS
+go test ./... -count=1                     PASS — 0 failures across every package
 go test -race  (cert config telegram lifecycle forgedns/... protocol/... settings)  PASS
 
 make build (frontend bun build + 3 Go binaries)     PASS
-GOARCH=386  build forgepanel/forgectl/forgenode     PASS
-GOARCH=arm64 build                                  PASS
-frontend: bun run check                             PASS (395 files, 0 errors)
-frontend: bun run test --coverage                   PASS (14 files, 37 tests, 90.9% stmts)
-docker build -t forgepanel:ci .                     PASS
+  forgectl/forgenode/forgepanel version               all report go1.25.12, commit 370302d
+GOARCH=amd64/arm64/386  build forgepanel            PASS (all three)
+frontend: bun run check                             PASS (397 files, 0 errors, 0 warnings)
+frontend: bun run test                              PASS (15 files, 39 tests)
+forgeedge: bunx tsc --noEmit                        PASS (0 errors)
+forgeedge: bun test                                 PASS (316 pass, 0 fail)
+forgeedge: go run testdata/gen + bun test golden    PASS (103 assertions, byte-identical Go↔TS)
+docker build -t forgepanel:round2-verify .          PASS (73 MB image)
+  docker run … /cores/sing-box version (in image)     sing-box 1.13.15 (glibc binary execs via gcompat; was exit 127)
 ```
 
 ## BUG-3 — Domains subsystem (live, against a running panel)

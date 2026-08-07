@@ -38,9 +38,21 @@
   - The **sing-box subscription is runnable as delivered**: it now ships a local
     mixed inbound + route instead of an outbounds-only document that carried
     nothing.
+  - **ShadowTLS carries traffic**: the subscription emits the required
+    Shadowsocks→ShadowTLS `detour` chain instead of a bare shadowtls outbound
+    that camouflages TLS but proxies nothing. Proven by `sing-box check`.
+- **Over-quota users are cut off**: `enabledInboundSpecs` and the ForgeEdge feed
+  skipped only Disabled/Expired, so a user past their data limit (`StatusLimited`)
+  kept transferring until the next engine reload. Both planes now agree.
+- **Inbounds can be disabled without deletion**: `POST /inbounds/:id/toggle`
+  clears `Enabled`, which `enabledInboundSpecs` honours, so a disabled inbound
+  stops serving immediately (previously only deletion removed it).
 - **ForgeDNS reassembly no longer deadlocks**: a full reorder buffer used to
   reject the in-order head frame that would have drained it, stalling the session
   permanently on its own missing head. The head is now always accepted.
+- **CI workflow was invalid YAML**: all seven `Test Suite: …` job names carried an
+  unquoted colon, which GitHub rejects for the whole file. Quoted; a real carried
+  fix for main (the workflow could never have run as written).
 
 ### Added
 - Subscription formats: `xray` (validated by `xray run -test`), `surge`, `loon`,
@@ -57,8 +69,18 @@
 - **§6 ForgeEdge** (`deploy/cloudflare/forgeedge/`): a Cloudflare Worker sharing
   the canonical model — VLESS/Trojan over WS, DoH, WARP, chain proxy, fragment,
   routing rules, and Backend Mode to a VPS node.
+- **§6 ForgeEdge Go-side** (`internal/edge`, `internal/api/edge*.go`,
+  `internal/store` `EdgeDeployment`, `forgectl edge`): the panel now feeds the
+  canonical model to registered Workers — a redacted push/pull feed so one
+  subscription URL carries VPS inbounds *and* edge entries, Cloudflare
+  OAuth+PKCE (and `--api-token`) deploy/update/delete/status/push/rotate-path, and
+  a CI drift guard that regenerates the golden fixtures from the real Go exporters
+  and asserts the TypeScript mirror is byte-identical.
 
 ### CI / build
-- Fixed the red CI: govulncheck (x/net, x/text, go 1.25.12) and shellcheck.
+- Fixed the red CI: govulncheck (x/net, x/text, go 1.25.12) and shellcheck; the
+  invalid workflow YAML (unquoted colons in job names); and a `.gitignore` pattern
+  (`forgectl`) that was silently ignoring the whole `cmd/forgectl/` source dir.
 - All fixes on one branch; `make check`, `staticcheck ./...` and `govulncheck
-  ./...` clean; the full non-`-short` Go matrix, frontend, e2e and docker green.
+  ./...` clean; the full non-`-short` Go matrix, race detector, frontend (39),
+  ForgeEdge worker (316) + drift guard, e2e, cross-compile and docker all green.
