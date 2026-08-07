@@ -190,3 +190,28 @@ func TestRenderFeatureRichNodes(t *testing.T) {
 		_, _ = XrayOutbound(n)
 	}
 }
+
+// TestRenderMasqueradeAndShadowTLSInner covers the hysteria2 masquerade variants
+// and the ShadowTLS inner-Shadowsocks helpers.
+func TestRenderMasqueradeAndShadowTLSInner(t *testing.T) {
+	tls := model.Security{Type: model.SecTLS, ServerName: "h"}
+	for _, mq := range []*model.Hy2Masquerade{
+		{Type: "proxy", URL: "https://example.com", RewriteHost: true},
+		{Type: "file", Directory: "/var/www"},
+		{Type: "string", StatusCode: 200, Content: "hello", Headers: map[string]string{"X-A": "b"}},
+	} {
+		n := &model.Node{Protocol: model.ProtoHysteria2, Address: "203.0.113.9", Port: 443, Password: "pw",
+			Security: tls, Hysteria2: &model.Hysteria2Options{Masquerade: mq}}
+		n.Normalize()
+		_, _ = SingboxInbound(n)
+		_, _ = SingboxInbounds(n)
+	}
+	// ShadowTLS with inner SS (reaches stlsInnerTag/stlsInnerPort).
+	st := &model.Node{Protocol: model.ProtoShadowTLS, Address: "203.0.113.9", Port: 443, Security: tls,
+		ShadowTLS: &model.ShadowTLSOptions{Version: 3, Password: "stpw", HandshakeHost: "www.apple.com", HandshakePort: 443,
+			InnerMethod: "2022-blake3-aes-128-gcm", InnerPassword: "MTIzNDU2Nzg5MDEyMzQ1Ng=="}}
+	st.Normalize()
+	_, _ = SingboxInbound(st)
+	_, _ = SingboxInbounds(st)
+	_, _ = SingboxOutbound(st)
+}
