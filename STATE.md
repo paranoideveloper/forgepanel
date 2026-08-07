@@ -26,7 +26,7 @@ then continue at the first unchecked box.
   - [ ] surge / quantumultx / loon line formats.
   - [ ] full protocol×transport×security×format golden matrix + structural validator.
 - [ ] BUG-2 / §4: connectivity harness proves real traffic per protocol; unproven combos flagged `experimental`.
-- [ ] BUG-3: Domains section; global + per-inbound + per-node domain; cascade to SNI/host/cert/link/sub; one-click ACME; no-domain REALITY guidance; never show plaintext as secure.
+- [x] BUG-3: Domains section; global + per-inbound + per-node domain; cascade to SNI/host/cert/link/sub; one-click ACME; no-domain REALITY guidance; never show plaintext as secure.
 - [ ] §3: validation & proof engine (3 layers, live Verify, diagnostics catalogue, Panel Doctor).
 - [ ] §5: Cloudflare-first DNS automation wizard (+ 8 providers), clean-IP scanner, `forgectl provision`.
 - [ ] §6: ForgeEdge Cloudflare Worker (unified model, OAuth deploy, WARP, chain, fragment, routing, backend mode).
@@ -68,6 +68,10 @@ token (or via the GitHub UI) to enable branch dispatch. Not retried; does not ga
 These heal main's red CI when the branch is merged.
 
 ## Log
+
+- `126117a` feat(domains): BUG-3 backend — registry, cascade (SNI/Host/addr), one-click TLS w/ honest preflight, no-domain REALITY guidance (EN+FA). 9 tests.
+- `be1ef0c` feat(domains): BUG-3 frontend — Domains view + nav tab + no-domain banner + REALITY one-click. 2 vitest tests. Proven live: inbound inherits default domain, link rides it.
+
 
 - `b983885` fix(sub): sing-box duplicate "proxy" tag — reserved selector/direct tags. Proven by real core.
 - `41bd4b5` feat(sub): xray + shadowrocket formats + real Subscription-Userinfo. Proven by `xray run -test`.

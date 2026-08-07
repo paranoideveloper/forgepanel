@@ -33,3 +33,17 @@ frontend: bun run check                             PASS (395 files, 0 errors)
 frontend: bun run test --coverage                   PASS (14 files, 37 tests, 90.9% stmts)
 docker build -t forgepanel:ci .                     PASS
 ```
+
+## BUG-3 — Domains subsystem (live, against a running panel)
+
+```
+domains-status (no domain):   has_domain=false, recommends REALITY=true
+POST /admin/domains {vpn.example.com}:  created, is_default=true (first domain auto-default)
+POST /admin/inbounds {vless, ws, tls, NO domain field}:  id=1  (inherits default domain)
+GET  /sub/<tok>/links:
+  vless://…@vpn.example.com:30443?...&host=vpn.example.com&security=tls&sni=vpn.example.com&type=ws#wsdom
+```
+The inbound carried no domain of its own, yet the exported client link dials the
+domain and its SNI + WS Host both cascaded from it. `allowInsecure=1` appears only
+because no real certificate exists for the test domain (honest self-signed
+fallback) — the panel never presents it as verified.
