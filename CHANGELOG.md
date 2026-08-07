@@ -19,6 +19,28 @@
   of silently emitting plaintext.
 - **BUG-4 — inbound editing**: safe-edit warnings on breaking changes, clone,
   enable/disable, bulk actions, and one-level undo. Covered by Playwright.
+- **BUG-2 — emitted configs now carry real traffic** (the §4 connectivity harness
+  drives the real cores over every emitted config; 24/24 protocol inbounds pass,
+  only the 4 REALITY variants skipped on loopback):
+  - The shipped **alpine image could not exec the glibc sing-box** release binary
+    (exit 127) — Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard/SSH were all dead in
+    the container. Added `gcompat`; proven by running the pinned sing-box inside
+    the built image.
+  - **QUIC no longer carries a `utls` block** sing-box rejects: `fingerprint=chrome`
+    was stamped on every TLS node and turned into `utls`, which Hysteria2/TUIC
+    refuse. Now suppressed for QUIC at both the render and defaults layers.
+  - **Self-signed TLS is auto-pinned** for xray-core 26 (which removed
+    `allowInsecure`): the subscription now carries `pinnedPeerCertSha256` of the
+    exact cert the engine serves. Proven by a real xray TLS round-trip.
+  - **Shadowsocks keeps its inbound PSK** in the subscription: stamping the user's
+    base64url password broke SS-2022 (needs exact-length standard base64) and
+    handed clients a key the single-key server never held.
+  - The **sing-box subscription is runnable as delivered**: it now ships a local
+    mixed inbound + route instead of an outbounds-only document that carried
+    nothing.
+- **ForgeDNS reassembly no longer deadlocks**: a full reorder buffer used to
+  reject the in-order head frame that would have drained it, stalling the session
+  permanently on its own missing head. The head is now always accepted.
 
 ### Added
 - Subscription formats: `xray` (validated by `xray run -test`), `surge`, `loon`,
