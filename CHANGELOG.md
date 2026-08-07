@@ -6,6 +6,13 @@
 - **Panel UI was completely dead**: the SvelteKit build's `/_app/*` assets were
   never served (404), so the app could not boot. Now served with correct MIME
   types + SPA fallback.
+- **Blank panel at the secret path**: even with assets served, opening
+  `/panel/<secret>` (no trailing slash) left SvelteKit's `base` collapsed to
+  `/panel`, so its relative `./_app/…` assets resolved to `/panel/_app/…` (served
+  as the HTML shell → rejected as a bad module) and the router matched no route.
+  The bare path now 301s to `<path>/` and `_app/…` assets are served under any
+  prefix. Verified in a real browser: login + dashboard render with 0 console
+  errors. Found by deploying to a real server.
 - **Login was broken**: the SPA called `/api/auth/login` returning `{token}`; the
   backend serves `/api/login` returning `{access_token}`. Reconciled, plus the
   `/health`→`/admin/overview`, `/usergroups`→`/groups`, `/presets`→
