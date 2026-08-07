@@ -1,0 +1,191 @@
+package edge
+
+import (
+	"context"
+	"strings"
+)
+
+// Deploy and Destroy are the whole-Worker lifecycle operations shared by the
+// panel handlers and `forgectl edge`. Steps follow
+// deploy/cloudflare/forgeedge/docs/FORGECTL_EDGE_SPEC.md.
+
+// DeploySpec is one deploy or update.
+type DeploySpec struct {
+	Name   string
+	Target string // workers (default) | pages
+	// SecurePath is passed in as a plain-text binding rather than scraped back
+	// out of a Worker log line, so forgectl knows every URL up front.
+	SecurePath string
+	Bundle     []byte
+	// Domain attaches a custom hostname; the zone must be in this account.
+	Domain string
+	// Force overwrites a Worker that already exists. Silently overwriting
+	// someone else's Worker is not acceptable, so this is never the default.
+	Force bool
+	// D1 also creates a D1 database and binds it.
+	D1 bool
+	// Update marks a re-upload of an existing Worker: the name check is skipped
+	// and the existing KV namespace is reused rather than created.
+	Update bool
+}
+
+// DeployResult is what an operator needs after a successful deploy.
+type DeployResult struct {
+	Name          string `json:"name"`
+	Target        string `json:"target"`
+	Origin        string `json:"origin"`
+	SecurePath    string `json:"secure_path"`
+	PanelURL      string `json:"panel_url"`
+	SubTemplate   string `json:"subscription_template"`
+	DoHURL        string `json:"doh_url"`
+	KVNamespaceID string `json:"kv_namespace_id,omitempty"`
+	D1DatabaseID  string `json:"d1_database_id,omitempty"`
+	Hostname      string `json:"hostname,omitempty"`
+	Updated       bool   `json:"updated"`
+}
+
+// Deploy uploads the Worker, wires its KV namespace, publishes it on
+// workers.dev and optionally attaches a custom domain.
+func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, error) {
+	if spec.Target == "" {
+		spec.Target = "workers"
+	}
+	if spec.Target != "workers" {
+		return nil, &Error{Op: "edge-deploy", Kind: KindValidation,
+			Message: "only the workers target is implemented",
+			Remediation: "deploy to Workers (the default). A Pages deployment uploads the same bundle as _worker.js; " +
+				"it is not wired here because nothing has been able to exercise it end to end."}
+	}
+	if err := c.requireAccount("edge-deploy"); err != nil {
+		return nil, err
+	}
+	if spec.SecurePath == "" {
+		p, err := GenerateSecurePath(SecurePathLength)
+		if err != nil {
+			return nil, err
+		}
+		spec.SecurePath = p
+	}
+
+	// 2. Refuse to clobber an existing Worker.
+	if !spec.Update {
+		exists, err := c.ScriptExists(ctx, spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		if exists && !spec.Force {
+			return nil, &Error{Op: "edge-deploy", Kind: KindConflict,
+				Message:     "a Worker named " + spec.Name + " already exists in this account",
+				Remediation: "choose another --name, or pass --force to overwrite it deliberately."}
+		}
+	}
+
+	// 3. KV: reuse the existing namespace on an update, create it otherwise.
+	title := KVTitle(spec.Name)
+	var kvID string
+	if ns, err := c.FindKVNamespace(ctx, title); err == nil {
+		kvID = ns.ID
+	} else if IsNotFound(err) {
+		ns, cerr := c.CreateKVNamespace(ctx, title)
+		if cerr != nil {
+			return nil, cerr
+		}
+		kvID = ns.ID
+	} else {
+		return nil, err
+	}
+
+	bindings := []Binding{
+		KVBinding(kvID),
+		// The Worker validates SECURE_PATH against ^[a-z0-9-]{8,64}$ and adopts
+		// it instead of minting its own.
+		PlainTextBinding("SECURE_PATH", spec.SecurePath),
+	}
+	var d1ID string
+	if spec.D1 {
+		db, err := c.CreateD1(ctx, spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		d1ID = db.UUID
+		bindings = append(bindings, D1Binding(d1ID))
+	}
+
+	// 6. Upload. keep_bindings is set on every upload (see UploadScript).
+	if err := c.UploadScript(ctx, UploadSpec{
+		Name: spec.Name, Script: spec.Bundle, Bindings: bindings,
+	}); err != nil {
+		return nil, err
+	}
+
+	// 7. Publish on workers.dev, claiming an account subdomain if there is none.
+	sub, err := c.AccountSubdomain(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if sub == "" {
+		candidate, gerr := RandomName()
+		if gerr != nil {
+			return nil, gerr
+		}
+		if err := c.SetAccountSubdomain(ctx, candidate); err != nil {
+			return nil, err
+		}
+		sub = candidate
+	}
+	if err := c.EnableSubdomain(ctx, spec.Name); err != nil {
+		return nil, err
+	}
+
+	res := &DeployResult{
+		Name: spec.Name, Target: spec.Target, Origin: WorkerOrigin(spec.Name, sub),
+		SecurePath: spec.SecurePath, KVNamespaceID: kvID, D1DatabaseID: d1ID,
+		Updated: spec.Update,
+	}
+
+	// 8. Optional custom domain.
+	if host := strings.TrimSpace(spec.Domain); host != "" {
+		zoneID, _, err := c.FindZone(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.AttachDomain(ctx, spec.Name, host, zoneID); err != nil {
+			return nil, err
+		}
+		res.Hostname = host
+		res.Origin = "https://" + host
+	}
+
+	res.PanelURL = res.Origin + "/" + res.SecurePath + "/panel"
+	res.SubTemplate = res.Origin + "/" + res.SecurePath + "/sub/<sub_token>"
+	res.DoHURL = res.Origin + "/" + res.SecurePath + "/dns-query"
+	return res, nil
+}
+
+// Destroy deletes the Worker and, unless keepKV, its KV namespace. Every
+// subscription URL that Worker served stops resolving immediately.
+func Destroy(ctx context.Context, c *Client, name, target string, keepKV bool) error {
+	if err := c.requireAccount("edge-delete"); err != nil {
+		return err
+	}
+	if target == "pages" {
+		if err := c.DeletePagesProject(ctx, name); err != nil {
+			return err
+		}
+	} else if err := c.DeleteScript(ctx, name); err != nil {
+		return err
+	}
+	if keepKV {
+		return nil
+	}
+	ns, err := c.FindKVNamespace(ctx, KVTitle(name))
+	if err != nil {
+		// A namespace that is already gone is not a failure of the delete; the
+		// Worker — the thing that actually served traffic — is destroyed.
+		if IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return c.DeleteKVNamespace(ctx, ns.ID)
+}
