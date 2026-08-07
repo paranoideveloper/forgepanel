@@ -122,10 +122,25 @@ func (s *Server) handleSub(c *gin.Context) {
 // singboxSubscription renders a minimal, valid sing-box CLIENT config whose
 // outbounds are the canonical per-node renderings (render.SingboxOutbound), so a
 // sing-box client receives real sing-box JSON instead of the base64 V2Ray list.
-// Tags are de-duplicated so the selector references distinct outbounds.
+//
+// sing-box rejects a config with two outbounds sharing a tag ("duplicate
+// outbound/endpoint tag"). Per-node renderings all default their tag to "proxy"
+// (render.SingboxOutbound), and this function additionally emits a "selector"
+// outbound tagged "proxy" and a "direct" outbound tagged "direct". So the
+// reserved tags "proxy" and "direct" are seeded into the dedup set BEFORE the
+// nodes are numbered: without that, the first node keeps "proxy" and collides
+// with the selector, and the whole subscription is refused by the core. The
+// selector therefore always owns "proxy" and node tags fall out as
+// proxy-2, proxy-3, …
+const (
+	sbSelectorTag = "proxy"
+	sbDirectTag   = "direct"
+)
+
 func singboxSubscription(nodes []*model.Node) []byte {
 	outs := make([]any, 0, len(nodes)+2)
-	seen := map[string]int{}
+	// Pre-reserve the tags this function emits itself, so no node can claim them.
+	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1}
 	var tags []string
 	for i, n := range nodes {
 		o, err := render.SingboxOutbound(n)
@@ -147,9 +162,9 @@ func singboxSubscription(nodes []*model.Node) []byte {
 		outs = append(outs, o)
 	}
 	if len(tags) > 0 {
-		outs = append(outs, map[string]any{"type": "selector", "tag": "proxy", "outbounds": append(append([]string{}, tags...), "direct"), "default": tags[0]})
+		outs = append(outs, map[string]any{"type": "selector", "tag": sbSelectorTag, "outbounds": append(append([]string{}, tags...), sbDirectTag), "default": tags[0]})
 	}
-	outs = append(outs, map[string]any{"type": "direct", "tag": "direct"})
+	outs = append(outs, map[string]any{"type": "direct", "tag": sbDirectTag})
 	doc := map[string]any{
 		"log":       map[string]any{"level": "warn"},
 		"outbounds": outs,

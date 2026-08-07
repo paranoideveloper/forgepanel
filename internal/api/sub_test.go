@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -300,4 +303,85 @@ func TestMultiLocationSubscriptionLinks(t *testing.T) {
 	if !hosts["useast.vpn.com"] || !hosts["euwest.vpn.com"] {
 		t.Fatalf("json sub missing multi-node addresses: %v", hosts)
 	}
+}
+
+// TestSingboxSubscriptionHasUniqueTags is the regression for the "duplicate
+// outbound/endpoint tag: proxy" bug: the per-node renderings all default their
+// tag to "proxy", and the builder also emits a selector tagged "proxy" and a
+// direct tagged "direct". Every emitted tag must be unique or the real sing-box
+// core rejects the whole config.
+func TestSingboxSubscriptionHasUniqueTags(t *testing.T) {
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoTrojan, Address: "b.example.com", Port: 443, Password: "pw1"},
+		{Protocol: model.ProtoShadowsocks, Address: "c.example.com", Port: 443, Password: "pw2", Method: "2022-blake3-aes-128-gcm"},
+		{Protocol: model.ProtoVMess, Address: "d.example.com", Port: 443, UUID: "66666666-7777-8888-9999-000000000000"},
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(singboxSubscription(nodes), &doc); err != nil {
+		t.Fatalf("subscription is not valid JSON: %v", err)
+	}
+	seen := map[string]bool{}
+	var selector map[string]any
+	for _, o := range doc.Outbounds {
+		tag, _ := o["tag"].(string)
+		if tag == "" {
+			t.Fatalf("outbound with empty tag: %v", o)
+		}
+		if seen[tag] {
+			t.Fatalf("duplicate outbound tag %q — the real core rejects this", tag)
+		}
+		seen[tag] = true
+		if o["type"] == "selector" {
+			selector = o
+		}
+	}
+	if selector == nil {
+		t.Fatal("no selector outbound emitted")
+	}
+	// The selector must reference only tags that exist.
+	for _, ref := range selector["outbounds"].([]any) {
+		if !seen[ref.(string)] {
+			t.Fatalf("selector references non-existent tag %q", ref)
+		}
+	}
+}
+
+// TestSingboxSubscriptionAcceptedByCore feeds the emitted subscription to the
+// real `sing-box check`, the only authority on whether the config is valid. It
+// skips cleanly when the binary is not installed, so CI without sing-box still
+// passes while a machine that has it gets the real proof.
+func TestSingboxSubscriptionAcceptedByCore(t *testing.T) {
+	bin := findSingbox()
+	if bin == "" {
+		t.Skip("sing-box binary not found; skipping semantic validation")
+	}
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoTrojan, Address: "b.example.com", Port: 443, Password: "pw1"},
+		{Protocol: model.ProtoVMess, Address: "d.example.com", Port: 443, UUID: "66666666-7777-8888-9999-000000000000"},
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "sub.json")
+	if err := os.WriteFile(cfg, singboxSubscription(nodes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sing-box rejected the subscription: %v\n%s", err, out)
+	}
+}
+
+func findSingbox() string {
+	if p, err := exec.LookPath("sing-box"); err == nil {
+		return p
+	}
+	for _, p := range []string{"/usr/bin/sing-box", "/usr/local/bin/sing-box"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
