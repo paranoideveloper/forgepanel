@@ -175,6 +175,7 @@
       {#if bundle.cloudflare_warning}
         <div class="warn-box">⚠️ {bundle.cloudflare_warning}</div>
       {/if}
+      <div class="warn-box">🔌 The authoritative listener runs on <code>0.0.0.0:53</code>. Port <strong>53/udp</strong> must be open on this server's firewall and reachable from the internet. If ForgePanel runs in Docker, publish it — <code>53:53/udp</code> in your compose ports — or delegated queries never arrive.</div>
       {#if bundle.socks5}
         <p style="margin-top:14px"><span class="muted">Client SOCKS5:</span> <code>{bundle.socks5}</code></p>
       {/if}

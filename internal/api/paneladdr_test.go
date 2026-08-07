@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestIsPrivateIP(t *testing.T) {
+	private := []string{
+		"127.0.0.1", "10.0.0.1", "172.18.0.2", "192.168.1.1",
+		"169.254.1.1", "100.64.0.1", "100.127.255.254", "::1", "not-an-ip",
+	}
+	public := []string{
+		"172.104.159.120", "8.8.8.8", "1.1.1.1", "203.0.113.10", "100.128.0.1",
+	}
+	for _, ip := range private {
+		if !isPrivateIP(ip) {
+			t.Errorf("isPrivateIP(%q) = false, want true", ip)
+		}
+	}
+	for _, ip := range public {
+		if isPrivateIP(ip) {
+			t.Errorf("isPrivateIP(%q) = true, want false", ip)
+		}
+	}
+}
+
 func TestNormalizeDomain(t *testing.T) {
 	cases := map[string]string{
 		"panel.example.com":                 "panel.example.com",

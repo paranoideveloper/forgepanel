@@ -3,6 +3,20 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.6 — ForgeDNS delegation IP + port note (forgedns-net)
+
+Running a real zone (`s13.eshkaftak.vip`, masterdns) on the Docker host surfaced
+two issues: (1) the delegation A-record showed the Docker bridge IP `172.18.0.2`
+because `detectServerIP()` sees only the container interface — added
+`publicServerIP()` which, when the detected IP is private, resolves the panel's
+configured domain to the real public IP; used for the bundle, panel-address
+`server_ipv4`, and DNS-check points-here. (2) The container wasn't publishing
+`53/udp`, so the running MasterDNS listener got no queries — fixed on the box
+(compose override now maps `53:53/udp`+`53/tcp`) and the setup panel now warns
+that 53/udp must be open/published. Verified the live tunnel: Cloudflare delegates
+s13→ns.eshkaftak.vip→172.104.159.120, and `:53` now answers tunnel-style queries.
+`isPrivateIP` unit-tested.
+
 ## v1.5.5 — ForgeDNS page "shows nothing" (forgedns-ux)
 
 The DNS Tunnels page had a blank adapter dropdown and zone creation silently

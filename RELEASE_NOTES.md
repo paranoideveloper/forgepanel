@@ -1,3 +1,24 @@
+# ForgePanel v1.5.6 — Release Notes
+
+Follow-up to v1.5.5 after running a real ForgeDNS zone end-to-end on a Docker
+host: the tunnel process ran and was correct, but two things bit.
+
+## Fixes
+
+- **Delegation A-record showed the Docker-internal IP.** `detectServerIP()` returns
+  the outbound-route local address, which behind Docker/NAT is a private bridge IP
+  (e.g. `172.18.0.2`) — useless in a public DNS record. New `publicServerIP()`
+  detects that case and resolves the panel's own configured domain (which points
+  at the server's real public address) instead. Used for the ForgeDNS delegation
+  bundle, the panel-address `server_ipv4`, and the DNS-check "points here" verdict.
+- **Setup panel now states the port requirement.** ForgeDNS's authoritative
+  listener binds `0.0.0.0:53`, but a zone is unreachable unless **53/udp** is open
+  on the host firewall and (under Docker) published to the container. The
+  delegation view now says so explicitly — a running listener that never receives
+  a query is the most confusing failure mode there is.
+
+---
+
 # ForgePanel v1.5.5 — Release Notes
 
 Fixes the **ForgeDNS — DNS Tunnels** page, which "showed nothing": the wire-format

@@ -450,7 +450,7 @@ func (s *Server) handleForgeDNSBundle(c *gin.Context) {
 	// instead of pointing at an empty address.
 	ip := strings.TrimSpace(c.Query("ip"))
 	if ip == "" {
-		ip = detectServerIP()
+		ip = s.publicServerIP()
 	}
 	b, err := s.buildBundle(z, ip, c.Query("resolvers"))
 	if err != nil {

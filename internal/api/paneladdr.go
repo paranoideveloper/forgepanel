@@ -47,6 +47,45 @@ func detectServerIPv6() string {
 // (IPv6) records.
 func resolveDomain(domain string) (v4, v6 []string, err error) { return settings.ResolveDomain(domain) }
 
+// isPrivateIP reports whether ip is loopback, link-local, or in a private/CGNAT
+// range — i.e. not an address a public DNS delegation or A record can point at.
+func isPrivateIP(ip string) bool {
+	p := net.ParseIP(ip)
+	if p == nil {
+		return true
+	}
+	if p.IsLoopback() || p.IsLinkLocalUnicast() || p.IsPrivate() {
+		return true
+	}
+	// 100.64.0.0/10 (CGNAT) is not covered by net.IP.IsPrivate.
+	if v4 := p.To4(); v4 != nil && v4[0] == 100 && v4[1]&0xc0 == 64 {
+		return true
+	}
+	return false
+}
+
+// publicServerIP returns this server's public IPv4 for delegation records and
+// A-record hints. detectServerIP() returns the outbound-route local address,
+// which behind Docker/NAT is a private bridge IP (e.g. 172.18.0.2) — useless in
+// a public DNS record. When that happens, resolve the panel's own configured
+// domain (it points at this server's real public address) and use that instead.
+func (s *Server) publicServerIP() string {
+	ip := detectServerIP()
+	if ip != "" && ip != "127.0.0.1" && !isPrivateIP(ip) {
+		return ip
+	}
+	if p := s.cfg.Panel(); p != nil && p.Domain != "" {
+		if v4, _, err := resolveDomain(p.Domain); err == nil {
+			for _, a := range v4 {
+				if !isPrivateIP(a) {
+					return a
+				}
+			}
+		}
+	}
+	return ip
+}
+
 // certStatusFor reports the panel certificate state for the given domain without
 // triggering issuance.
 func (s *Server) certStatusFor(domain string) gin.H {
@@ -87,7 +126,7 @@ func (s *Server) handlePanelAddress(c *gin.Context) {
 		"public_url":    s.PublicURL(),
 		"https_enabled": p.HTTPSEnabled,
 		"admin_path":    p.AdminPath,
-		"server_ipv4":   detectServerIP(),
+		"server_ipv4":   s.publicServerIP(),
 		"server_ipv6":   detectServerIPv6(),
 		"cert":          s.certStatusFor(p.Domain),
 	})
@@ -106,7 +145,7 @@ func (s *Server) handlePanelDNSCheck(c *gin.Context) {
 		c.JSON(200, gin.H{"domain": domain, "resolves": false, "error": err.Error(), "points_here": false})
 		return
 	}
-	myV4, myV6 := detectServerIP(), detectServerIPv6()
+	myV4, myV6 := s.publicServerIP(), detectServerIPv6()
 	pointsHere := false
 	for _, ip := range v4 {
 		if ip == myV4 {
