@@ -925,7 +925,8 @@ step_install() {
     mkdir -p "$DATA_DIR"
   fi
   chmod 0700 "$DATA_DIR"
-  local backup_dir="${DATA_DIR}/install-backups/$(date -u '+%Y%m%dT%H%M%SZ')"
+  local backup_dir
+  backup_dir="${DATA_DIR}/install-backups/$(date -u '+%Y%m%dT%H%M%SZ')"
   mkdir -p "$backup_dir"
   chmod 0700 "$backup_dir"
   local bin_backup ctl_backup node_backup unit_backup env_backup
@@ -934,7 +935,7 @@ step_install() {
   node_backup=$(backup_existing "$NODE_PATH" "${backup_dir}/forgenode")
   unit_backup=$(backup_existing "$UNIT_PATH" "${backup_dir}/forgepanel.service")
   env_backup=$(backup_existing "$ENV_FILE" "${backup_dir}/forgepanel.env")
-  systemctl is-active --quiet "$SERVICE" 2>/dev/null && was_active=1 || true
+  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then was_active=1; fi
 
   rollback_install() {
     err "Installation did not pass validation; restoring the previous state."
@@ -945,7 +946,7 @@ step_install() {
     restore_or_remove "$UNIT_PATH" "$unit_backup"
     restore_or_remove "$ENV_FILE" "$env_backup"
     systemctl daemon-reload >/dev/null 2>&1 || true
-    [[ "$was_active" == "1" ]] && systemctl start "$SERVICE" >/dev/null 2>&1 || true
+    if [[ "$was_active" == "1" ]]; then systemctl start "$SERVICE" >/dev/null 2>&1 || true; fi
     if [[ "$data_created" == "1" ]]; then rm -rf "${DATA_DIR:?}"; fi
     exit 1
   }
