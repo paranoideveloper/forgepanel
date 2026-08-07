@@ -55,6 +55,13 @@ Live CI cannot be triggered from the branch (workflow only runs on main/PRs; tok
 lacks `workflow` scope to add a dispatch trigger). Proven by local reproduction;
 recorded in docs/E2E_REPORT.md.
 
+
+## CI workflow_dispatch (blocked on token scope)
+The change to add a manual `workflow_dispatch` trigger to `.github/workflows/ci.yml`
+is captured at `packaging/github-workflows/ci-add-workflow-dispatch.patch`. It could
+not be pushed: the token lacks the `workflow` scope. Apply it with a workflow-scoped
+token (or via the GitHub UI) to enable branch dispatch. Not retried; does not gate anything.
+
 ## Carried fixes for main
 - `2318d00` govulncheck: x/net v0.56.0, x/text v0.39.0, go directive -> 1.25.12.
 - `2e5e06e` shellcheck: install.sh SC2155/SC2015.
