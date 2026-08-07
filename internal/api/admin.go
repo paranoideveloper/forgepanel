@@ -167,6 +167,7 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		return
 	}
 	applyCreateDefaults(&n) // panel fills in keys/dest/flow/creds so it "just works"
+	s.applyDomain(&n)       // inherit default domain + cascade to SNI/Host/etc.
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -194,6 +195,7 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 		return
 	}
 	applyCreateDefaults(&n)
+	s.applyDomain(&n) // inherit default domain + cascade
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

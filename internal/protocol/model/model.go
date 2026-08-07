@@ -444,6 +444,14 @@ type Node struct {
 	Address  string   `json:"address"`
 	Port     int      `json:"port"`
 
+	// Domain is the single source of truth an operator sets once; it CASCADES to
+	// the SNI, the transport Host / gRPC authority, the exported client address
+	// and certificate selection (see ApplyDomainCascade). Every derived field is
+	// still individually overridable — the cascade only fills blanks. Empty means
+	// "no domain": the inbound is IP-based and the UI steers the operator to
+	// REALITY and the other domain-free protocols.
+	Domain string `json:"domain,omitempty"`
+
 	// Identity / credentials. Only the fields meaningful for Protocol are set;
 	// Normalize clears the others.
 	UUID       string `json:"uuid,omitempty"`       // vless, vmess, tuic
@@ -469,6 +477,60 @@ type Node struct {
 	Brook     *BrookOptions     `json:"brook,omitempty"`
 	ForgeDNS  *ForgeDNSOptions  `json:"forgedns,omitempty"`
 	SSPlugin  *SSPluginOptions  `json:"ss_plugin,omitempty"`
+}
+
+// ApplyDomainCascade fills every domain-derived field from n.Domain, WITHOUT
+// overwriting anything the operator set explicitly — the cascade only fills
+// blanks, so a per-field override always wins. It is the mechanism behind
+// "set the domain once and everything follows": SNI, the transport Host header
+// (WS / httpupgrade / h2) which is also the gRPC/authority the client presents,
+// and the client-facing address in exported links.
+//
+// It deliberately does NOT touch REALITY's ServerNames: those are the borrowed
+// destination site, not a domain the operator owns, so a REALITY inbound is
+// domain-free by design and the cascade leaves it alone.
+//
+// Returns true when a domain is present and cascaded, false for the domain-free
+// (IP-based) case, which the caller uses to drive the no-domain guidance.
+func (n *Node) ApplyDomainCascade() bool {
+	d := strings.TrimSpace(n.Domain)
+	if d == "" {
+		return false
+	}
+	n.Domain = d
+
+	// SNI follows the domain for real TLS. REALITY borrows someone else's chain,
+	// so its serverNames are left untouched.
+	if n.Security.Type == SecTLS && n.Security.ServerName == "" {
+		n.Security.ServerName = d
+	}
+
+	// The transport Host header (and the HTTP/2 & gRPC authority the client
+	// presents) follows the domain wherever a Host is meaningful and unset.
+	switch n.Transport.Network {
+	case NetWS, NetHTTPUpgrade, NetH2, NetGRPC, NetXHTTP:
+		if n.Transport.Host == "" {
+			n.Transport.Host = d
+		}
+	}
+	return true
+}
+
+// EffectiveClientAddress is the address a generated CLIENT link should dial: the
+// operator's domain when one is set (so the link rides the CDN/cert), otherwise
+// the node's own address. It never returns a bind-all placeholder.
+func (n *Node) EffectiveClientAddress() string {
+	if d := strings.TrimSpace(n.Domain); d != "" {
+		return d
+	}
+	return n.Address
+}
+
+// IsPlaintext reports whether the inbound actually carries NO transport
+// security — security "none" on a cleartext transport. The UI uses this to
+// refuse to present such an inbound as if it were secure.
+func (n *Node) IsPlaintext() bool {
+	return n.Security.Type == SecNone && n.Protocol.UsesTransport()
 }
 
 // UsesTransport reports whether the protocol layers over the pluggable

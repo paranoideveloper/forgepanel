@@ -99,7 +99,18 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	}
 	allowPanelHost := func(host string) bool {
 		p := cfg.Panel()
-		return p != nil && p.Domain != "" && strings.EqualFold(host, p.Domain)
+		if p != nil && p.Domain != "" && strings.EqualFold(host, p.Domain) {
+			return true
+		}
+		// One-click TLS (BUG-3): also issue for any domain in the registry, so an
+		// inbound whose domain is registered gets an ACME cert on demand. Still a
+		// closed allowlist — an arbitrary SNI cannot trigger a Let's Encrypt order.
+		if db != nil {
+			if _, err := db.DomainByName(host); err == nil {
+				return true
+			}
+		}
+		return false
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
@@ -392,6 +403,14 @@ func (s *Server) routes() {
 			})
 			admin.GET("/domains/check", s.handleDomainCheck)
 			admin.GET("/domains/ns-wizard", s.handleNSWizard)
+			// Domains registry (BUG-3): CRUD + no-domain guidance + one-click paths.
+			admin.GET("/domains", s.handleListDomains)
+			admin.POST("/domains", s.handleCreateDomain)
+			admin.PUT("/domains/:id", s.handleUpdateDomain)
+			admin.DELETE("/domains/:id", s.handleDeleteDomain)
+			admin.GET("/domains-status", s.handleDomainStatus)
+			admin.POST("/inbounds/reality-quickstart", s.handleRealityQuickstart)
+			admin.POST("/inbounds/:id/tls", s.handleInboundOneClickTLS)
 			admin.POST("/certs/import", s.handleCertImport)
 			admin.GET("/certs", s.handleCertList)
 			admin.GET("/nodes", s.handleListNodes)

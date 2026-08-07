@@ -176,10 +176,24 @@ type AuditLog struct {
 	Diff    string `gorm:"type:text" json:"diff"`
 }
 
+// Domain is an operator-owned domain in the Domains registry. Inbounds reference
+// it by name; new inbounds inherit the one flagged IsDefault. Provider links it
+// to the §5 DNS-automation credentials so a domain can be provisioned end to end.
+type Domain struct {
+	Base
+	Name      string `gorm:"uniqueIndex;not null" json:"name"`
+	IsDefault bool   `gorm:"index" json:"is_default"`
+	Provider  string `json:"provider,omitempty"` // cloudflare | arvan | desec | ...
+	TLSMode   string `json:"tls_mode,omitempty"` // acme | manual | none
+	CertPath  string `json:"cert_path,omitempty"`
+	KeyPath   string `json:"key_path,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
 // AllModels is the migration set.
 func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &NodeClientTraffic{},
-		&ForgeDNSZone{}, &UserInbound{}}
+		&ForgeDNSZone{}, &UserInbound{}, &Domain{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

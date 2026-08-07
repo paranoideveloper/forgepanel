@@ -247,6 +247,13 @@ const defaultRealityDest = "www.cloudflare.com"
 // operator's configured public address wins; otherwise the host the client
 // reached the panel on is used.
 func (s *Server) substituteAddr(n *model.Node, fallbackHost string) {
+	// A configured domain is the client-facing address: exported links must dial
+	// the domain (so they ride its cert/CDN), not the raw bind IP. This is the
+	// address half of the domain cascade.
+	if d := strings.TrimSpace(n.Domain); d != "" {
+		n.Address = d
+		return
+	}
 	a := n.Address
 	if a == "" || a == "0.0.0.0" || a == "::" || a == "[::]" || a == "127.0.0.1" || a == "localhost" {
 		pub := ""
