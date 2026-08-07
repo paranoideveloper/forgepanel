@@ -130,7 +130,7 @@ func desecValue(rec Record) (string, error) {
 		return fmt.Sprintf("%d %d %d %s.", rec.SRV.Priority, rec.SRV.Weight, rec.SRV.Port, NormalizeDomain(rec.SRV.Target)), nil
 	}
 	return "", &Error{Provider: "desec", Op: "encode-record", Kind: KindUnsupported,
-		Message:     fmt.Sprintf("deSEC support for %s records is not implemented here", rec.Type),
+		Message:     fmt.Sprintf("deSEC support for %s records is not available in this build", rec.Type),
 		Remediation: "create the RRset by hand at https://desec.io, or use a provider that supports it"}
 }
 

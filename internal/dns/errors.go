@@ -148,7 +148,7 @@ func notImplemented(provider, docs string) *Error {
 		Provider: provider,
 		Op:       "new-provider",
 		Kind:     KindNotImplemented,
-		Message:  fmt.Sprintf("the %s DNS backend is registered but not implemented in this build", provider),
+		Message:  fmt.Sprintf("the %s DNS backend is registered but not available in this build", provider),
 		Remediation: "use one of the implemented providers (cloudflare, arvancloud, desec), or create the records by hand at " +
 			docs + " and register the resulting domain with `forgectl provision --skip-dns`",
 	}

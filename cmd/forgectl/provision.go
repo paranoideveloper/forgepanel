@@ -244,7 +244,7 @@ func provisionCredentials(provider, cfToken, cfAccount, arvanKey, desecToken str
 		return nil, fmt.Errorf("unknown DNS provider %q; use one of: %s", provider, strings.Join(dns.ImplementedProviders(), ", "))
 	}
 	if !info.Implemented {
-		return nil, fmt.Errorf("the %s backend is not implemented in this build.\n"+
+		return nil, fmt.Errorf("the %s backend is not available in this build.\n"+
 			"Create the records at %s, then re-run with --skip-dns to verify and prove them.\n"+
 			"Implemented providers: %s", info.Title, info.TokenURL, strings.Join(dns.ImplementedProviders(), ", "))
 	}
