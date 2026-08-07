@@ -20,6 +20,7 @@
     users: () => import('$lib/views/UsersView.svelte'),
     nodes: () => import('$lib/views/NodesView.svelte'),
     studio: () => import('../routes/studio/StudioView.svelte'),
+    domains: () => import('$lib/views/DomainsView.svelte'),
     forgedns: () => import('$lib/views/ForgeDNSView.svelte'),
     certs: () => import('$lib/views/CertificatesView.svelte'),
     system: () => import('$lib/views/SystemHealthView.svelte')

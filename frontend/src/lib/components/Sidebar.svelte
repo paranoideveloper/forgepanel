@@ -12,6 +12,7 @@
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
     { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
     { id: 'studio', label: 'Config Studio', icon: '⚙️' },
+    { id: 'domains', label: 'Domains', icon: '🌍' },
     { id: 'forgedns', label: 'ForgeDNS', icon: '🛰️' },
     { id: 'certs', label: 'Certificates & TLS', icon: '🔒' },
     { id: 'system', label: 'System & Security', icon: '🛠️' }
