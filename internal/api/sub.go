@@ -16,7 +16,7 @@ import (
 
 // subFormats are the subscription formats this endpoint can render, listed for
 // the error message when a client asks for something else.
-var subFormats = []string{"v2ray", "clash", "sing-box", "xray", "links", "json"}
+var subFormats = []string{"v2ray", "clash", "clash-meta", "sing-box", "xray", "surge", "loon", "quantumultx", "links", "json"}
 
 // canonicalSubFormat maps a requested format (and its aliases) to the single
 // name the renderer switch uses. It returns "" for anything unsupported, so an
@@ -36,6 +36,12 @@ func canonicalSubFormat(f string) string {
 		return "sing-box"
 	case "xray", "xray-json", "v2ray-json":
 		return "xray"
+	case "surge":
+		return "surge"
+	case "loon":
+		return "loon"
+	case "quantumultx", "quantumult", "qx":
+		return "quantumultx"
 	case "links", "raw", "uri", "plain":
 		return "links"
 	case "json":
@@ -124,6 +130,12 @@ func (s *Server) handleSub(c *gin.Context) {
 		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes))
 	case "xray":
 		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes))
+	case "surge":
+		c.Data(200, "text/plain; charset=utf-8", surgeSubscription(nodes))
+	case "loon":
+		c.Data(200, "text/plain; charset=utf-8", loonSubscription(nodes))
+	case "quantumultx":
+		c.Data(200, "text/plain; charset=utf-8", quantumultxSubscription(nodes))
 	default: // v2ray/base64 subscription (also Shadowrocket)
 		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))
 		c.Data(200, "text/plain; charset=utf-8", []byte(b64))

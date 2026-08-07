@@ -137,7 +137,7 @@ func TestExplicitFormatBeatsUserAgent(t *testing.T) {
 // say so, not silently hand back a different one the client cannot read.
 func TestUnsupportedExplicitFormatIsAnError(t *testing.T) {
 	s, tok := subServer(t)
-	rec := subGet(t, s, "/sub/"+tok+"/quantumult", "")
+	rec := subGet(t, s, "/sub/"+tok+"/nonexistentformat", "")
 	if rec.Code == 200 {
 		t.Fatalf("unsupported format silently served %d bytes of another format: %s",
 			rec.Body.Len(), rec.Body.String())

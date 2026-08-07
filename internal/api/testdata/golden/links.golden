@@ -1,0 +1,5 @@
+vmess://eyJhZGQiOiJhLmV4YW1wbGUuY29tIiwiYWlkIjoiMCIsImFscG4iOiIiLCJmcCI6IiIsImhvc3QiOiJhLmV4YW1wbGUuY29tIiwiaWQiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJuZXQiOiJ3cyIsInBhdGgiOiIvd3MiLCJwb3J0IjoiNDQzIiwicHMiOiJ2bWVzcy13cyIsInNjeSI6ImF1dG8iLCJzbmkiOiJhLmV4YW1wbGUuY29tIiwidGxzIjoidGxzIiwidHlwZSI6Im5vbmUiLCJ2IjoiMiJ9
+trojan://trojanpass@b.example.com:443?security=tls&sni=b.example.com&type=tcp#trojan
+ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206TVRJek5EVTJOemc1TURFeU16UTFOZz09@c.example.com:8388#ss
+socks://dTpw@d.example.com:1080#socks
+http://hu:hp@e.example.com:8080#http
