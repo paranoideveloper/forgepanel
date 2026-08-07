@@ -62,6 +62,10 @@ type Server struct {
 	closeOnce   sync.Once
 	closeErr    error
 
+	// edgePush debounces canonical-feed pushes to registered ForgeEdge
+	// deployments (§6); see EdgePushSoon in edge.go.
+	edgePush edgePushState
+
 	// FirstAdminPassword is retained for API compatibility but is no longer used:
 	// fresh installs create the owner via the token-protected first-run setup flow
 	// instead of a printed random password. It stays empty.
@@ -395,6 +399,11 @@ func (s *Server) routes() {
 					}
 				}
 			}
+			// §6 ForgeEdge control plane, mounted the same way at
+			// /api/admin/edge/…. The PULL feed itself is NOT here: a Worker cron
+			// has no admin session, so it lives at /api/edge/feed behind its own
+			// bearer token (registered below).
+			s.registerEdgeRoutes(admin)
 			admin.GET("/groups", s.handleListGroups)
 			admin.POST("/groups", s.handleCreateGroup)
 			admin.GET("/groups/:id", s.handleGetGroup)
@@ -473,6 +482,13 @@ func (s *Server) routes() {
 	// suffix. DB-backed when a store is attached, else the in-memory demo store.
 	r.GET("/sub/:token", s.handleSub)
 	r.GET("/sub/:token/*format", s.handleSub)
+
+	// ForgeEdge PULL feed (§6): the Worker's cron fetches this with the token
+	// minted at /api/admin/edge/feed-token. Token-authenticated rather than
+	// session-authenticated, because the caller is a Worker, not a browser.
+	if s.db != nil {
+		r.GET("/api/edge/feed", s.handleEdgeFeed)
+	}
 
 	// Node agent endpoints (token-authenticated, spec §10).
 	if s.db != nil {
