@@ -12,6 +12,30 @@
   let activeTab = $state('overview');
   let mobileMenuOpen = $state(false);
 
+  // First-run setup (no admin exists yet): the panel prints a one-time token on
+  // first boot; the operator creates the owner account here rather than curling.
+  let setupRequired = $state(false);
+  let setupToken = $state('');
+  let confirmPw = $state('');
+  let setupError = $state('');
+
+  async function handleSetup(e?: Event) {
+    if (e) e.preventDefault();
+    setupError = '';
+    if (password !== confirmPw) { setupError = 'Passwords do not match'; return; }
+    try {
+      await apiFetch('/setup/init', {
+        method: 'POST',
+        body: JSON.stringify({ token: setupToken.trim(), username, password, password_confirm: confirmPw }),
+      });
+      showToast('Administrator created', 'success');
+      setupRequired = false;
+      await handleLogin();
+    } catch (err: any) {
+      setupError = err.message || 'Setup failed';
+    }
+  }
+
   let CurrentView = $state<Component | null>(null);
   let componentLoading = $state(false);
 
@@ -67,10 +91,15 @@
     showToast('Logged out', 'info');
   }
 
-  onMount(() => {
+  onMount(async () => {
     if (token) {
       loadTabModule('overview');
+      return;
     }
+    try {
+      const st = await apiFetch<{ setup_required: boolean }>('/setup/status');
+      setupRequired = st.setup_required;
+    } catch (_) { /* older builds have no setup endpoint */ }
   });
 </script>
 
@@ -80,7 +109,38 @@
 
 <Toast />
 
-{#if !token}
+{#if !token && setupRequired}
+  <div class="login-wrapper" in:fade={{ duration: 200 }}>
+    <div class="login-card" in:fly={{ y: 24, duration: 300 }}>
+      <div class="brand">
+        <div class="logo-box"><span class="logo">⚡</span></div>
+        <h1>ForgePanel</h1>
+      </div>
+      <p class="subtitle">First run — create your administrator account</p>
+
+      <form onsubmit={handleSetup} data-testid="setup-form">
+        <div class="form-group">
+          <label for="stoken">Setup token</label>
+          <input id="stoken" data-testid="setup-token" type="text" bind:value={setupToken} placeholder="printed on first boot" required />
+        </div>
+        <div class="form-group">
+          <label for="suser">Username</label>
+          <input id="suser" type="text" bind:value={username} placeholder="admin" required />
+        </div>
+        <div class="form-group">
+          <label for="spwd">Password</label>
+          <input id="spwd" type="password" bind:value={password} placeholder="••••••••" required />
+        </div>
+        <div class="form-group">
+          <label for="scpwd">Confirm password</label>
+          <input id="scpwd" type="password" bind:value={confirmPw} placeholder="••••••••" required />
+        </div>
+        <button type="submit" class="btn-submit" data-testid="setup-submit">Create Administrator</button>
+      </form>
+      {#if setupError}<div class="err-box" in:fade>{setupError}</div>{/if}
+    </div>
+  </div>
+{:else if !token}
   <div class="login-wrapper" in:fade={{ duration: 200 }}>
     <div class="login-card" in:fly={{ y: 24, duration: 300 }}>
       <div class="brand">

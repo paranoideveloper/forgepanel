@@ -88,9 +88,16 @@
   async function generate(f: Field) {
     if (!f.keygen) return;
     try {
+      let kind = f.keygen;
+      const method = String(values['method'] || '');
+      // Shadowsocks 2022 needs an exact-length base64 PSK, not a generic
+      // password — the static schema can't know the method, so switch here.
+      if (proto === 'shadowsocks' && f.key === 'password' && method.startsWith('2022-')) {
+        kind = 'ss2022';
+      }
       const resp = await apiFetch<Record<string, any>>('/keygen', {
         method: 'POST',
-        body: JSON.stringify({ kind: f.keygen, method: String(values['method'] || '') }),
+        body: JSON.stringify({ kind, method }),
       });
       const val = resp.private_key ?? resp.uuid ?? resp.short_id ?? resp.psk ?? resp.password ?? resp.seed;
       if (val !== undefined) values[f.key] = val;
