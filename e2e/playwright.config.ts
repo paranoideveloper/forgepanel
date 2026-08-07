@@ -5,7 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
 // The panel serves the SvelteKit SPA (see the SPA-serving fix), so these are true
 // end-to-end UI tests, desktop + mobile.
 const PORT = Number(process.env.FP_E2E_PORT || 24700);
-export const BASE_URL = `http://127.0.0.1:${PORT}`;
+// HTTPS by default (self-signed with no domain) — tests accept the self-signed cert.
+export const BASE_URL = `https://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: './tests',
@@ -15,7 +16,7 @@ export default defineConfig({
   reporter: [['list']],
   globalSetup: './global-setup.ts',
   globalTeardown: './global-teardown.ts',
-  use: { baseURL: BASE_URL, headless: true },
+  use: { baseURL: BASE_URL, headless: true, ignoreHTTPSErrors: true },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile', use: { ...devices['Pixel 5'] } },

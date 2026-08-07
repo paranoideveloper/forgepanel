@@ -3,8 +3,11 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// The panel serves HTTPS by default (self-signed with no domain). Accept the
+// self-signed cert for the local health/setup calls in this test harness.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const PORT = Number(process.env.FP_E2E_PORT || 24700);
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = `https://127.0.0.1:${PORT}`;
 
 async function waitHealthy(timeoutMs: number) {
   const t0 = Date.now();
