@@ -72,6 +72,9 @@ func main() {
 					fmt.Fprintln(os.Stderr, "forgepanel: :80 ACME helper:", e)
 				}
 			}()
+			// Issue/renew the domain's cert ahead of the first visit so the panel is
+			// browser-trusted from the start instead of on the first domain handshake.
+			srv.PrimePanelCert()
 		}
 		serveErr = httpSrv.ServeTLS(ln, "", "")
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {

@@ -1,3 +1,35 @@
+# ForgePanel v1.5.4 — Release Notes
+
+Fixes the **Certificates & Panel Domain** page so automatic Let's Encrypt TLS is
+correct and self-explanatory. The ACME machinery already worked — a real cert is
+issued over the domain via HTTP-01 on `:80` — but the page misreported it and the
+controls fought the "HTTPS is always on" model. Verified end-to-end against the
+built, embedded binary on a live host: `https://<domain>:2053/` serves a
+browser-trusted Let's Encrypt certificate (`ssl_verify=0`), while the bare IP
+still shows the self-signed fallback (unavoidable — SNI can't match on an IP).
+
+## Fixes
+
+- **Cert status & DNS check now read the real backend fields.** The view consumed
+  the wrong JSON keys (`resolved`/`ip` vs. `resolves`/`a`/`points_here`, and the
+  imported-cert list vs. the live `panel-address.cert`), so it *always* showed
+  "DNS failed to resolve" and "Self-Signed / Indefinite" even when a valid ACME
+  cert was live. It now shows the true issuer, expiry, days-remaining, and a
+  DNS-points-here verdict.
+- **Saving a panel domain enables HTTPS/ACME.** TLS is always served, so attaching
+  a domain now implies you want a trusted cert for it — no separate toggle needed.
+- **"Force ACME Issue / Renew" no longer requires a vestigial HTTPS flag.** It only
+  needs a configured domain; issuance is on-demand for any registered domain.
+- **Cert priming at boot.** When a domain is configured the panel issues/renews its
+  certificate in the background at startup, so the first visit over the domain is
+  already trusted instead of stalling on a first-time order.
+- **IP-vs-domain guidance.** The page now states plainly that opening the panel by
+  IP will always be marked "Not Secure", and links the domain URL to use instead.
+- A domain change is now reported as `restart_required` (the `:80` ACME helper and
+  the public URL derive from the boot-time domain).
+
+---
+
 # ForgePanel v1.5.3 — Release Notes
 
 Adds **bulk inbound operations** (multi-select → enable/disable/delete) on top of

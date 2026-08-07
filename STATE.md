@@ -3,6 +3,27 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.4 — Certificates & Panel Domain page (cert-ux)
+
+A user configured `c.xonyon.dpdns.org` and the page reported "DNS failed to
+resolve" + "Self-Signed / Indefinite", and Force-Renew said "enable HTTPS first".
+Diagnosis on the live host: **the ACME machinery already worked** — a real Let's
+Encrypt cert (issuer YE1) is issued over the domain via HTTP-01 on `:80`, and
+`https://c.xonyon.dpdns.org:2053/` verifies with `ssl_verify=0`. The bug was the
+page: it read the wrong JSON keys (`resolved`/`ip` and the imported-cert list)
+instead of the live `panel-address.cert` + `resolves`/`points_here`, so it always
+showed failure. Root user-confusion: they were opening the panel **by IP**, where
+SNI can't match the domain, so the self-signed fallback (→ "Not Secure") is served.
+
+Fixed & verified in a browser against the BUILT embedded binary (screenshot in
+`e2e/test-results/certificates.png`) and end-to-end on the live v1.5.4 container:
+
+- Cert view now reads the real backend fields (true issuer/expiry/days + a
+  DNS-points-here verdict); new IP-vs-domain banner links the domain URL to use.
+- Saving a panel domain enables HTTPS/ACME; Force-Renew needs only a domain;
+  cert priming at boot; domain change ⇒ `restart_required`.
+- e2e `certificates.spec.ts` (desktop+mobile) + rewritten `CertificatesView.test.ts`.
+
 ## v1.5.0 UI round (BUG-5..BUG-9) — v1.4.0 was WITHDRAWN
 
 A real-server deploy of v1.4.0 exposed that the primary flow did not work in the

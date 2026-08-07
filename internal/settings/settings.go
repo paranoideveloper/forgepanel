@@ -163,6 +163,12 @@ func (s *Service) Apply(change Change) (*Result, error) {
 				return nil, err
 			}
 		}
+		if domain != p.Domain {
+			// The :80 ACME HTTP-01 helper is started at boot only when a domain is
+			// configured, and the public URL and login banner are derived from it,
+			// so a domain change needs a restart to take full effect.
+			restart = true
+		}
 		p.Domain = domain
 		if domain == "" {
 			p.HTTPSEnabled = false

@@ -154,6 +154,15 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid payload"})
 		return
 	}
+	// Saving a panel domain implies you want a real (ACME) certificate for it:
+	// TLS is always served, and the only reason to attach a domain is to get a
+	// browser-trusted cert instead of the self-signed fallback. If the caller
+	// didn't explicitly say otherwise, enable HTTPS/ACME so the cert status, the
+	// :80 ACME helper and the public URL all reflect that intent.
+	if req.Domain != nil && normalizeDomain(*req.Domain) != "" && req.HTTPSEnabled == nil {
+		enable := true
+		req.HTTPSEnabled = &enable
+	}
 	shared := settings.New(s.cfg)
 	shared.IPv4 = detectServerIP
 	shared.IPv6 = detectServerIPv6
@@ -176,6 +185,24 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 	})
 }
 
+// PrimePanelCert issues or renews the panel domain's ACME certificate in the
+// background at startup, so the first visitor who reaches the panel over its
+// domain is served a browser-trusted certificate instead of stalling the TLS
+// handshake on a first-time Let's Encrypt order. Best-effort: it waits briefly
+// for the :80 HTTP-01 helper to come up, then asks autocert for the cert; any
+// failure is left for the real handshake (or the Force-Renew button) to retry.
+func (s *Server) PrimePanelCert() {
+	p := s.cfg.Panel()
+	if p == nil || p.Domain == "" || s.certs == nil {
+		return
+	}
+	domain := p.Domain
+	go func() {
+		time.Sleep(3 * time.Second)
+		_, _ = s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
+	}()
+}
+
 // handlePanelCertRenew (admin) primes/renews the ACME certificate for the panel
 // domain by fetching it through the manager (autocert issues or renews as
 // needed). Returns the resulting status.
@@ -191,8 +218,8 @@ func (s *Server) handlePanelCertRenew(c *gin.Context) {
 		return
 	}
 	p := s.cfg.Panel()
-	if p.Domain == "" || !p.HTTPSEnabled {
-		c.JSON(400, gin.H{"error": "configure a domain and enable HTTPS first"})
+	if p.Domain == "" {
+		c.JSON(400, gin.H{"error": "configure a panel domain first (Panel → Address)"})
 		return
 	}
 	if s.certs == nil {
