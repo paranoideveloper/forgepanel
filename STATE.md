@@ -32,7 +32,9 @@ then continue at the first unchecked box.
 - [ ] §6: ForgeEdge Cloudflare Worker (unified model, OAuth deploy, WARP, chain, fragment, routing, backend mode).
 - [ ] §7: `docs/E2E_REPORT.md` with real output for all 13 steps.
 - [ ] `make check` clean; coverage ≥75% overall, ≥90% for protocol + forgedns.
-- [ ] Zero TODO/FIXME outside `third_party/`.
+  - `internal/protocol/**` tree aggregate = **99.5%** (`-coverpkg=./internal/protocol/...`): model 100, parse 99.7, render 99.8, export 99.6, keygen 93.3. ✅
+  - `internal/forgedns/**` tree aggregate: raising from 72.0% (adapter 90.6, codec/server/session/upstream in progress). ⏳
+- [x] Zero TODO/FIXME/"not implemented" outside `third_party/` (grep = 0).
 - [ ] `CHANGELOG.md` + `RELEASE_NOTES.md` updated; tag (next after v1.3.2 — NOT v1.1.0).
 
 
