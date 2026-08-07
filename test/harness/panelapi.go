@@ -220,6 +220,26 @@ func (p *Panel) UpdateInbound(id uint, node map[string]any) error {
 	return p.do(http.MethodPut, fmt.Sprintf("/api/admin/inbounds/%d", id), node, nil)
 }
 
+// ToggleInbound flips an inbound's Enabled flag. This is the only route that can
+// reach the flag: PUT binds a model.Node, which has no such field.
+func (p *Panel) ToggleInbound(id uint) error {
+	return p.do(http.MethodPost, fmt.Sprintf("/api/admin/inbounds/%d/toggle", id), nil, nil)
+}
+
+// InboundEnabled reports the stored Enabled flag for one inbound.
+func (p *Panel) InboundEnabled(id uint) (bool, error) {
+	rows, err := p.ListInbounds()
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rows {
+		if r.ID == id {
+			return r.Enabled, nil
+		}
+	}
+	return false, fmt.Errorf("inbound %d not found", id)
+}
+
 // InboundNode returns the stored canonical node for one inbound.
 func (p *Panel) InboundNode(id uint) (map[string]any, error) {
 	rows, err := p.ListInbounds()

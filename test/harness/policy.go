@@ -142,37 +142,33 @@ func (r *Runner) RunPolicy(c Case) Result {
 		// Push more than the limit, then wait for the traffic poller to notice.
 		_ = r.probeWithRetry(core.Addr(), listen, seed+1)
 		_ = r.probeWithRetry(core.Addr(), listen, seed+2)
-		settle = 45 * time.Second
-		step("await-limit", r.waitStatus(user.ID, "limited", settle), "status must become limited")
+		step("await-limit", r.waitStatus(user.ID, "limited", 45*time.Second),
+			"status must become limited")
+		// The status flip and the engine reload it triggers are separate steps:
+		// pollAndAccount saves the user, then calls reloadHook, which regenerates
+		// and re-applies the config asynchronously. Probing the instant the status
+		// changes races that reload and would report a rule as unenforced when it
+		// is merely not yet applied.
+		settle = 20 * time.Second
 	case "inbound-disabled":
-		// store.Inbound has an Enabled column, ListInbounds reports it, and both
-		// enabledInboundSpecs and subscriptionNodes honour it — but no route sets
-		// it. Try the update endpoint anyway (with the node it stored, plus the
-		// flag) so the result records what the API actually does, rather than an
-		// assertion made from reading the router.
-		node, nerr := r.Panel.InboundNode(in.ID)
-		if nerr != nil {
-			res.Reason = "could not read the inbound back: " + nerr.Error()
+		// store.Inbound.Enabled is honoured by enabledInboundSpecs, and
+		// POST /inbounds/:id/toggle is the route that reaches it (PUT binds a
+		// model.Node, which has no such field). Assert the flag actually flipped
+		// before asserting the consequence, so "still serving" cannot be confused
+		// with "the toggle silently did nothing".
+		terr := r.Panel.ToggleInbound(in.ID)
+		step("toggle-inbound", terr, "POST /api/admin/inbounds/:id/toggle")
+		if terr != nil {
+			res.Status = StatusFail
+			res.Reason = "no way to disable an inbound: " + terr.Error()
 			return res
 		}
-		node["enabled"] = false
-		uerr := r.Panel.UpdateInbound(in.ID, node)
-		step("attempt-disable", uerr, "PUT /api/admin/inbounds/:id with enabled=false")
-		time.Sleep(12 * time.Second)
-		rows, _ := r.Panel.ListInbounds()
-		stillEnabled := false
-		for _, row := range rows {
-			if row.ID == in.ID && row.Enabled {
-				stillEnabled = true
-			}
-		}
-		if stillEnabled {
-			step("disable-took-effect", errors.New("inbound still reports enabled=true"), "")
+		enabled, eerr := r.Panel.InboundEnabled(in.ID)
+		step("disable-recorded", errFrom(eerr == nil && !enabled,
+			"the inbound still reports enabled=true after the toggle"), "")
+		if eerr == nil && enabled {
 			res.Status = StatusFail
-			res.Reason = "the panel exposes no way to disable an inbound: store.Inbound.Enabled is set " +
-				"true by store.CreateInbound and no handler ever clears it, and model.Node — the only body " +
-				"PUT /api/admin/inbounds/:id accepts — has no such field. The only way to stop an inbound " +
-				"serving is to delete it, which also destroys its configuration"
+			res.Reason = "POST /inbounds/:id/toggle returned success but the inbound still reports enabled=true"
 			return res
 		}
 	case "inbound-removed":
@@ -200,7 +196,8 @@ func (r *Runner) RunPolicy(c Case) Result {
 		res.Reason = "unknown policy " + c.Policy
 		return res
 	}
-	if settle > 0 && c.Policy != "user-expired" && c.Policy != "user-over-quota" {
+	// user-expired already waited out the sweep inside its own branch.
+	if settle > 0 && c.Policy != "user-expired" {
 		time.Sleep(settle)
 	}
 
