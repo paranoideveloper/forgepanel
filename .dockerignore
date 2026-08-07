@@ -57,3 +57,7 @@ var/
 # JS tooling (the web assets are plain static files, nothing to install)
 node_modules/
 web/dist/
+
+# Reference clones + downloaded core binaries: not needed to compile the image.
+third_party/
+test/harness/.cache/

@@ -61,7 +61,14 @@ LABEL org.opencontainers.image.title="ForgePanel" \
 
 # ca-certificates: required to talk to Let's Encrypt and any outbound HTTPS.
 # libcap: to grant the narrow port-binding capability below.
-RUN apk add --no-cache ca-certificates tzdata libcap wireguard-tools iptables nftables iproute2
+# gcompat: the official sing-box release binaries (fetched at runtime by binmgr)
+#   are glibc-dynamically-linked (interpreter /lib64/ld-linux-x86-64.so.2). Alpine
+#   is musl, so without a glibc shim every sing-box exec fails with "no such file
+#   or directory" (exit 127) and Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard/SSH are
+#   all dead in the container. gcompat provides the loader + libc shim; verified by
+#   running the pinned sing-box-1.13.15 binary under it. (Xray ships static and
+#   does not need it, but gcompat is harmless there.)
+RUN apk add --no-cache ca-certificates tzdata libcap gcompat wireguard-tools iptables nftables iproute2
 
 COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
 COPY --from=build /out/forgectl   /usr/local/bin/forgectl
