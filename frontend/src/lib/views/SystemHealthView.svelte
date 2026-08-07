@@ -10,6 +10,16 @@
   let auditLogs = $state<AuditLog[]>([]);
   let loading = $state(true);
 
+  // Panel Doctor
+  let doctor = $state<any>(null);
+  let doctorBusy = $state(false);
+  async function runDoctor() {
+    doctorBusy = true;
+    try { doctor = await apiFetch('/admin/doctor'); }
+    catch (e: any) { showToast(e.message || 'doctor failed', 'error'); }
+    finally { doctorBusy = false; }
+  }
+
   // 2FA state
   let twoFAEnabled = $state(false);
   let twoFAData = $state<TwoFASetup | null>(null);
@@ -29,6 +39,7 @@
     loading = true;
     try {
       healthDetail = await apiFetch<HealthDetail>('/admin/health/detail');
+      await runDoctor();
       auditLogs = await apiFetch<AuditLog[]>('/admin/stats');
       const user = await apiFetch<{ two_factor_enabled?: boolean }>('/admin/me');
       twoFAEnabled = !!user.two_factor_enabled;
@@ -111,6 +122,33 @@
 <div class="view-header">
   <h2>System Diagnostics &amp; Security</h2>
   <button class="btn-primary" onclick={loadData}>Refresh</button>
+</div>
+
+<div class="card" data-testid="doctor-panel">
+  <div class="doctor-head">
+    <h3>Panel Doctor</h3>
+    <button class="btn-sm" onclick={runDoctor} disabled={doctorBusy}>{doctorBusy ? 'Running…' : 'Run diagnostics'}</button>
+  </div>
+  {#if doctor?.health}
+    <p class="doctor-state">
+      Overall: <span class="badge {doctor.health.state === 'healthy' ? 'ok' : doctor.health.state === 'not_configured' ? 'warn' : 'err'}">{doctor.health.label || doctor.health.state}</span>
+    </p>
+    {#if doctor.health.subsystems}
+      <div class="doctor-grid">
+        {#each doctor.health.subsystems as sub}
+          <div class="doctor-item">
+            <span class="badge {sub.state === 'healthy' ? 'ok' : sub.state === 'not_configured' ? 'warn' : 'err'}">{sub.state}</span>
+            <div><strong>{sub.label}</strong><span class="muted">{sub.summary}</span></div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    {#if doctor.inbounds?.length}
+      <p class="muted" style="margin-top:12px">{doctor.inbounds.length} inbound(s) checked.</p>
+    {/if}
+  {:else}
+    <p class="muted">Click “Run diagnostics” to check the panel, engines, certs and inbounds.</p>
+  {/if}
 </div>
 
 <div class="card">
@@ -206,4 +244,14 @@
   pre { background: #0F1420; padding: 14px; border-radius: 8px; overflow-x: auto; color: #FF7A1A; font-family: monospace; margin-top: 12px; }
   .twofa-content { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
   .secret-text { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .doctor-head { display: flex; justify-content: space-between; align-items: center; }
+  .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.12); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .doctor-state { margin: 8px 0 12px; font-size: 14px; }
+  .doctor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .doctor-item { display: flex; gap: 10px; align-items: flex-start; background: #0F1420; padding: 10px 12px; border-radius: 8px; }
+  .doctor-item strong { display: block; font-size: 13px; }
+  .doctor-item .muted { font-size: 11px; }
+  .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
+  .badge.warn { background: rgba(255,180,0,0.15); color: #FFB400; }
+  .badge.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
 </style>

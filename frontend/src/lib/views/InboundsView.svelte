@@ -22,6 +22,32 @@
   let cfgText = $state('');
   let cfgTitle = $state('');
 
+  // Paste-Anything importer
+  let importing = $state(false);
+  let importText = $state('');
+  let importBusy = $state(false);
+
+  async function runImport() {
+    if (!importText.trim()) return;
+    importBusy = true;
+    try {
+      const res = await apiFetch<{ count: number; nodes: any[]; errors?: string[] }>('/import', {
+        method: 'POST', body: JSON.stringify({ text: importText }),
+      });
+      if (!res.count) { showToast('Nothing recognized to import', 'error'); return; }
+      let ok = 0;
+      for (const node of res.nodes) {
+        try { await apiFetch('/admin/inbounds', { method: 'POST', body: JSON.stringify(node) }); ok++; } catch (_) {}
+      }
+      showToast(`Imported ${ok}/${res.count} as inbounds`, ok ? 'success' : 'error');
+      importText = ''; importing = false; load();
+    } catch (e: any) {
+      showToast(e.message || 'import failed', 'error');
+    } finally {
+      importBusy = false;
+    }
+  }
+
   async function load() {
     loading = true;
     try {
@@ -97,12 +123,24 @@
 <div class="head">
   <h2>Inbounds</h2>
   <div class="actions">
+    <button class="ghost" data-testid="import-toggle" onclick={() => importing = !importing}>Import</button>
     <button class="ghost" data-testid="quick-reality" onclick={quickReality}>One-click REALITY</button>
     <button class="primary" data-testid="create-inbound" onclick={() => creating = !creating}>
       {creating ? 'Close' : '+ Create Inbound'}
     </button>
   </div>
 </div>
+
+{#if importing}
+  <div class="card" data-testid="import-panel">
+    <h3>Paste anything — links, a subscription, base64, or JSON</h3>
+    <textarea data-testid="import-text" bind:value={importText} rows="4"
+      placeholder="vless://…&#10;vmess://…&#10;https://host/sub/token&#10;(base64 or clash/sing-box JSON)"></textarea>
+    <button class="primary" data-testid="import-run" onclick={runImport} disabled={importBusy}>
+      {importBusy ? 'Importing…' : 'Parse & create inbounds'}
+    </button>
+  </div>
+{/if}
 
 {#if creating}
   <div class="card creator" data-testid="inbound-creator">
@@ -193,6 +231,7 @@
   .muted { color: rgba(255,255,255,0.45); }
   .cfg { display: flex; flex-direction: column; gap: 10px; }
   .cfg .lbl { font-size: 12px; color: rgba(255,255,255,0.6); }
+  textarea { width: 100%; box-sizing: border-box; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-bottom: 10px; }
   .uri-row { display: flex; gap: 8px; align-items: center; }
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
