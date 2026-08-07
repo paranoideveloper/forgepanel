@@ -148,7 +148,9 @@ func TestAPI_InboundAndAssignmentsFlow(t *testing.T) {
 		"flow":     "xtls-rprx-vision",
 	}
 	upBody, _ := json.Marshal(updateInboundReq)
-	upReq := httptest.NewRequest("PUT", "/api/admin/inbounds/"+strconv.FormatUint(uint64(inResp.ID), 10), bytes.NewReader(upBody))
+	// The port changes (443 → 8443), which the safe-edit guard (BUG-4) treats as
+	// a breaking change; confirm it explicitly.
+	upReq := httptest.NewRequest("PUT", "/api/admin/inbounds/"+strconv.FormatUint(uint64(inResp.ID), 10)+"?confirm=true", bytes.NewReader(upBody))
 	upReq.Header.Set("Content-Type", "application/json")
 	upReq.Header.Set("Authorization", "Bearer "+token)
 	upW := httptest.NewRecorder()
