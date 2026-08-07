@@ -39,6 +39,8 @@ func main() {
 	switch os.Args[1] {
 	case "provision":
 		err = cmdProvision(os.Args[2:])
+	case "edge":
+		err = cmdEdge(os.Args[2:])
 	case "keygen":
 		err = cmdKeygen(os.Args[2:])
 	case "convert":
@@ -90,7 +92,10 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "forgectl:", err)
-		os.Exit(1)
+		printRemediation(os.Stderr, err)
+		// Most commands are pass/fail; `edge` classifies its failures (auth,
+		// name taken, not found, feed rejected) so a script can tell them apart.
+		os.Exit(exitCodeFor(err))
 	}
 }
 
@@ -115,6 +120,7 @@ Usage:
   forgectl keygen <reality|uuid|shortid|ss2022|wireguard|ssh|password|mldsa65> [method]
   forgectl convert <link> <uri|xray|singbox|clash>
   forgectl render <link> <xray|singbox>
+  forgectl edge <deploy|update|delete|status|push|rotate-path|token-url> [flags]
   forgectl healthcheck [port|url]   probe the running panel (container HEALTHCHECK)
   forgectl version
 
