@@ -1,3 +1,12 @@
+# ForgePanel v1.5.3 — Release Notes
+
+Adds **bulk inbound operations** (multi-select → enable/disable/delete) on top of
+v1.5.2, and ships the full set of install artifacts (static binaries + `.deb` /
+`.rpm` packages + `install.sh`). Verified: 9/9 Playwright tests against the built,
+embedded binary; every protocol carries real traffic from an external client.
+
+---
+
 # ForgePanel v1.5.2 — Release Notes
 
 The 1.5 line rebuilt the browser experience and fixed the things that stopped a
