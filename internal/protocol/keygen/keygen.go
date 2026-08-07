@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/curve25519"
@@ -53,7 +54,7 @@ type RealityKeyPair struct {
 // clamped per RFC 7748 before the public key is derived, matching `xray x25519`.
 func RealityKeys() (RealityKeyPair, error) {
 	var priv [32]byte
-	if _, err := rand.Read(priv[:]); err != nil {
+	if _, err := io.ReadFull(rand.Reader, priv[:]); err != nil {
 		return RealityKeyPair{}, err
 	}
 	// RFC 7748 clamping.
@@ -91,7 +92,7 @@ func ShortID(nBytes int) (string, error) {
 		return "", fmt.Errorf("shortId length must be 1..8 bytes, got %d", nBytes)
 	}
 	b := make([]byte, nBytes)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
@@ -106,7 +107,7 @@ func SS2022PSK(method string) (string, error) {
 		return "", fmt.Errorf("method %q is not a 2022-blake3 method; use a passphrase", method)
 	}
 	b := make([]byte, size)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
@@ -118,7 +119,7 @@ func Password(nBytes int) (string, error) {
 		nBytes = 16
 	}
 	b := make([]byte, nBytes)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
@@ -133,7 +134,7 @@ type WireGuardKeyPair struct {
 // WireGuardKeys generates a WireGuard keypair with the standard clamping.
 func WireGuardKeys() (WireGuardKeyPair, error) {
 	var priv [32]byte
-	if _, err := rand.Read(priv[:]); err != nil {
+	if _, err := io.ReadFull(rand.Reader, priv[:]); err != nil {
 		return WireGuardKeyPair{}, err
 	}
 	priv[0] &= 248
@@ -184,7 +185,7 @@ func SSHKeys() (SSHKeyPair, error) {
 // engine derive the rest keeps us interoperable with the exact upstream KAT.
 func MLDSA65Seed() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
