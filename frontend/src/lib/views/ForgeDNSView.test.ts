@@ -2,144 +2,93 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import ForgeDNSView from './ForgeDNSView.svelte';
 
+// These mocks mirror the REAL backend contract (verified against the Go handlers):
+//   /adapters → [{id,name,description}]   /zones → [{id,zone,adapter,enabled,...}]
+//   POST /zones expects {zone,adapter} and returns the created zone
+//   /zones/:id/bundle → {zone,ns_records:[{type,name,value}],client_config_toml,...}
+const ADAPTERS = [{ id: 'cottendns', name: 'CottenDNS (A)', description: 'A-record downstream.' }];
+const BUNDLE = {
+  zone: 'new.example.com', adapter: 'cottendns', ns_host: 'ns.new.example.com',
+  ns_records: [{ type: 'A', name: 'ns.new.example.com', value: '203.0.113.10' }, { type: 'NS', name: 'new.example.com', value: 'ns.new.example.com' }],
+  cloudflare_warning: 'Disable the orange cloud.', client_config_toml: 'server = "new.example.com"\nkey = "secret"', socks5: '127.0.0.1:1080', steps: ['Delegate NS', 'Run client']
+};
+
 describe('ForgeDNSView Component', () => {
   beforeEach(() => {
     (globalThis as any).confirm = () => true;
-    (globalThis as any).navigator = {
-      clipboard: {
-        writeText: async () => {}
-      }
-    };
+    (globalThis as any).navigator = { clipboard: { writeText: async () => {} } };
   });
 
-  it('loads DNS adapters and zone list', async () => {
+  it('loads DNS adapters and zone list using the real fields (zone/enabled)', async () => {
     (globalThis as any).fetch = async (url: string) => {
-      if (url.includes('/adapters')) {
-        return {
-          ok: true,
-          json: async () => [{ id: 'miekg', name: 'Miekg DNS' }]
-        } as Response;
-      }
-      if (url.includes('/zones')) {
-        return {
-          ok: true,
-          json: async () => [
-            { id: 1, domain: 't.example.com', adapter: 'miekg', active: false, sessions: 0 }
-          ]
-        } as Response;
-      }
-      return { ok: true, json: async () => ([]) } as Response;
+      if (url.includes('/adapters')) return { ok: true, json: async () => ADAPTERS } as Response;
+      if (url.includes('/zones')) return { ok: true, json: async () => [{ id: 1, zone: 't.example.com', adapter: 'cottendns', enabled: false, bind_host: '0.0.0.0', bind_port: 53 }] } as Response;
+      return { ok: true, json: async () => [] } as Response;
     };
-
     render(ForgeDNSView);
-
     expect(await screen.findByText('t.example.com')).toBeTruthy();
-    expect(screen.getByText('miekg')).toBeTruthy();
+    expect(screen.getByText('cottendns')).toBeTruthy();
     expect(screen.getByText('Stopped')).toBeTruthy();
+    // The adapter dropdown has a real, non-empty label (regression for the blank dropdown).
+    expect(screen.getByRole('option', { name: 'CottenDNS (A)' })).toBeTruthy();
   });
 
   it('validates tunnel creation input', async () => {
+    (globalThis as any).fetch = async () => ({ ok: true, json: async () => [] } as Response);
     render(ForgeDNSView);
     const createBtn = screen.getByText('Create & Activate');
     await fireEvent.click(createBtn);
     expect(await screen.findByText('Tunnel domain is required')).toBeTruthy();
   });
 
-  it('creates zone, views setup details, copies URI, and deletes selected zone', async () => {
-    let deleteCalled = false;
-    let copyCalled = false;
+  it('creates a zone (sends {zone,adapter}), shows the delegation bundle, copies config, deletes', async () => {
+    let postBody: any = null; let deleteCalled = false; let copyCalled = false;
     (globalThis as any).navigator.clipboard.writeText = async () => { copyCalled = true; };
     (globalThis as any).fetch = async (url: string, opts?: any) => {
-      if (opts?.method === 'POST') {
-        return {
-          ok: true,
-          json: async () => ({
-            id: 1,
-            domain: 'new.example.com',
-            adapter: 'miekg',
-            active: true,
-            ns_records: [{ host: 'ns1', target: '2.2.2.2' }],
-            client_uri: 'dns://new.example.com'
-          })
-        } as Response;
-      }
-      if (opts?.method === 'DELETE') {
-        deleteCalled = true;
-        return { ok: true, json: async () => ({ deleted: 1 }) } as Response;
-      }
-      return {
-        ok: true,
-        json: async () => [
-          {
-            id: 1,
-            domain: 't.example.com',
-            adapter: 'miekg',
-            active: true,
-            ns_records: [{ host: 'ns1', target: '1.1.1.1' }],
-            client_uri: 'dns://t.example.com'
-          }
-        ]
-      } as Response;
+      if (opts?.method === 'POST') { postBody = JSON.parse(opts.body); return { ok: true, json: async () => ({ id: 1, zone: 'new.example.com', adapter: 'cottendns', enabled: true }) } as Response; }
+      if (opts?.method === 'DELETE') { deleteCalled = true; return { ok: true, json: async () => ({ deleted: 1 }) } as Response; }
+      if (url.includes('/bundle')) return { ok: true, json: async () => BUNDLE } as Response;
+      if (url.includes('/adapters')) return { ok: true, json: async () => ADAPTERS } as Response;
+      return { ok: true, json: async () => [{ id: 1, zone: 't.example.com', adapter: 'cottendns', enabled: true }] } as Response;
     };
-
     render(ForgeDNSView);
 
-    const domainInput = screen.getByPlaceholderText('Tunnel domain (e.g. dns.example.com)');
-    await fireEvent.input(domainInput, { target: { value: 'new.example.com' } });
+    await fireEvent.input(screen.getByPlaceholderText('Tunnel domain (e.g. dns.example.com)'), { target: { value: 'new.example.com' } });
+    await fireEvent.click(screen.getByText('Create & Activate'));
 
-    const createBtn = screen.getByText('Create & Activate');
-    await fireEvent.click(createBtn);
+    // POSITIVE: the create request used the backend's field name.
+    expect(await screen.findByTestId('setup-panel')).toBeTruthy();
+    expect(postBody).toEqual({ zone: 'new.example.com', adapter: 'cottendns' });
+    // POSITIVE: real delegation records rendered from the bundle (async load).
+    expect(await screen.findByText('203.0.113.10')).toBeTruthy();
 
-    const setupBtn = await screen.findByText('Setup Info');
-    await fireEvent.click(setupBtn);
-
-    expect(screen.getByText('Delegation & Setup — t.example.com')).toBeTruthy();
-
-    const copyBtn = screen.getByText('Copy URI');
-    await fireEvent.click(copyBtn);
+    await fireEvent.click(await screen.findByTestId('copy-config'));
     expect(copyCalled).toBe(true);
 
-    const deleteBtn = screen.getByText('Delete');
-    await fireEvent.click(deleteBtn);
+    await fireEvent.click(screen.getAllByText('Delete')[0]);
     expect(deleteCalled).toBe(true);
   });
 
-  it('handles delete zone confirmation cancel and errors', async () => {
+  it('handles delete confirmation cancel', async () => {
     let deleteCalled = false;
     (globalThis as any).confirm = () => false;
     (globalThis as any).fetch = async (url: string, opts?: any) => {
       if (opts?.method === 'DELETE') deleteCalled = true;
-      if (url.includes('/zones')) {
-        return {
-          ok: true,
-          json: async () => [
-            { id: 1, domain: 't.example.com', adapter: 'miekg', active: true }
-          ]
-        } as Response;
-      }
-      return { ok: true, json: async () => ([]) } as Response;
+      if (url.includes('/adapters')) return { ok: true, json: async () => ADAPTERS } as Response;
+      if (url.includes('/zones')) return { ok: true, json: async () => [{ id: 1, zone: 't.example.com', adapter: 'cottendns', enabled: true }] } as Response;
+      return { ok: true, json: async () => [] } as Response;
     };
-
     render(ForgeDNSView);
-
-    const deleteBtn = await screen.findByText('Delete');
-    await fireEvent.click(deleteBtn);
+    await fireEvent.click(await screen.findByText('Delete'));
     expect(deleteCalled).toBe(false);
   });
 
-  it('handles error paths in loadData, createZone, deleteZone, copyClientUri', async () => {
+  it('handles error paths in loadData / createZone', async () => {
     (globalThis as any).confirm = () => true;
-    (globalThis as any).navigator.clipboard.writeText = async () => { throw new Error('Copy Failed'); };
     (globalThis as any).fetch = async () => { throw new Error('DNS Failure'); };
-
     render(ForgeDNSView);
-
-    const domainInput = screen.getByPlaceholderText('Tunnel domain (e.g. dns.example.com)');
-    await fireEvent.input(domainInput, { target: { value: 'err.example.com' } });
-
-    const createBtn = screen.getByText('Create & Activate');
-    await fireEvent.click(createBtn);
-
+    await fireEvent.input(screen.getByPlaceholderText('Tunnel domain (e.g. dns.example.com)'), { target: { value: 'err.example.com' } });
+    await fireEvent.click(screen.getByText('Create & Activate'));
     expect(await screen.findByText('DNS Failure')).toBeTruthy();
   });
 });

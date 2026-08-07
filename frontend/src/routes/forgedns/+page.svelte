@@ -1,21 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { apiFetch, setAuthToken, getAuthToken } from '$lib/api';
-  import type { DNSZone, DNSAdapter } from '$lib/types';
+  import ForgeDNSView from '$lib/views/ForgeDNSView.svelte';
 
   let token = $state(getAuthToken());
   let username = $state('admin');
   let password = $state('');
   let loginErr = $state('');
-
-  let adapters = $state<DNSAdapter[]>([]);
-  let zones = $state<DNSZone[]>([]);
-  let selectedZone = $state<DNSZone | null>(null);
-
-  let newDomain = $state('');
-  let selectedAdapter = $state('');
-  let createErr = $state('');
-  let copyMsg = $state('');
 
   async function handleLogin(e?: Event) {
     if (e) e.preventDefault();
@@ -27,76 +17,15 @@
       });
       token = res.access_token;
       setAuthToken(token);
-      await loadData();
     } catch (err: any) {
       loginErr = err.message || 'Login failed';
     }
   }
 
-  async function loadData() {
-    try {
-      adapters = await apiFetch<DNSAdapter[]>('/admin/forgedns/adapters');
-      if (adapters.length > 0 && !selectedAdapter) {
-        selectedAdapter = adapters[0].id;
-      }
-      zones = await apiFetch<DNSZone[]>('/admin/forgedns/zones');
-    } catch (err: any) {
-      if (err.status === 401) {
-        token = '';
-        setAuthToken('');
-      }
-    }
+  function signOut() {
+    token = '';
+    setAuthToken('');
   }
-
-  async function createZone() {
-    createErr = '';
-    if (!newDomain.trim()) {
-      createErr = 'Domain is required';
-      return;
-    }
-    try {
-      const newZone = await apiFetch<DNSZone>('/admin/forgedns/zones', {
-        method: 'POST',
-        body: JSON.stringify({ domain: newDomain.trim(), adapter: selectedAdapter })
-      });
-      newDomain = '';
-      selectedZone = newZone;
-      await loadData();
-    } catch (err: any) {
-      createErr = err.message || 'Failed to create zone';
-    }
-  }
-
-  async function deleteZone(id: number) {
-    if (!confirm('Are you sure you want to delete this DNS tunnel zone?')) return;
-    try {
-      await apiFetch(`/admin/forgedns/zones/${id}`, { method: 'DELETE' });
-      if (selectedZone?.id === id) selectedZone = null;
-      await loadData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete zone');
-    }
-  }
-
-  function selectZone(zone: DNSZone) {
-    selectedZone = zone;
-  }
-
-  async function copyUri(uri: string) {
-    try {
-      await navigator.clipboard.writeText(uri);
-      copyMsg = 'Copied!';
-      setTimeout(() => (copyMsg = ''), 2000);
-    } catch (_) {
-      copyMsg = 'Copy failed';
-    }
-  }
-
-  onMount(() => {
-    if (token) {
-      loadData();
-    }
-  });
 </script>
 
 <svelte:head>
@@ -106,6 +35,7 @@
 <header>
   <div class="dot {token ? 'on' : ''}"></div>
   <h1>ForgePanel — DNS Tunnels</h1>
+  {#if token}<button class="ghost signout" onclick={signOut}>Sign out</button>{/if}
 </header>
 
 <main>
@@ -126,92 +56,9 @@
       {/if}
     </div>
   {:else}
-    <div class="card">
-      <h2>Create a DNS tunnel — no terminal needed</h2>
-      <div class="row">
-        <input type="text" bind:value={newDomain} placeholder="tunnel domain, e.g. t.example.com" style="flex:1;min-width:220px" />
-        <select bind:value={selectedAdapter}>
-          {#each adapters as ad}
-            <option value={ad.id}>{ad.name}</option>
-          {/each}
-        </select>
-        <button onclick={createZone}>Create &amp; activate</button>
-      </div>
-      <div class="muted" style="margin-top:8px;font-size:13px">
-        Pick a wire format, enter your delegated domain, and click. The panel starts the authoritative DNS listener for you.
-      </div>
-      {#if createErr}
-        <div class="err">{createErr}</div>
-      {/if}
-    </div>
-
-    <div class="card">
-      <h2>Tunnel zones</h2>
-      {#if zones.length === 0}
-        <p class="muted">No tunnel zones configured yet.</p>
-      {:else}
-        <table>
-          <thead>
-            <tr>
-              <th>Zone</th>
-              <th>Adapter</th>
-              <th>Status</th>
-              <th>Sessions</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each zones as z}
-              <tr>
-                <td><strong>{z.domain}</strong></td>
-                <td><code>{z.adapter}</code></td>
-                <td>
-                  <span class="pill {z.active ? 'on' : 'off'}">
-                    {z.active ? 'Active' : 'Stopped'}
-                  </span>
-                </td>
-                <td>{z.sessions || 0}</td>
-                <td>
-                  <button class="ghost" onclick={() => selectZone(z)}>Setup</button>
-                  <button class="ghost danger" onclick={() => deleteZone(z.id)}>Delete</button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    </div>
-
-    {#if selectedZone}
-      <div class="card">
-        <h2>Setup — {selectedZone.domain}</h2>
-        <p class="muted" style="font-size:13px">
-          Add these DNS records at your registrar to delegate the zone to this server, then import the client URI.
-        </p>
-        {#if selectedZone.ns_records && selectedZone.ns_records.length > 0}
-          <table>
-            <thead>
-              <tr><th>Host</th><th>Target</th></tr>
-            </thead>
-            <tbody>
-              {#each selectedZone.ns_records as ns}
-                <tr>
-                  <td><code>{ns.host}</code></td>
-                  <td><code>{ns.target}</code></td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-        {#if selectedZone.client_uri}
-          <p style="margin-top:14px">
-            Client URI: <code>{selectedZone.client_uri}</code>
-            <button class="ghost" onclick={() => copyUri(selectedZone!.client_uri)}>Copy</button>
-            {#if copyMsg}<span class="copy-hint">{copyMsg}</span>{/if}
-          </p>
-        {/if}
-      </div>
-    {/if}
+    <!-- Reuse the shared, tested zone-management UI so this standalone entry and
+         the admin panel can never drift apart again. -->
+    <ForgeDNSView />
   {/if}
 </main>
 
@@ -254,6 +101,9 @@
   header .dot.on {
     background: var(--ok);
   }
+  header .signout {
+    margin-left: auto;
+  }
   main {
     max-width: 980px;
     margin: 0 auto;
@@ -273,7 +123,7 @@
     text-transform: uppercase;
     letter-spacing: .06em;
   }
-  input, select, button {
+  input, button {
     font: inherit;
     border-radius: 9px;
     border: 1px solid var(--line);
@@ -292,9 +142,6 @@
     background: #1A2230;
     color: var(--text);
   }
-  button.danger {
-    color: var(--bad);
-  }
   button:hover {
     filter: brightness(1.08);
   }
@@ -304,52 +151,9 @@
     flex-wrap: wrap;
     align-items: center;
   }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th, td {
-    text-align: left;
-    padding: 10px 8px;
-    border-bottom: 1px solid var(--line);
-    font-size: 14px;
-  }
-  th {
-    color: var(--muted);
-    font-weight: 600;
-  }
-  code {
-    background: #0e1420;
-    padding: 2px 6px;
-    border-radius: 6px;
-    font-size: 13px;
-  }
-  .pill {
-    display: inline-block;
-    padding: 2px 9px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .pill.on {
-    background: rgba(51, 196, 129, .16);
-    color: var(--ok);
-  }
-  .pill.off {
-    background: rgba(255, 92, 108, .16);
-    color: var(--bad);
-  }
   .err {
     color: var(--bad);
     margin-top: 10px;
     font-size: 13px;
-  }
-  .muted {
-    color: var(--muted);
-  }
-  .copy-hint {
-    margin-left: 8px;
-    font-size: 12px;
-    color: var(--ok);
   }
 </style>

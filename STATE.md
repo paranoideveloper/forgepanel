@@ -3,6 +3,22 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.5.5 — ForgeDNS page "shows nothing" (forgedns-ux)
+
+The DNS Tunnels page had a blank adapter dropdown and zone creation silently
+failed — all Go↔TS contract drift: `/forgedns/adapters` returned `[]string` (UI
+wanted `{id,name}`), the dropdown listed native codecs that can't build a bundle,
+and the view POSTed `domain`/read `domain`/`active` while the API uses
+`zone`/`enabled` + a separate `/bundle` endpoint. Fixed the adapters endpoint to
+return the upstream (bundle-capable) family as objects; rewired the view to the
+real contract and to fetch the delegation bundle (A/NS records, Cloudflare
+warning, SOCKS5, client_config.toml, steps); deduped the standalone `/forgedns`
+page into a wrapper over the shared component; bundle A-record defaults to the
+server IP. Verified end-to-end against the built binary (create a real
+cottendns zone → delegation records + client config), screenshot in
+`e2e/test-results/forgedns.png`; new `e2e/tests/forgedns.spec.ts` + rewritten
+component test.
+
 ## v1.5.4 — Certificates & Panel Domain page (cert-ux)
 
 A user configured `c.xonyon.dpdns.org` and the page reported "DNS failed to

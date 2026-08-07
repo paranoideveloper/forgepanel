@@ -105,10 +105,37 @@ func upstreamConfig(z *store.ForgeDNSZone) upstream.ZoneConfig {
 	}
 }
 
+// adapterInfo gives the zone-creation dropdown a friendly label + one-line help
+// for each selectable adapter. Keyed by the upstream adapter id.
+var adapterInfo = map[string]struct{ Name, Description string }{
+	"cottendns": {"CottenDNS", "WhiteDNS CottenDNS — most active upstream; A/TXT downstream with listener toggles."},
+	"stormdns":  {"StormDNS", "nullroute1970 StormDNS — TXT-record downstream."},
+	"masterdns": {"MasterDNS", "masterking32 MasterDnsVPN — CNAME-record downstream."},
+}
+
 // handleForgeDNSAdapters lists the selectable wire-format adapters for the UI
-// dropdown (spec §5): the operator picks one when creating a zone.
+// dropdown (spec §5): the operator picks one when creating a zone. Returns the
+// UPSTREAM (real-binary) adapters — the ones that produce a delegation bundle
+// and client config — as {id,name,description} objects. It must return objects,
+// not a bare []string, or the frontend's a.id/a.name are undefined and every
+// <option> renders blank; and it must be the upstream family, or a created zone
+// cannot build a bundle (upstream.Lookup would reject a native-only name).
 func (s *Server) handleForgeDNSAdapters(c *gin.Context) {
-	c.JSON(200, adapter.Names())
+	descs := upstream.Descriptors() // recommended-first: cottendns, stormdns, masterdns
+	out := make([]gin.H, 0, len(descs))
+	for _, d := range descs {
+		info := adapterInfo[d.Adapter]
+		name := info.Name
+		if name == "" {
+			name = d.Adapter
+		}
+		desc := info.Description
+		if desc == "" {
+			desc = d.Repo
+		}
+		out = append(out, gin.H{"id": d.Adapter, "name": name, "description": desc})
+	}
+	c.JSON(200, out)
 }
 
 // handleForgeDNSUpstreamAdapters describes the real-binary adapters and the
@@ -418,7 +445,14 @@ func (s *Server) handleForgeDNSBundle(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "zone not found"})
 		return
 	}
-	b, err := s.buildBundle(z, c.Query("ip"), c.Query("resolvers"))
+	// Default the delegation A-record target to this server's public IP when the
+	// caller didn't pin one, so the NS records the UI shows are usable as-is
+	// instead of pointing at an empty address.
+	ip := strings.TrimSpace(c.Query("ip"))
+	if ip == "" {
+		ip = detectServerIP()
+	}
+	b, err := s.buildBundle(z, ip, c.Query("resolvers"))
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

@@ -31,12 +31,29 @@ export interface Node {
 
 export interface DNSZone {
   id: number;
-  domain: string;
+  zone: string;
   adapter: string;
-  active: boolean;
-  sessions: number;
-  ns_records: Array<{ host: string; target: string }>;
-  client_uri: string;
+  enabled: boolean;
+  ns_host?: string;
+  domains?: string;
+  bind_host?: string;
+  bind_port?: number;
+  mode?: string;
+}
+
+// Client bundle returned by /forgedns/zones/:id/bundle — the delegation records
+// to paste at the registrar plus the ready-to-use client config file.
+export interface DNSBundle {
+  zone: string;
+  adapter: string;
+  ns_host: string;
+  ns_records: Array<{ type: string; name: string; value: string; note?: string }>;
+  cloudflare_warning?: string;
+  client_config_toml: string;
+  client_resolvers_txt?: string;
+  socks5?: string;
+  steps?: string[];
+  releases_page?: string;
 }
 
 export interface DNSAdapter {

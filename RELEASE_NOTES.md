@@ -1,3 +1,33 @@
+# ForgePanel v1.5.5 — Release Notes
+
+Fixes the **ForgeDNS — DNS Tunnels** page, which "showed nothing": the wire-format
+adapter dropdown was blank and creating a zone silently failed. Root causes were
+Go↔TypeScript contract drift, verified end-to-end against the built, embedded
+binary (screenshot in `e2e/test-results/forgedns.png`).
+
+## Fixes
+
+- **Blank adapter dropdown.** `/forgedns/adapters` returned a bare `[]string`, but
+  the UI renders `{id,name}` objects — so every `<option>` had an empty value and
+  label. It now returns the **upstream (bundle-capable) adapters** (CottenDNS,
+  StormDNS, MasterDNS) as `{id,name,description}`.
+- **Adapter family mismatch.** The dropdown offered native codec names (e.g.
+  `forge`) that can't produce a delegation bundle, so "Setup Info" came up empty.
+  The dropdown now lists exactly the adapters that yield a working bundle.
+- **Zone creation silently failed.** The form POSTed `{domain,…}` but the API keys
+  a zone on `{zone,…}`; the view also read `domain`/`active` while the API returns
+  `zone`/`enabled`. Aligned the view (and its standalone `/forgedns` twin, now a
+  thin wrapper over the shared component) to the real contract.
+- **Setup panel wired to the real bundle.** "Setup Info" now fetches
+  `/forgedns/zones/:id/bundle` and shows the delegation A/NS records, the
+  Cloudflare grey-cloud warning, the client SOCKS5, the full `client_config.toml`
+  (with copy), and step-by-step delegation instructions. The bundle's A-record now
+  defaults to the server's public IP when no `?ip=` is given.
+- Empty-state text and a responsive create row (no more overlapping controls on
+  mobile).
+
+---
+
 # ForgePanel v1.5.4 — Release Notes
 
 Fixes the **Certificates & Panel Domain** page so automatic Let's Encrypt TLS is
