@@ -33,7 +33,7 @@ func TestLooksLikeKey(t *testing.T) {
 		"ABCDEF0123456789ABCDEF0123456789",
 	}
 	bad := []string{
-		"", "short", "0123456789abcde",           // too short (<16)
+		"", "short", "0123456789abcde", // too short (<16)
 		"065b883074970af6bee6a192eb0e3dg6",        // non-hex char 'g'
 		"065b8830 74970af6bee6a192eb0e3df6",       // space (partial write)
 		"065b883074970af6bee6a192eb0e3df6\ntrail", // embedded newline/garbage
