@@ -328,7 +328,13 @@ func (m *Manager) advance(s *Session, f codec.Frame, ackSeq uint16, hasAck bool)
 			m.counters.StaleUpstream++
 		case s.reorder[f.Seq] != nil:
 			m.counters.StaleUpstream++
-		case len(s.reorder) >= m.opts.MaxReorderFrames:
+		case len(s.reorder) >= m.opts.MaxReorderFrames && f.Seq != s.nextSeqIn:
+			// The reorder buffer is full: refuse further OUT-OF-ORDER frames so it
+			// cannot grow without bound. The in-order head (f.Seq == nextSeqIn) is
+			// the one exception — it drains immediately in the loop below and can
+			// only shrink the buffer, never grow it. Rejecting it here would
+			// permanently stall the stream on its own missing head once the buffer
+			// filled with the frames waiting behind it.
 			m.counters.InvalidSequence++
 		default:
 			s.UpBytes += int64(len(f.Payload))
