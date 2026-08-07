@@ -50,6 +50,11 @@
 - **ForgeDNS reassembly no longer deadlocks**: a full reorder buffer used to
   reject the in-order head frame that would have drained it, stalling the session
   permanently on its own missing head. The head is now always accepted.
+- **Live Verify works on a clean install**: the §3 diagnostic looked for sing-box
+  on `$PATH`, but binmgr installs it under `<dataDir>/bin`, so every verification
+  failed with "sing-box binary not available" even though the core was downloaded
+  and serving. It now runs the exact binary the supervisor uses. Found by
+  deploying to a real server and re-proven there (Shadowsocks 2 ms, VMess-WS 3 ms).
 - **CI workflow was invalid YAML**: all seven `Test Suite: …` job names carried an
   unquoted colon, which GitHub rejects for the whole file. Quoted; a real carried
   fix for main (the workflow could never have run as written).
