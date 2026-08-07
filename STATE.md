@@ -25,7 +25,14 @@ then continue at the first unchecked box.
   - [ ] clash-meta as a distinct renderer.
   - [ ] surge / quantumultx / loon line formats.
   - [ ] full protocol×transport×security×format golden matrix + structural validator.
-- [ ] BUG-2 / §4: connectivity harness proves real traffic per protocol; unproven combos flagged `experimental`.
+- [x] BUG-2 / §4: connectivity harness proves real traffic per protocol; unproven combos flagged `experimental`.
+  - `internal/core` `TestFullMatrixConnectivity`: **24/24 protocol inbounds pass real end-to-end traffic** through the actual xray/sing-box cores (only the 4 REALITY variants skipped — steal-handshake cannot complete on loopback, verified on a public IP).
+  - Reconciled the §4 harness teammate's 5 confirmed blockers, each fixed and proven with the real core:
+    - #1 alpine runtime could not exec the glibc sing-box release (exit 127) → `gcompat` (`e96461a`); proven by running pinned sing-box-1.13.15 inside the built image.
+    - #2 xray26 removed `allowInsecure`; self-signed TLS was unverifiable → `applyExportDefaults` pins `pinnedPeerCertSha256=hex(sha256(leaf))` (`b75d404`); proven by a real xray TLS round-trip (HTTP 204).
+    - #3 `fingerprint=chrome` → `utls` on QUIC, which sing-box rejects → no uTLS on QUIC at render+defaults (`6e278ee`); Hy2/TUIC/AnyTLS now PASS on loopback (were skipped).
+    - #4 SS-2022 subscription stamped a base64url user pw as the PSK → keep the inbound PSK in `stampIdentity` (`6e278ee`); proven by `xray run -test`.
+    - #5 sing-box subscription shipped no inbound/route (not runnable) → mixed inbound + route (`4acef9c`); proven by `sing-box check`.
 - [x] BUG-3: Domains section; global + per-inbound + per-node domain; cascade to SNI/host/cert/link/sub; one-click ACME; no-domain REALITY guidance; never show plaintext as secure.
 - [ ] §3: validation & proof engine (3 layers, live Verify, diagnostics catalogue, Panel Doctor).
 - [ ] §5: Cloudflare-first DNS automation wizard (+ 8 providers), clean-IP scanner, `forgectl provision`.
@@ -33,7 +40,7 @@ then continue at the first unchecked box.
 - [ ] §7: `docs/E2E_REPORT.md` with real output for all 13 steps.
 - [ ] `make check` clean; coverage ≥75% overall, ≥90% for protocol + forgedns.
   - `internal/protocol/**` tree aggregate = **99.5%** (`-coverpkg=./internal/protocol/...`): model 100, parse 99.7, render 99.8, export 99.6, keygen 93.3. ✅
-  - `internal/forgedns/**` tree aggregate: raising from 72.0% (adapter 90.6, codec/server/session/upstream in progress). ⏳
+  - `internal/forgedns/**` tree aggregate = **97.1%** (`-coverpkg=./internal/forgedns/...`): adapter 90.6, codec 97.9, server 100, session 99, upstream 96.7. ✅ (fixed a real HOL-block reorder-stall bug found by the coverage tests, `0caed9d`.)
 - [x] Zero TODO/FIXME/"not implemented" outside `third_party/` (grep = 0).
 - [ ] `CHANGELOG.md` + `RELEASE_NOTES.md` updated; tag (next after v1.3.2 — NOT v1.1.0).
 
