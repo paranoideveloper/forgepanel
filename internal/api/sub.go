@@ -265,13 +265,24 @@ func singboxSubscription(nodes []*model.Node) []byte {
 		tags = append(tags, tag)
 		outs = append(outs, o)
 	}
+	final := sbDirectTag
 	if len(tags) > 0 {
 		outs = append(outs, map[string]any{"type": "selector", "tag": sbSelectorTag, "outbounds": append(append([]string{}, tags...), sbDirectTag), "default": tags[0]})
+		final = sbSelectorTag
 	}
 	outs = append(outs, map[string]any{"type": "direct", "tag": sbDirectTag})
+	// A subscription must be runnable as delivered: ship a local mixed
+	// (socks+http) inbound and a route whose final hop is the node selector, so
+	// `sing-box run -c <sub>` actually forwards traffic — matching the xray
+	// format's socks/http inbounds. Without an inbound the config parses but can
+	// carry nothing.
 	doc := map[string]any{
-		"log":       map[string]any{"level": "warn"},
+		"log": map[string]any{"level": "warn"},
+		"inbounds": []any{
+			map[string]any{"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 10808},
+		},
 		"outbounds": outs,
+		"route":     map[string]any{"final": final},
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return b

@@ -1,4 +1,12 @@
 {
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "listen_port": 10808,
+      "tag": "in",
+      "type": "mixed"
+    }
+  ],
   "log": {
     "level": "warn"
   },
@@ -76,5 +84,8 @@
       "tag": "direct",
       "type": "direct"
     }
-  ]
+  ],
+  "route": {
+    "final": "proxy"
+  }
 }
