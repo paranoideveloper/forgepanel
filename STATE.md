@@ -35,6 +35,31 @@ then continue at the first unchecked box.
 - [ ] Zero TODO/FIXME outside `third_party/`.
 - [ ] `CHANGELOG.md` + `RELEASE_NOTES.md` updated; tag (next after v1.3.2 — NOT v1.1.0).
 
+
+## CI status (branch — all jobs reproduced locally with CI's exact commands)
+
+Root failures on `main` were **govulncheck** and **shellcheck**; both fixed here.
+
+| CI job | local result |
+|--------|--------------|
+| code-hygiene: gofmt / tidy / vet / staticcheck / shellcheck / goreleaser check | PASS |
+| govulncheck ./... | PASS (was FAIL exit 3) |
+| all 7 Go test suites (`-shuffle=on -count=1`) | PASS |
+| race-detector subset | PASS |
+| e2e-smoke (`make build` + forgectl version) | PASS |
+| cross-compile linux/{amd64,arm64,386} | PASS |
+| frontend svelte suite (`bun run check` + `bun run test --coverage`, 37 tests, 90.9%) | PASS |
+| docker-build | PASS |
+
+Live CI cannot be triggered from the branch (workflow only runs on main/PRs; token
+lacks `workflow` scope to add a dispatch trigger). Proven by local reproduction;
+recorded in docs/E2E_REPORT.md.
+
+## Carried fixes for main
+- `2318d00` govulncheck: x/net v0.56.0, x/text v0.39.0, go directive -> 1.25.12.
+- `2e5e06e` shellcheck: install.sh SC2155/SC2015.
+These heal main's red CI when the branch is merged.
+
 ## Log
 
 - `b983885` fix(sub): sing-box duplicate "proxy" tag — reserved selector/direct tags. Proven by real core.

@@ -30,3 +30,14 @@ Shadowrocket imports the base64 link list verbatim, so it is an alias of
 emitter (clash-meta beyond classic clash, and the proprietary surge/quantumultx/
 loon line formats) are **deferred and tracked in STATE.md rather than shipped as
 a fake alias**, per the prompt's no-stub rule.
+
+## ADR-0005 — CI proven by local reproduction; live run gated on token scope
+CI (`.github/workflows/ci.yml`) triggers only on push to `main` and PRs to
+`main`. The round-2 mandate is: no pushes to main, no PRs. The provided token
+also lacks the `workflow` scope, so a `workflow_dispatch` trigger cannot be
+added to run CI on the branch either. **Decision:** every CI job is reproduced
+locally with CI's exact commands and recorded in `docs/E2E_REPORT.md`; the two
+real failures (govulncheck, shellcheck) are fixed on the branch. Per the
+round-2 instructions, these are "carried fixes for main" — the branch is cut
+from main, so merging heals main's CI, which will then run live on the merge
+commit.
