@@ -43,7 +43,8 @@ then continue at the first unchecked box.
 - [x] `make check` clean; coverage ≥75% overall, ≥90% for protocol + forgedns.
   - `internal/protocol/**` tree aggregate = **99.5%** (`-coverpkg=./internal/protocol/...`): model 100, parse 99.7, render 99.8, export 99.6, keygen 93.3. ✅
   - `internal/forgedns/**` tree aggregate = **97.1%** (`-coverpkg=./internal/forgedns/...`): adapter 90.6, codec 97.9, server 100, session 99, upstream 96.7. ✅ (fixed a real HOL-block reorder-stall bug found by the coverage tests, `0caed9d`.)
-  - `go test ./... -count=1` = 0 failures; `gofmt`/`go vet`/`staticcheck`/`govulncheck` clean; race subset clean.
+  - **Overall = 76.0%** (`go test ./... -coverprofile`, total statements) ≥ 75%. ✅
+  - `go test ./... -count=1` = 0 failures; `gofmt`/`go vet`/`staticcheck` (v0.7.0)/`govulncheck` clean; race subset clean.
 - [x] Zero TODO/FIXME/"not implemented" outside `third_party/` (grep = 0).
 - [x] `CHANGELOG.md` + `RELEASE_NOTES.md` updated; tagged `v1.4.0` (next after v1.3.2).
 
