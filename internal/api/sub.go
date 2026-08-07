@@ -263,6 +263,22 @@ func singboxSubscription(nodes []*model.Node) []byte {
 		}
 		o["tag"] = tag
 		tags = append(tags, tag)
+		if n.Protocol == model.ProtoShadowTLS && n.ShadowTLS != nil {
+			// ShadowTLS is pure TLS camouflage: on its own it carries no proxy
+			// bytes. The sing-box client needs a two-outbound chain — an inner
+			// Shadowsocks outbound that tunnels THROUGH the shadowtls outbound via
+			// `detour`. Rewrite the rendered shadowtls to be the detour target and
+			// make the Shadowsocks entry the tag the selector points at.
+			stlsTag := tag + "-stls"
+			o["tag"] = stlsTag
+			ss := map[string]any{
+				"type": "shadowsocks", "tag": tag,
+				"method": n.ShadowTLS.InnerMethod, "password": n.ShadowTLS.InnerPassword,
+				"detour": stlsTag,
+			}
+			outs = append(outs, ss, o)
+			continue
+		}
 		outs = append(outs, o)
 	}
 	final := sbDirectTag
