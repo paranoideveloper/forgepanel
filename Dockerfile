@@ -16,7 +16,7 @@ WORKDIR /src
 # module cache layer.
 COPY go.mod go.sum ./
 RUN go mod download
-RUN apk add --no-cache bash curl unzip && curl -fsSL https://bun.sh/install | bash
+RUN apk add --no-cache bash curl libgcc libstdc++ unzip && curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 COPY . .
 RUN cd frontend && bun install && bun run build
