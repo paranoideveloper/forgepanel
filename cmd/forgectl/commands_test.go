@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,7 +192,16 @@ func TestCmdSettingsShowAndSet(t *testing.T) {
 		t.Fatalf("cmdSettingsShow failed: %v", err)
 	}
 
-	if err := cmdSettingsSet([]string{"--data", dir, "--panel-port", "8443", "--domain", "panel.local", "--defer-restart"}); err != nil {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate test panel port: %v", err)
+	}
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release test panel port: %v", err)
+	}
+
+	if err := cmdSettingsSet([]string{"--data", dir, "--panel-port", port, "--domain", "panel.local", "--defer-restart"}); err != nil {
 		t.Fatalf("cmdSettingsSet failed: %v", err)
 	}
 }

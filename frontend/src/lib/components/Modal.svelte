@@ -7,12 +7,18 @@
     onClose: () => void;
     children?: any;
   }>();
+
+  function closeFromBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
 </script>
 
 {#if isOpen}
   <div 
     class="modal-backdrop" 
-    onclick={onClose}
+    onclick={closeFromBackdrop}
     onkeydown={(e) => e.key === 'Escape' && onClose()}
     role="button"
     tabindex="0"
@@ -22,9 +28,9 @@
   >
     <div 
       class="modal-dialog" 
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="document"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       tabindex="-1"
       in:scale={{ start: 0.95, duration: 200 }}
       out:scale={{ start: 0.95, duration: 150 }}

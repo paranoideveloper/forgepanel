@@ -4,7 +4,7 @@
 #
 #   docker build -t forgepanel:latest .
 #   docker run -d --name forgepanel -p 2053:2053 \
-#     -v forgepanel-data:/var/lib/forgepanel ghcr.io/paranoideveloper/forgepanel:latest
+#     -v forgepanel-data:/var/lib/forgepanel forgepanel:latest
 #
 # ---- build ------------------------------------------------------------------
 # go.mod requires go 1.25; keep this image at or above that.

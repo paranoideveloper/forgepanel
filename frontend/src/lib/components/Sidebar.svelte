@@ -21,6 +21,12 @@
     onTabChange(tab);
     mobileOpen = false;
   }
+
+  function closeFromBackdrop(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+      mobileOpen = false;
+    }
+  }
 </script>
 
 <!-- Desktop Sidebar -->
@@ -31,7 +37,7 @@
     </div>
     <div class="brand-text">
       <h2>ForgePanel</h2>
-      <span class="version-tag">v1.0 Pro</span>
+      <span class="version-tag">v1.3.0</span>
     </div>
   </div>
 
@@ -60,7 +66,7 @@
 {#if mobileOpen}
   <div 
     class="mobile-backdrop" 
-    onclick={() => mobileOpen = false}
+    onclick={closeFromBackdrop}
     onkeydown={(e) => e.key === 'Escape' && (mobileOpen = false)}
     role="button"
     tabindex="0"
@@ -69,9 +75,9 @@
   >
     <div 
       class="mobile-drawer"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="document"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Navigation menu"
       tabindex="-1"
       in:fly={{ x: -280, duration: 250 }}
       out:fly={{ x: -280, duration: 200 }}

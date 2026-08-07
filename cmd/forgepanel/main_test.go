@@ -1,8 +1,10 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/forgepanel/forgepanel/internal/api"
@@ -13,7 +15,15 @@ func TestForgepanelVersionFlag(t *testing.T) {
 	// Verify data directory locking and release
 	dir := t.TempDir()
 	t.Setenv("FORGEPANEL_DATA", dir)
-	t.Setenv("FORGEPANEL_PANEL_PORT", "0") // Dynamic port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate test panel port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release test panel port: %v", err)
+	}
+	t.Setenv("FORGEPANEL_PANEL_PORT", strconv.Itoa(port))
 
 	cfg, srv, ln, err := start()
 	if err != nil {

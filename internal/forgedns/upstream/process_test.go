@@ -311,7 +311,10 @@ func TestForeignPortHolderIsReportedNotKilled(t *testing.T) {
 // TestRepeatedRapidReloadsDoNotConflict: stop/start cycles in quick succession
 // must never collide on the port.
 func TestRepeatedRapidReloadsDoNotConflict(t *testing.T) {
-	pc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	port := pc.LocalAddr().(*net.UDPAddr).Port
 	pc.Close()
 

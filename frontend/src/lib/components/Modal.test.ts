@@ -33,7 +33,7 @@ describe('Modal Component', () => {
       onClose
     });
 
-    const dialog = screen.getByRole('document');
+    const dialog = screen.getByRole('dialog');
     await fireEvent.click(dialog);
     expect(onClose).not.toHaveBeenCalled();
   });
