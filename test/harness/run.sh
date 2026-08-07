@@ -157,6 +157,7 @@ export HARNESS_ADMIN_PASS="${HARNESS_ADMIN_PASS:-Harness-Probe-9143}"
 rm -f "$RESULTS"/matrix.json "$RESULTS"/matrix.txt
 rm -rf "$RESULTS/logs"; mkdir -p "$RESULTS/logs"
 
+# shellcheck disable=SC2329  # invoked via `trap cleanup EXIT` below, which shellcheck cannot see
 cleanup() {
   if [[ "$KEEP" == "1" ]]; then
     log "stack left running (--keep). Tear down with:"

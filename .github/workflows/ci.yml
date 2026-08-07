@@ -48,10 +48,13 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@latest
           staticcheck ./...
 
-      - name: Shell Installer Linting
+      - name: Shell Script Linting
         uses: ludeeus/action-shellcheck@master
         with:
-          sc-files: 'install.sh'
+          # `sc-files` is not a valid input for this action (it was silently
+          # ignored and produced a warning). The action lints every tracked shell
+          # script by default; third_party clones are gitignored so never present.
+          ignore_paths: third_party node_modules
 
       - name: GoReleaser Config Check
         uses: goreleaser/goreleaser-action@v6
