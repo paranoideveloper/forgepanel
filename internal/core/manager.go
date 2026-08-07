@@ -81,6 +81,15 @@ func reapStrayEngines(binDir string) {
 }
 
 // EnsureBinaries downloads+verifies whichever cores the given inbounds require.
+// SingboxBinary resolves — downloading and verifying if necessary — the exact
+// sing-box binary this supervisor runs, under <dataDir>/bin. Callers such as the
+// §3 live-Verify diagnostic use it so they exercise the same core the panel
+// serves with, instead of hoping one happens to be on $PATH (it is not, on a
+// clean install where binmgr fetched the core into its own cache).
+func (c *Controller) SingboxBinary() (string, error) {
+	return c.bins.Ensure(binmgr.EngineSingbox)
+}
+
 func (c *Controller) EnsureBinaries(nodes []*model.Node) error {
 	needXray, needSB, needBrook := false, false, false
 	for _, n := range nodes {

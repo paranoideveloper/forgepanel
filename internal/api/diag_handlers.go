@@ -55,7 +55,17 @@ func (s *Server) handleVerifyInbound(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	res := diag.VerifySingbox(ctx, n, diag.Cores{})
+	// Run the verification with the exact sing-box the supervisor uses. binmgr
+	// installs it under <dataDir>/bin, which is not on $PATH, so without this the
+	// diagnostic falls back to a $PATH lookup that fails on every clean install
+	// and reports "sing-box binary not available" even though the core is present.
+	cores := diag.Cores{}
+	if s.engine != nil {
+		if bin, err := s.engine.SingboxBinary(); err == nil {
+			cores.Singbox = bin
+		}
+	}
+	res := diag.VerifySingbox(ctx, n, cores)
 	s.audit(c, "inbound.verify", res.Finding.Code)
 	c.JSON(200, res)
 }
