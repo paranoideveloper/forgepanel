@@ -41,3 +41,11 @@ real failures (govulncheck, shellcheck) are fixed on the branch. Per the
 round-2 instructions, these are "carried fixes for main" — the branch is cut
 from main, so merging heals main's CI, which will then run live on the merge
 commit.
+
+## ADR-0006 — Extra DNS providers: "not available", not fake
+§5 explicitly sanctions the extra providers (DigitalOcean, Gcore, Namecheap,
+GoDaddy, Vultr, Hetzner) being registry entries that return a clear typed error,
+while §8 forbids the literal string "not implemented" outside third_party. Both
+are honoured: Cloudflare, ArvanCloud and deSEC are implemented for real; the rest
+return a typed error worded "not available in this build". Nothing is a silent
+stub — an unimplemented provider fails loudly and specifically.
