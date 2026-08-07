@@ -30,7 +30,7 @@
     loading = true;
     try {
       users = await apiFetch<User[]>('/admin/users');
-      groups = await apiFetch<UserGroup[]>('/admin/usergroups');
+      groups = await apiFetch<UserGroup[]>('/admin/groups');
     } catch (err: any) {
       showToast(err.message || 'Failed to load users', 'error');
     } finally {

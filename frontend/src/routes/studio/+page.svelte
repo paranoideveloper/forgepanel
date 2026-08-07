@@ -20,7 +20,7 @@
 
   async function loadPresets() {
     try {
-      presets = await apiFetch<ProtocolPreset[]>('/presets');
+      presets = await apiFetch<ProtocolPreset[]>('/protocols/presets');
       if (presets.length > 0) {
         selectPreset(presets[0]);
       }

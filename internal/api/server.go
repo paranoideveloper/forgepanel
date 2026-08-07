@@ -396,6 +396,7 @@ func (s *Server) routes() {
 			// health with human-readable text, replacing the unexplained dot.
 			admin.GET("/health/detail", s.handleHealthDetail)
 			admin.GET("/stats", s.handleStats)
+			admin.GET("/overview", s.handleOverview)
 			admin.GET("/engines", s.handleEngines)
 			admin.GET("/engines/config", s.handleEngineConfig)
 			admin.POST("/engines/validate", s.handleEngineValidate)

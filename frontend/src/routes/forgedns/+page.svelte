@@ -21,11 +21,11 @@
     if (e) e.preventDefault();
     loginErr = '';
     try {
-      const res = await apiFetch<{ token: string }>('/auth/login', {
+      const res = await apiFetch<{ access_token: string }>('/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      token = res.token;
+      token = res.access_token;
       setAuthToken(token);
       await loadData();
     } catch (err: any) {

@@ -26,11 +26,11 @@
     if (e) e.preventDefault();
     authError = '';
     try {
-      const res = await apiFetch<{ token: string }>('/auth/login', {
+      const res = await apiFetch<{ access_token: string }>('/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      token = res.token;
+      token = res.access_token;
       setAuthToken(token);
       await loadAll();
     } catch (err: any) {
@@ -40,9 +40,9 @@
 
   async function loadAll() {
     try {
-      health = await apiFetch<SystemHealth>('/health');
+      health = await apiFetch<SystemHealth>('/admin/overview');
       users = await apiFetch<User[]>('/admin/users');
-      groups = await apiFetch<UserGroup[]>('/admin/usergroups');
+      groups = await apiFetch<UserGroup[]>('/admin/groups');
       nodes = await apiFetch<Node[]>('/admin/nodes');
     } catch (err: any) {
       if (err.status === 401) {

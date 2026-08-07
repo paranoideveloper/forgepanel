@@ -44,11 +44,14 @@
     if (e) e.preventDefault();
     authError = '';
     try {
-      const res = await apiFetch<{ token: string }>('/auth/login', {
+      // The backend login endpoint is POST /api/login and returns an
+      // access+refresh pair (not /api/auth/login and not {token}). This mismatch
+      // meant login silently failed and the panel could never be entered.
+      const res = await apiFetch<{ access_token: string; refresh_token: string }>('/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      token = res.token;
+      token = res.access_token;
       setAuthToken(token);
       showToast('Signed in successfully', 'success');
       await loadTabModule('overview');

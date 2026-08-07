@@ -101,3 +101,7 @@ clean:
 
 help:
 	@grep -E '^[a-z-]+:' $(MAKEFILE_LIST) | cut -d: -f1 | sort -u
+
+e2e: build ## Build the panel and run the Playwright end-to-end suite
+	@cp bin/forgepanel e2e/forgepanel-test
+	@cd e2e && bunx playwright test

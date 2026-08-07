@@ -189,3 +189,26 @@ func TestDeleteDomainInUseIsRefused(t *testing.T) {
 }
 
 var _ = store.Domain{}
+
+// TestOverviewEndpointShape locks the dashboard endpoint the frontend needs
+// (OverviewView was calling /api/health, which did not exist → a 404 on login).
+func TestOverviewEndpointShape(t *testing.T) {
+	s := dbServerT(t)
+	r := gin.New()
+	r.GET("/api/admin/overview", s.handleOverview)
+	rec := dreq(t, r, "GET", "/api/admin/overview", "")
+	if rec.Code != 200 {
+		t.Fatalf("overview: %d", rec.Code)
+	}
+	var o struct {
+		Status     string `json:"status"`
+		NodesTotal int    `json:"nodes_total"`
+		Uptime     int64  `json:"uptime_seconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &o); err != nil {
+		t.Fatal(err)
+	}
+	if o.Status != "ok" {
+		t.Fatalf("status=%q", o.Status)
+	}
+}

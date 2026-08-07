@@ -22,7 +22,7 @@ describe('UsersView Component', () => {
           ]
         } as Response;
       }
-      if (url.includes('/admin/usergroups')) {
+      if (url.includes('/admin/groups')) {
         return {
           ok: true,
           json: async () => [

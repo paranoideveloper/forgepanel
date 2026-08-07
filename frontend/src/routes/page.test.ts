@@ -10,11 +10,11 @@ describe('Root Page Component', () => {
   it('renders login screen when unauthenticated and submits credentials', async () => {
     let loginCalled = false;
     (globalThis as any).fetch = async (url: string) => {
-      if (url.includes('/auth/login')) {
+      if (url.includes('/login')) {
         loginCalled = true;
         return {
           ok: true,
-          json: async () => ({ token: 'jwt-token-123' })
+          json: async () => ({ access_token: 'jwt-token-123', refresh_token: 'r' })
         } as Response;
       }
       return {

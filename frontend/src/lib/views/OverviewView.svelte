@@ -10,7 +10,7 @@
   async function loadOverview() {
     loading = true;
     try {
-      health = await apiFetch<SystemHealth>('/health');
+      health = await apiFetch<SystemHealth>('/admin/overview');
     } catch (err: any) {
       showToast(err.message || 'Failed to load system status', 'error');
     } finally {

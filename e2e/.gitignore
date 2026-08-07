@@ -1,0 +1,7 @@
+node_modules/
+forgepanel-test
+test-results/
+playwright-report/
+.auth.json
+.panel.pid
+.paneldata/

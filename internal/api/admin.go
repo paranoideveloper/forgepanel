@@ -13,6 +13,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 // handleLogin authenticates an admin and returns an access+refresh token pair.
@@ -502,6 +503,34 @@ func (s *Server) handleStats(c *gin.Context) {
 	us, _ := s.db.ListUsers(0)
 	gs, _ := s.db.ListGroups()
 	c.JSON(200, gin.H{"inbounds": len(ins), "users": len(us), "groups": len(gs)})
+}
+
+// processStart is when this panel process started, for the uptime the dashboard
+// shows.
+var processStart = time.Now()
+
+// handleOverview backs the dashboard's top-level health card. The frontend
+// OverviewView was calling /api/health (which did not exist → a 404 toast on
+// every login); this is the endpoint it needs, returning the exact shape it
+// renders: liveness, build version, node online/total counts, and uptime.
+func (s *Server) handleOverview(c *gin.Context) {
+	online, total := 0, 0
+	cutoff := time.Now().Add(-3 * time.Minute)
+	if nodes, err := s.db.ListNodes(); err == nil {
+		total = len(nodes)
+		for _, n := range nodes {
+			if n.Enrolled && n.LastSeen != nil && n.LastSeen.After(cutoff) {
+				online++
+			}
+		}
+	}
+	c.JSON(200, gin.H{
+		"status":         "ok",
+		"version":        version.Get().Version,
+		"nodes_online":   online,
+		"nodes_total":    total,
+		"uptime_seconds": int64(time.Since(processStart).Seconds()),
+	})
 }
 
 // --- subscription materialisation (spec §4/§9) ----------------------------
