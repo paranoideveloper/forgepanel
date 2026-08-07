@@ -1,3 +1,54 @@
+# ForgePanel v1.5.2 — Release Notes
+
+The 1.5 line rebuilt the browser experience and fixed the things that stopped a
+config from actually working. Everything below was verified in a real browser
+against the built, `go:embed`'d binary and with real client cores carrying
+traffic from an external machine — not isolated unit tests.
+
+## Highlights
+
+- **A real Inbounds section + Config Studio.** Create any of the 13 protocols from
+  a schema-driven form (every option, Generate keys/UUIDs/PSKs), with a live
+  four-format preview (client link · Xray · sing-box · Clash) and a working Save.
+  List, **edit**, clone, enable/disable, delete; copy the client link or QR.
+- **Every protocol carries traffic.** Inbounds now include their own credential,
+  so VLESS/VMess/Trojan/REALITY authenticate and pass traffic — previously a
+  standalone inbound rendered an empty client list and only Shadowsocks worked.
+- **Reachable by default.** The panel auto-opens the host firewall (ufw) for each
+  inbound port, and warns in the UI when a port is blocked despite a green Verify.
+- **Users, groups & assignment.** Create users, **assign inbounds to a user or a
+  group**, edit status/group/data-limit/expiry, reset credentials, hand out
+  per-user subscription links.
+- **HTTPS by default** — self-signed with no domain, automatic Let's Encrypt with
+  one. First-run administrator setup happens in the browser.
+- **Panel Doctor + Paste-Anything importer** reachable in the UI.
+
+## Fixes
+
+- "Only Shadowsocks worked" — inbound auth lists were built solely from assigned
+  users, so unassigned inbounds rejected every connection. Fixed.
+- "Verify is green but it fails on my phone" — the loopback Verify never touched
+  ufw's default-deny; proxy ports were firewalled. The panel now opens them and
+  the UI reports reachability honestly.
+- Panel served plain HTTP; the primary create flow was an empty shell; tests
+  passed on empty panes. All rebuilt and re-verified end to end.
+
+## Known limitations
+
+- REALITY and QUIC inbounds cannot be *Verified* on a loopback (they need a real
+  network); the badge says so instead of faking a pass — they do work externally.
+- A cloud-provider firewall (Linode/AWS/…) must still be opened separately; the
+  panel can only manage the host firewall.
+- Remote **nodes** support enroll/delete only (no in-place edit).
+
+## Install
+
+See the README and `docs/INSTALL.md`. Fresh install: run the binary/installer,
+open the printed `https://HOST:2053/panel/<secret>` URL (self-signed cert — accept
+the browser warning), and create the administrator with the one-time setup token.
+
+---
+
 # ForgePanel v1.4.0 — Release Notes
 
 ## What was broken, and how it was fixed

@@ -12,7 +12,7 @@ checksum**. Fetch the pinned copy for the release you want and verify it before
 running it as root:
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh.sha256
 sha256sum -c install.sh.sha256 && sudo bash install.sh
@@ -81,7 +81,7 @@ later repair or explicit purge.
 ## Docker
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 FORGEPANEL_VERSION=$VERSION docker compose up -d --build
@@ -115,8 +115,8 @@ implicit floating-image pull.
 ### Verifying a local image
 
 ```bash
-docker image inspect forgepanel:v1.3.2
-docker run --rm --entrypoint /usr/local/bin/forgectl forgepanel:v1.3.2 version
+docker image inspect forgepanel:v1.5.2
+docker run --rm --entrypoint /usr/local/bin/forgectl forgepanel:v1.5.2 version
 ```
 
 ## From source

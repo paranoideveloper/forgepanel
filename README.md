@@ -13,19 +13,19 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 ## Features
 
 - **13 protocols, one panel** — VLESS, VMess, Trojan, Shadowsocks, SOCKS, HTTP, Hysteria2, TUIC, AnyTLS, ShadowTLS, WireGuard, AmneziaWG (kernel mode), Brook.
-- **Zero-config creation** — pick a protocol and a port; the panel fills in keys, UUIDs, passwords, REALITY key-pairs and a working steal-site so every config just works.
+- **Inbounds section + Config Studio** — create any protocol from a schema-driven form that exposes every option, generate keys/UUIDs/PSKs with a click, and watch a **live four-format preview** (client link · Xray · sing-box · Clash). Edit, clone, enable/disable and delete inbounds; copy the client link or scan its QR.
+- **Zero-config creation** — pick a protocol and a port; the panel fills in keys, UUIDs, passwords, REALITY key-pairs and a working steal-site so every config just works. Each inbound authenticates with its own credential out of the box.
+- **Reachable by default** — the panel **auto-opens the host firewall (ufw)** for every inbound port, and a per-inbound **Verify** carries real traffic through the core to prove a config works (with an honest warning when a port is firewalled).
+- **Users, groups & subscriptions** — create users, **assign inbounds to a user or a group**, set data-limit quotas / expiry, reset credentials, and hand out per-user base64 / Clash / sing-box **subscription** links.
 - **Engines managed for you** — it downloads, pins, verifies and supervises `xray`, `sing-box` and `brook` automatically. Configs are validated before they're applied, so a bad edit can never take your traffic down.
-- **Clean web UI** — dark/light themes, live config preview, one-click copy/QR, and a schema-driven form that exposes every option of every protocol.
-- **Multi-user** — per-user UUIDs/passwords, data-limit quotas with resets, expiry dates, and per-user subscription links.
-- **Subscriptions** — base64 / Clash / sing-box subscription endpoints out of the box.
-- **Security built in** — REALITY and TLS (with an auto self-signed fallback), argon2id logins, JWT + optional TOTP 2FA, and login rate-limiting.
+- **HTTPS by default** — the panel serves TLS with a self-signed certificate out of the box, and switches to automatic Let's Encrypt (ACME) when you set a domain. Admin logins are argon2id + JWT with optional TOTP 2FA and rate-limiting.
+- **Diagnostics** — a Panel Doctor, a coded bilingual (EN/FA) validation catalogue, and a Paste-Anything importer that turns pasted links / subscriptions / JSON into inbounds.
 - **ForgeDNS** — an optional DNS-tunnel subsystem for hard-censorship networks.
-- **Import** — pull existing inbounds in from another panel's SQLite database.
 - **Ships anywhere** — a single static binary, a systemd service, or Docker.
 
 ## Install
 
-Every published mode uses the same release version. Replace `v1.3.2` with the
+Every published mode uses the same release version. Replace `v1.5.2` with the
 version you intend to run and keep it pinned in production.
 
 ### Verified Linux installer (recommended)
@@ -35,7 +35,7 @@ access. It installs the three matching binaries, records ownership in an
 installation manifest, starts the service, and prints the one-time setup token.
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 curl -fsSLO "$BASE/install.sh"
 curl -fsSLO "$BASE/install.sh.sha256"
@@ -49,7 +49,7 @@ preserves data by default; `--purge --yes` is explicit.
 ### Debian and Ubuntu package
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 ARCH=$(dpkg --print-architecture)       # amd64 or arm64
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.deb
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -59,7 +59,7 @@ sudo apt install "./$ASSET"
 ### Fedora, RHEL, Rocky, and AlmaLinux package
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.rpm
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -69,7 +69,7 @@ sudo dnf install "./$ASSET"
 ### Docker
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 docker build -t forgepanel:$VERSION \
@@ -93,7 +93,7 @@ Requires Docker with the Compose plugin. The checked-in Compose file keeps data
 in a named volume and accepts an explicit image version.
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 FORGEPANEL_VERSION=$VERSION docker compose up -d --build
@@ -106,7 +106,7 @@ Use this mode for a foreground process, testing, or custom supervision. The
 systemd installer or package remains the supported VPS management path.
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.5.2
 ARCH=amd64                         # use arm64 on 64-bit ARM
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 for bin in forgepanel forgectl forgenode; do
@@ -123,7 +123,7 @@ Requires Go 1.25+ and is intended for development or a custom supervisor.
 ```bash
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-git checkout v1.3.2
+git checkout v1.5.2
 make build
 FORGEPANEL_DATA="$PWD/forgepanel-data" ./bin/forgepanel
 ```
@@ -157,9 +157,10 @@ Full docs are in [`docs/`](docs/) — [Install and local management](docs/INSTAL
 
 ## Security notes
 
-- The panel serves plain **HTTP on port 2053** by default. For anything beyond a quick trial, put it behind a reverse proxy with TLS (Caddy/Nginx) or bind it to localhost and tunnel in over SSH.
-- Change the generated admin password on first login and enable TOTP 2FA in Settings.
-- Keep the secret admin path private — it's part of your first line of defense.
+- The panel serves **HTTPS on port 2053** by default. With no domain it uses a **self-signed** certificate (your browser warns once — that is expected); set a domain and it obtains and renews a Let's Encrypt certificate automatically. Plain HTTP to the port is refused.
+- The panel is reached at a **secret path** (`https://HOST:2053/panel/<random>`) printed on first boot — keep it private; it's part of your first line of defense.
+- Create the first administrator through the browser using the one-time setup token, and enable TOTP 2FA under System & Security.
+- The panel **opens the host firewall (ufw)** for inbound ports it serves. If you run a **cloud-provider firewall** (Linode/AWS/etc.) as well, open the same ports there — the panel cannot manage a firewall outside the host.
 
 ## License
 
