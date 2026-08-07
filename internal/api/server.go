@@ -379,6 +379,10 @@ func (s *Server) routes() {
 			admin.POST("/inbounds/:id/toggle", s.handleToggleInbound)
 			admin.POST("/inbounds/:id/undo", s.handleUndoInbound)
 			admin.POST("/inbounds/bulk", s.handleBulkInbounds)
+			// Validation & Proof engine (§3).
+			admin.POST("/inbounds/validate", s.handleValidateInbound)
+			admin.POST("/inbounds/:id/verify", s.handleVerifyInbound)
+			admin.GET("/doctor", s.handleDoctor)
 			admin.GET("/groups", s.handleListGroups)
 			admin.POST("/groups", s.handleCreateGroup)
 			admin.GET("/groups/:id", s.handleGetGroup)
