@@ -1,10 +1,17 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
 )
 
 // applyCreateDefaults makes the panel "do the work" (user request): it fills in
@@ -283,12 +290,49 @@ func (s *Server) applyExportDefaults(n *model.Node) {
 		return
 	}
 	// If the operator configured a real domain with an imported/ACME cert, keep
-	// strict verification; otherwise the server serves a self-signed cert and the
-	// client must skip verification.
+	// strict verification — the client trusts it through the public CA, no pin
+	// needed.
 	if s.hasRealCert(n.SNI()) {
 		return
 	}
+	// Self-signed cert. Xray 26 removed allowInsecure outright, so an xray client
+	// can only accept the panel's self-signed cert by pinning its exact SHA-256
+	// (tlsSettings.pinnedPeerCertSha256, hex-encoded). Pin the very cert the
+	// engine serves so the emitted subscription actually connects. sing-box has
+	// no cert-pin field and honours `insecure`, so the sing-box-rendered
+	// protocols keep AllowInsecure instead.
+	if render.EngineFor(n.Protocol) == "xray" {
+		if pin := s.selfSignedPinHex(); pin != "" {
+			n.Security.PinSHA256 = []string{pin}
+			return
+		}
+	}
 	n.Security.AllowInsecure = true
+}
+
+// selfSignedPinHex returns hex(SHA-256(DER)) of the panel's self-signed leaf
+// certificate — the one cert.EnsureSelfSigned generates and the engine serves
+// for TLS inbounds that have no real certificate (internal/core/manager.go uses
+// the same path). Empty if it cannot be produced, in which case the caller falls
+// back to the sing-box `insecure` path.
+func (s *Server) selfSignedPinHex() string {
+	if s.cfg == nil {
+		return ""
+	}
+	cp, _, err := cert.EnsureSelfSigned(filepath.Join(s.cfg.DataDir, "certs"))
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(cp)
+	if err != nil {
+		return ""
+	}
+	blk, _ := pem.Decode(raw)
+	if blk == nil {
+		return ""
+	}
+	sum := sha256.Sum256(blk.Bytes)
+	return hex.EncodeToString(sum[:])
 }
 
 // hasRealCert reports whether the panel holds a real (imported/ACME) certificate
