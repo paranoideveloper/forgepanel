@@ -1,6 +1,8 @@
 package api
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/core/engine"
@@ -94,6 +96,18 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 			}
 		}
 		sp := engine.InboundSpec{Node: n}
+		// The inbound's OWN credential — the UUID/password embedded in the config
+		// link the panel shows and hands out (handleInboundConfig → export.URI) —
+		// must always authenticate. Without it a standalone inbound with no assigned
+		// users renders an empty `clients` list and VLESS/VMess/Trojan reject every
+		// connection; only Shadowsocks (shared-key, no client list) worked. Assigned
+		// users are materialized in addition, for per-user multi-tenant access.
+		if n.UUID != "" || n.Password != "" {
+			sp.Clients = append(sp.Clients, engine.ClientCred{
+				Email: "inbound-" + strconv.FormatUint(uint64(in.ID), 10),
+				UUID:  n.UUID, Password: n.Password, Flow: n.Flow,
+			})
+		}
 		for _, u := range byInbound[in.ID] {
 			sp.Clients = append(sp.Clients, engine.ClientCred{
 				Email: job.UserEmail(u.ID), UUID: u.UUID, Password: u.Password, Flow: n.Flow,

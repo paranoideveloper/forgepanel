@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/job"
+
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -396,8 +398,15 @@ func TestEngineSpecIncludesDirectAssignments(t *testing.T) {
 	specs := f.s.enabledInboundSpecs()
 	found := false
 	for _, sp := range specs {
-		if sp.Node.Remark == "free" && len(sp.Clients) == 1 {
-			found = true
+		if sp.Node.Remark != "free" {
+			continue
+		}
+		// The inbound now always carries its own credential too; assert the
+		// directly-assigned USER is present among the clients.
+		for _, cl := range sp.Clients {
+			if cl.Email == job.UserEmail(f.user.ID) {
+				found = true
+			}
 		}
 	}
 	if !found {
