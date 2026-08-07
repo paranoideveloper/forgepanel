@@ -1,0 +1,1823 @@
+{
+  "cases": [
+    {
+      "name": "vless-ws-tls",
+      "input": {
+        "tag": "Edge 1. VLESS - Domain : 443",
+        "remark": "Edge 1. VLESS - Domain : 443",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "none",
+        "transport": {
+          "network": "ws",
+          "path": "/vl/9f2c1a",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "eDgE.exAmple.com",
+          "alpn": [
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "normalized": {
+        "tag": "Edge 1. VLESS - Domain : 443",
+        "remark": "Edge 1. VLESS - Domain : 443",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "none",
+        "transport": {
+          "network": "ws",
+          "path": "/vl/9f2c1a",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "eDgE.exAmple.com",
+          "alpn": [
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "uri": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?alpn=http%2F1.1\u0026fp=chrome\u0026host=edge.example.com\u0026path=%2Fvl%2F9f2c1a\u0026security=tls\u0026sni=eDgE.exAmple.com\u0026type=ws#Edge%201.%20VLESS%20-%20Domain%20:%20443",
+      "clash": {
+        "alpn": [
+          "http/1.1"
+        ],
+        "client-fingerprint": "chrome",
+        "name": "Edge 1. VLESS - Domain : 443",
+        "network": "ws",
+        "port": 443,
+        "server": "edge.example.com",
+        "servername": "eDgE.exAmple.com",
+        "tls": true,
+        "type": "vless",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "ws-opts": {
+          "early-data-header-name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max-early-data": 2560,
+          "path": "/vl/9f2c1a"
+        }
+      },
+      "singbox": {
+        "packet_encoding": "xudp",
+        "server": "edge.example.com",
+        "server_port": 443,
+        "tag": "Edge 1. VLESS - Domain : 443",
+        "tls": {
+          "alpn": [
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "eDgE.exAmple.com",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "transport": {
+          "early_data_header_name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max_early_data": 2560,
+          "path": "/vl/9f2c1a",
+          "type": "ws"
+        },
+        "type": "vless",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "xray": {
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "edge.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "encryption": "none",
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "security": "tls",
+          "tlsSettings": {
+            "alpn": [
+              "http/1.1"
+            ],
+            "fingerprint": "chrome",
+            "serverName": "eDgE.exAmple.com"
+          },
+          "wsSettings": {
+            "earlyDataHeaderName": "Sec-WebSocket-Protocol",
+            "headers": {
+              "Host": "edge.example.com"
+            },
+            "maxEarlyData": 2560,
+            "path": "/vl/9f2c1a"
+          }
+        },
+        "tag": "Edge 1. VLESS - Domain : 443"
+      }
+    },
+    {
+      "name": "vless-ws-plain",
+      "input": {
+        "remark": "Edge 2. VLESS - IPv4 : 8080",
+        "protocol": "vless",
+        "address": "104.16.0.1",
+        "port": 8080,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "transport": {
+          "network": "ws",
+          "path": "/vl/9f2c1a",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "normalized": {
+        "remark": "Edge 2. VLESS - IPv4 : 8080",
+        "protocol": "vless",
+        "address": "104.16.0.1",
+        "port": 8080,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "none",
+        "transport": {
+          "network": "ws",
+          "path": "/vl/9f2c1a",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "uri": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@104.16.0.1:8080?host=edge.example.com\u0026path=%2Fvl%2F9f2c1a\u0026security=none\u0026type=ws#Edge%202.%20VLESS%20-%20IPv4%20:%208080",
+      "clash": {
+        "name": "Edge 2. VLESS - IPv4 : 8080",
+        "network": "ws",
+        "port": 8080,
+        "server": "104.16.0.1",
+        "type": "vless",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "ws-opts": {
+          "early-data-header-name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max-early-data": 2560,
+          "path": "/vl/9f2c1a"
+        }
+      },
+      "singbox": {
+        "packet_encoding": "xudp",
+        "server": "104.16.0.1",
+        "server_port": 8080,
+        "tag": "proxy",
+        "transport": {
+          "early_data_header_name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max_early_data": 2560,
+          "path": "/vl/9f2c1a",
+          "type": "ws"
+        },
+        "type": "vless",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "xray": {
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "104.16.0.1",
+              "port": 8080,
+              "users": [
+                {
+                  "encryption": "none",
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "wsSettings": {
+            "earlyDataHeaderName": "Sec-WebSocket-Protocol",
+            "headers": {
+              "Host": "edge.example.com"
+            },
+            "maxEarlyData": 2560,
+            "path": "/vl/9f2c1a"
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "vless-tcp-reality-vision",
+      "input": {
+        "remark": "VPS REALITY",
+        "protocol": "vless",
+        "address": "203.0.113.10",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "flow": "xtls-rprx-vision",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "reality",
+          "fingerprint": "chrome",
+          "reality": {
+            "dest": "www.datadoghq.com:443",
+            "server_names": [
+              "www.datadoghq.com"
+            ],
+            "public_key": "xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU",
+            "short_id": "0123abcd",
+            "spider_x": "/"
+          }
+        }
+      },
+      "normalized": {
+        "remark": "VPS REALITY",
+        "protocol": "vless",
+        "address": "203.0.113.10",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "flow": "xtls-rprx-vision",
+        "encryption": "none",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "reality",
+          "server_name": "www.datadoghq.com",
+          "fingerprint": "chrome",
+          "reality": {
+            "dest": "www.datadoghq.com:443",
+            "server_names": [
+              "www.datadoghq.com"
+            ],
+            "public_key": "xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU",
+            "short_id": "0123abcd",
+            "spider_x": "/"
+          }
+        }
+      },
+      "uri": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@203.0.113.10:443?flow=xtls-rprx-vision\u0026fp=chrome\u0026pbk=xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU\u0026security=reality\u0026sid=0123abcd\u0026sni=www.datadoghq.com\u0026type=tcp#VPS%20REALITY",
+      "clash": {
+        "client-fingerprint": "chrome",
+        "flow": "xtls-rprx-vision",
+        "name": "VPS REALITY",
+        "port": 443,
+        "reality-opts": {
+          "public-key": "xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU",
+          "short-id": "0123abcd"
+        },
+        "server": "203.0.113.10",
+        "servername": "www.datadoghq.com",
+        "tls": true,
+        "type": "vless",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "singbox": {
+        "flow": "xtls-rprx-vision",
+        "packet_encoding": "xudp",
+        "server": "203.0.113.10",
+        "server_port": 443,
+        "tag": "proxy",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "public_key": "xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU",
+            "short_id": "0123abcd"
+          },
+          "server_name": "www.datadoghq.com",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "type": "vless",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "xray": {
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "203.0.113.10",
+              "port": 443,
+              "users": [
+                {
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision",
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "realitySettings": {
+            "fingerprint": "chrome",
+            "publicKey": "xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU",
+            "serverName": "www.datadoghq.com",
+            "shortId": "0123abcd",
+            "show": false,
+            "spiderX": "/"
+          },
+          "security": "reality"
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "vless-grpc-tls",
+      "input": {
+        "remark": "gRPC node",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "transport": {
+          "network": "grpc",
+          "service_name": "forge/grpc",
+          "multi_mode": true
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "grpc.example.com",
+          "fingerprint": "firefox"
+        }
+      },
+      "normalized": {
+        "remark": "gRPC node",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "none",
+        "transport": {
+          "network": "grpc",
+          "service_name": "forge/grpc",
+          "multi_mode": true
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "grpc.example.com",
+          "fingerprint": "firefox"
+        }
+      },
+      "uri": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?fp=firefox\u0026mode=multi\u0026security=tls\u0026serviceName=forge%2Fgrpc\u0026sni=grpc.example.com\u0026type=grpc#gRPC%20node",
+      "clash": {
+        "client-fingerprint": "firefox",
+        "grpc-opts": {
+          "grpc-service-name": "forge/grpc"
+        },
+        "name": "gRPC node",
+        "network": "grpc",
+        "port": 443,
+        "server": "edge.example.com",
+        "servername": "grpc.example.com",
+        "tls": true,
+        "type": "vless",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "singbox": {
+        "packet_encoding": "xudp",
+        "server": "edge.example.com",
+        "server_port": 443,
+        "tag": "proxy",
+        "tls": {
+          "enabled": true,
+          "server_name": "grpc.example.com",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "firefox"
+          }
+        },
+        "transport": {
+          "service_name": "forge/grpc",
+          "type": "grpc"
+        },
+        "type": "vless",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "xray": {
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "edge.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "encryption": "none",
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "grpcSettings": {
+            "multiMode": true,
+            "serviceName": "forge/grpc"
+          },
+          "network": "grpc",
+          "security": "tls",
+          "tlsSettings": {
+            "fingerprint": "firefox",
+            "serverName": "grpc.example.com"
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "vless-xhttp-reality",
+      "input": {
+        "remark": "XHTTP + REALITY",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "transport": {
+          "network": "xhttp",
+          "path": "/xh",
+          "host": "cdn.example.com",
+          "xhttp_mode": "packet-up",
+          "x_padding_bytes": "100-1000",
+          "xmux": {
+            "max_concurrency": "16-32",
+            "h_max_request_times": "600-900"
+          }
+        },
+        "security": {
+          "type": "reality",
+          "fingerprint": "chrome",
+          "reality": {
+            "server_names": [
+              "www.speedtest.net"
+            ],
+            "public_key": "pubkeyhere",
+            "short_ids": [
+              "aabb",
+              "ccdd"
+            ]
+          }
+        }
+      },
+      "normalized": {
+        "remark": "XHTTP + REALITY",
+        "protocol": "vless",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "none",
+        "transport": {
+          "network": "xhttp",
+          "path": "/xh",
+          "host": "cdn.example.com",
+          "xhttp_mode": "packet-up",
+          "x_padding_bytes": "100-1000",
+          "xmux": {
+            "max_concurrency": "16-32",
+            "h_max_request_times": "600-900"
+          }
+        },
+        "security": {
+          "type": "reality",
+          "server_name": "www.speedtest.net",
+          "fingerprint": "chrome",
+          "reality": {
+            "server_names": [
+              "www.speedtest.net"
+            ],
+            "public_key": "pubkeyhere",
+            "short_ids": [
+              "aabb",
+              "ccdd"
+            ],
+            "spider_x": "/"
+          }
+        }
+      },
+      "uri": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?fp=chrome\u0026host=cdn.example.com\u0026mode=packet-up\u0026path=%2Fxh\u0026pbk=pubkeyhere\u0026security=reality\u0026sid=aabb\u0026sni=www.speedtest.net\u0026type=xhttp#XHTTP%20+%20REALITY",
+      "clash_error": "export/clash: not representable in Clash.Meta: transport \"xhttp\"",
+      "singbox_error": "render/singbox: transport \"xhttp\" is not supported by sing-box; use xray",
+      "xray": {
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "edge.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "encryption": "none",
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "realitySettings": {
+            "fingerprint": "chrome",
+            "publicKey": "pubkeyhere",
+            "serverName": "www.speedtest.net",
+            "shortId": "aabb",
+            "show": false,
+            "spiderX": "/"
+          },
+          "security": "reality",
+          "xhttpSettings": {
+            "host": "cdn.example.com",
+            "mode": "packet-up",
+            "path": "/xh",
+            "xPaddingBytes": "100-1000",
+            "xmux": {
+              "hMaxRequestTimes": "600-900",
+              "maxConcurrency": "16-32"
+            }
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "trojan-ws-tls",
+      "input": {
+        "tag": "Edge 1. Trojan - Domain : 443",
+        "remark": "Edge 1. Trojan - Domain : 443",
+        "protocol": "trojan",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "p@ss w/ord+special\u0026chars",
+        "transport": {
+          "network": "ws",
+          "path": "/tr/aa11",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "edge.example.com",
+          "alpn": [
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "normalized": {
+        "tag": "Edge 1. Trojan - Domain : 443",
+        "remark": "Edge 1. Trojan - Domain : 443",
+        "protocol": "trojan",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "p@ss w/ord+special\u0026chars",
+        "transport": {
+          "network": "ws",
+          "path": "/tr/aa11",
+          "host": "edge.example.com",
+          "early_data": 2560,
+          "ed_header": "Sec-WebSocket-Protocol"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "edge.example.com",
+          "alpn": [
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "uri": "trojan://p%40ss+w%2Ford%2Bspecial%26chars@edge.example.com:443?alpn=http%2F1.1\u0026fp=chrome\u0026host=edge.example.com\u0026path=%2Ftr%2Faa11\u0026security=tls\u0026sni=edge.example.com\u0026type=ws#Edge%201.%20Trojan%20-%20Domain%20:%20443",
+      "clash": {
+        "alpn": [
+          "http/1.1"
+        ],
+        "client-fingerprint": "chrome",
+        "name": "Edge 1. Trojan - Domain : 443",
+        "network": "ws",
+        "password": "p@ss w/ord+special\u0026chars",
+        "port": 443,
+        "server": "edge.example.com",
+        "type": "trojan",
+        "udp": true,
+        "ws-opts": {
+          "early-data-header-name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max-early-data": 2560,
+          "path": "/tr/aa11"
+        }
+      },
+      "singbox": {
+        "password": "p@ss w/ord+special\u0026chars",
+        "server": "edge.example.com",
+        "server_port": 443,
+        "tag": "Edge 1. Trojan - Domain : 443",
+        "tls": {
+          "alpn": [
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "transport": {
+          "early_data_header_name": "Sec-WebSocket-Protocol",
+          "headers": {
+            "Host": "edge.example.com"
+          },
+          "max_early_data": 2560,
+          "path": "/tr/aa11",
+          "type": "ws"
+        },
+        "type": "trojan"
+      },
+      "xray": {
+        "protocol": "trojan",
+        "settings": {
+          "servers": [
+            {
+              "address": "edge.example.com",
+              "password": "p@ss w/ord+special\u0026chars",
+              "port": 443
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "security": "tls",
+          "tlsSettings": {
+            "alpn": [
+              "http/1.1"
+            ],
+            "fingerprint": "chrome",
+            "serverName": "edge.example.com"
+          },
+          "wsSettings": {
+            "earlyDataHeaderName": "Sec-WebSocket-Protocol",
+            "headers": {
+              "Host": "edge.example.com"
+            },
+            "maxEarlyData": 2560,
+            "path": "/tr/aa11"
+          }
+        },
+        "tag": "Edge 1. Trojan - Domain : 443"
+      }
+    },
+    {
+      "name": "vmess-ws-tls",
+      "input": {
+        "remark": "VMess \u003cws\u003e \u0026 tls",
+        "protocol": "vmess",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "transport": {
+          "network": "ws",
+          "path": "/vm",
+          "host": "vm.example.com"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "vm.example.com",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "normalized": {
+        "remark": "VMess \u003cws\u003e \u0026 tls",
+        "protocol": "vmess",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "auto",
+        "transport": {
+          "network": "ws",
+          "path": "/vm",
+          "host": "vm.example.com"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "vm.example.com",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "fingerprint": "chrome"
+        }
+      },
+      "uri": "vmess://eyJhZGQiOiJlZGdlLmV4YW1wbGUuY29tIiwiYWlkIjoiMCIsImFscG4iOiJoMixodHRwLzEuMSIsImZwIjoiY2hyb21lIiwiaG9zdCI6InZtLmV4YW1wbGUuY29tIiwiaWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEiLCJuZXQiOiJ3cyIsInBhdGgiOiIvdm0iLCJwb3J0IjoiNDQzIiwicHMiOiJWTWVzcyBcdTAwM2N3c1x1MDAzZSBcdTAwMjYgdGxzIiwic2N5IjoiYXV0byIsInNuaSI6InZtLmV4YW1wbGUuY29tIiwidGxzIjoidGxzIiwidHlwZSI6Im5vbmUiLCJ2IjoiMiJ9",
+      "clash": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "alterId": 0,
+        "cipher": "auto",
+        "client-fingerprint": "chrome",
+        "name": "VMess \u003cws\u003e \u0026 tls",
+        "network": "ws",
+        "port": 443,
+        "server": "edge.example.com",
+        "servername": "vm.example.com",
+        "tls": true,
+        "type": "vmess",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "ws-opts": {
+          "headers": {
+            "Host": "vm.example.com"
+          },
+          "path": "/vm"
+        }
+      },
+      "singbox": {
+        "alter_id": 0,
+        "security": "auto",
+        "server": "edge.example.com",
+        "server_port": 443,
+        "tag": "proxy",
+        "tls": {
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "vm.example.com",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          }
+        },
+        "transport": {
+          "headers": {
+            "Host": "vm.example.com"
+          },
+          "path": "/vm",
+          "type": "ws"
+        },
+        "type": "vmess",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "xray": {
+        "protocol": "vmess",
+        "settings": {
+          "vnext": [
+            {
+              "address": "edge.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "alterId": 0,
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811",
+                  "security": "auto"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "security": "tls",
+          "tlsSettings": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "fingerprint": "chrome",
+            "serverName": "vm.example.com"
+          },
+          "wsSettings": {
+            "headers": {
+              "Host": "vm.example.com"
+            },
+            "path": "/vm"
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "vmess-tcp-http-obfs",
+      "input": {
+        "remark": "VMess tcp http",
+        "protocol": "vmess",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "transport": {
+          "network": "tcp",
+          "path": "/index",
+          "host": "obfs.example.com",
+          "header": {
+            "type": "http"
+          }
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "normalized": {
+        "remark": "VMess tcp http",
+        "protocol": "vmess",
+        "address": "edge.example.com",
+        "port": 443,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "encryption": "auto",
+        "transport": {
+          "network": "tcp",
+          "path": "/index",
+          "host": "obfs.example.com",
+          "header": {
+            "type": "http"
+          }
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "uri": "vmess://eyJhZGQiOiJlZGdlLmV4YW1wbGUuY29tIiwiYWlkIjoiMCIsImFscG4iOiIiLCJmcCI6IiIsImhvc3QiOiJvYmZzLmV4YW1wbGUuY29tIiwiaWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEiLCJuZXQiOiJ0Y3AiLCJwYXRoIjoiL2luZGV4IiwicG9ydCI6IjQ0MyIsInBzIjoiVk1lc3MgdGNwIGh0dHAiLCJzY3kiOiJhdXRvIiwic25pIjoiIiwidGxzIjoiIiwidHlwZSI6Imh0dHAiLCJ2IjoiMiJ9",
+      "clash": {
+        "alterId": 0,
+        "cipher": "auto",
+        "http-opts": {
+          "headers": {
+            "Host": [
+              "obfs.example.com"
+            ]
+          },
+          "method": "GET",
+          "path": [
+            "/index"
+          ]
+        },
+        "name": "VMess tcp http",
+        "network": "http",
+        "port": 443,
+        "server": "edge.example.com",
+        "type": "vmess",
+        "udp": true,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "singbox_error": "render/singbox: tcp header obfuscation \"http\" has no sing-box equivalent",
+      "xray": {
+        "protocol": "vmess",
+        "settings": {
+          "vnext": [
+            {
+              "address": "edge.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "alterId": 0,
+                  "id": "b831381d-6324-4d53-ad4f-8cda48b30811",
+                  "security": "auto"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {
+            "header": {
+              "request": {
+                "headers": {
+                  "Host": [
+                    "obfs.example.com"
+                  ]
+                },
+                "path": [
+                  "/index"
+                ]
+              },
+              "type": "http"
+            }
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "shadowsocks-2022",
+      "input": {
+        "remark": "SS 2022",
+        "protocol": "shadowsocks",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "SGVsbG8gV29ybGQhIQ==",
+        "method": "2022-blake3-aes-128-gcm",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "normalized": {
+        "remark": "SS 2022",
+        "protocol": "shadowsocks",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "SGVsbG8gV29ybGQhIQ==",
+        "method": "2022-blake3-aes-128-gcm",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "uri": "ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206U0dWc2JHOGdWMjl5YkdRaElRPT0@edge.example.com:443#SS%202022",
+      "clash": {
+        "cipher": "2022-blake3-aes-128-gcm",
+        "name": "SS 2022",
+        "password": "SGVsbG8gV29ybGQhIQ==",
+        "port": 443,
+        "server": "edge.example.com",
+        "type": "ss",
+        "udp": true
+      },
+      "singbox_error": "shadowsocks 2022: PSK segment 0 decodes to 13 bytes, method requires exactly 16",
+      "xray": {
+        "protocol": "shadowsocks",
+        "settings": {
+          "servers": [
+            {
+              "address": "edge.example.com",
+              "method": "2022-blake3-aes-128-gcm",
+              "password": "SGVsbG8gV29ybGQhIQ==",
+              "port": 443
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp"
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "shadowsocks-classic-plugin",
+      "input": {
+        "remark": "SS + v2ray-plugin",
+        "protocol": "shadowsocks",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "hunter2",
+        "method": "chacha20-ietf-poly1305",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "ss_plugin": {
+          "name": "v2ray-plugin",
+          "opts": "tls;host=ss.example.com"
+        }
+      },
+      "normalized": {
+        "remark": "SS + v2ray-plugin",
+        "protocol": "shadowsocks",
+        "address": "edge.example.com",
+        "port": 443,
+        "password": "hunter2",
+        "method": "chacha20-ietf-poly1305",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "ss_plugin": {
+          "name": "v2ray-plugin",
+          "opts": "tls;host=ss.example.com"
+        }
+      },
+      "uri": "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpodW50ZXIy@edge.example.com:443?plugin=v2ray-plugin%3Btls%3Bhost%3Dss.example.com#SS%20+%20v2ray-plugin",
+      "clash": {
+        "cipher": "chacha20-ietf-poly1305",
+        "name": "SS + v2ray-plugin",
+        "password": "hunter2",
+        "plugin": "v2ray-plugin",
+        "plugin-opts": {
+          "host": "ss.example.com",
+          "tls": true
+        },
+        "port": 443,
+        "server": "edge.example.com",
+        "type": "ss",
+        "udp": true
+      },
+      "singbox": {
+        "method": "chacha20-ietf-poly1305",
+        "password": "hunter2",
+        "plugin": "v2ray-plugin",
+        "plugin_opts": "tls;host=ss.example.com",
+        "server": "edge.example.com",
+        "server_port": 443,
+        "tag": "proxy",
+        "type": "shadowsocks"
+      },
+      "xray": {
+        "protocol": "shadowsocks",
+        "settings": {
+          "servers": [
+            {
+              "address": "edge.example.com",
+              "method": "chacha20-ietf-poly1305",
+              "password": "hunter2",
+              "port": 443
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp"
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "socks-auth",
+      "input": {
+        "remark": "SOCKS chain",
+        "protocol": "socks",
+        "address": "edge.example.com",
+        "port": 1080,
+        "password": "pass",
+        "username": "user",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "normalized": {
+        "remark": "SOCKS chain",
+        "protocol": "socks",
+        "address": "edge.example.com",
+        "port": 1080,
+        "password": "pass",
+        "username": "user",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        }
+      },
+      "uri": "socks://dXNlcjpwYXNz@edge.example.com:1080#SOCKS%20chain",
+      "clash": {
+        "name": "SOCKS chain",
+        "password": "pass",
+        "port": 1080,
+        "server": "edge.example.com",
+        "type": "socks5",
+        "udp": true,
+        "username": "user"
+      },
+      "singbox": {
+        "password": "pass",
+        "server": "edge.example.com",
+        "server_port": 1080,
+        "tag": "proxy",
+        "type": "socks",
+        "username": "user",
+        "version": "5"
+      },
+      "xray": {
+        "protocol": "socks",
+        "settings": {
+          "servers": [
+            {
+              "address": "edge.example.com",
+              "port": 1080,
+              "users": [
+                {
+                  "pass": "pass",
+                  "user": "user"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp"
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "http-tls",
+      "input": {
+        "remark": "HTTPS proxy",
+        "protocol": "http",
+        "address": "edge.example.com",
+        "port": 8443,
+        "password": "p@ss",
+        "username": "user",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "proxy.example.com"
+        }
+      },
+      "normalized": {
+        "remark": "HTTPS proxy",
+        "protocol": "http",
+        "address": "edge.example.com",
+        "port": 8443,
+        "password": "p@ss",
+        "username": "user",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "proxy.example.com"
+        }
+      },
+      "uri": "https://user:p%40ss@edge.example.com:8443#HTTPS%20proxy",
+      "clash": {
+        "name": "HTTPS proxy",
+        "password": "p@ss",
+        "port": 8443,
+        "server": "edge.example.com",
+        "sni": "proxy.example.com",
+        "tls": true,
+        "type": "http",
+        "username": "user"
+      },
+      "singbox": {
+        "password": "p@ss",
+        "server": "edge.example.com",
+        "server_port": 8443,
+        "tag": "proxy",
+        "tls": {
+          "enabled": true,
+          "server_name": "proxy.example.com"
+        },
+        "type": "http",
+        "username": "user"
+      },
+      "xray": {
+        "protocol": "http",
+        "settings": {
+          "servers": [
+            {
+              "address": "edge.example.com",
+              "port": 8443,
+              "users": [
+                {
+                  "pass": "p@ss",
+                  "user": "user"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "proxy.example.com"
+          }
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "hysteria2",
+      "input": {
+        "remark": "Hy2",
+        "protocol": "hysteria2",
+        "address": "edge.example.com",
+        "port": 8443,
+        "password": "hy2pass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "hy2.example.com"
+        },
+        "hysteria2": {
+          "up_mbps": 50,
+          "down_mbps": 200,
+          "obfs_type": "salamander",
+          "obfs_password": "obfspw",
+          "port_hopping": "20000-50000",
+          "port_hop_interval": 30
+        }
+      },
+      "normalized": {
+        "remark": "Hy2",
+        "protocol": "hysteria2",
+        "address": "edge.example.com",
+        "port": 8443,
+        "password": "hy2pass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "hy2.example.com",
+          "alpn": [
+            "h3"
+          ]
+        },
+        "hysteria2": {
+          "up_mbps": 50,
+          "down_mbps": 200,
+          "obfs_type": "salamander",
+          "obfs_password": "obfspw",
+          "port_hopping": "20000-50000",
+          "port_hop_interval": 30
+        }
+      },
+      "uri": "hysteria2://hy2pass@edge.example.com:8443?down=200\u0026hop_interval=30\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfspw\u0026sni=hy2.example.com\u0026up=50#Hy2",
+      "clash": {
+        "alpn": [
+          "h3"
+        ],
+        "down": "200 Mbps",
+        "hop-interval": 30,
+        "name": "Hy2",
+        "obfs": "salamander",
+        "obfs-password": "obfspw",
+        "password": "hy2pass",
+        "port": 8443,
+        "ports": "20000-50000",
+        "server": "edge.example.com",
+        "sni": "hy2.example.com",
+        "type": "hysteria2",
+        "udp": true,
+        "up": "50 Mbps"
+      },
+      "singbox": {
+        "down_mbps": 200,
+        "hop_interval": "30s",
+        "obfs": {
+          "password": "obfspw",
+          "type": "salamander"
+        },
+        "password": "hy2pass",
+        "server": "edge.example.com",
+        "server_port": 8443,
+        "server_ports": [
+          "20000:50000"
+        ],
+        "tag": "proxy",
+        "tls": {
+          "alpn": [
+            "h3"
+          ],
+          "enabled": true,
+          "server_name": "hy2.example.com"
+        },
+        "type": "hysteria2",
+        "up_mbps": 50
+      },
+      "xray_error": "render/xray: protocol \"hysteria2\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "tuic",
+      "input": {
+        "remark": "TUIC v5",
+        "protocol": "tuic",
+        "address": "edge.example.com",
+        "port": 8444,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "password": "tuicpass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "tuic.example.com"
+        },
+        "tuic": {
+          "congestion_control": "bbr",
+          "udp_relay_mode": "native",
+          "zero_rtt_handshake": true,
+          "heartbeat": 10
+        }
+      },
+      "normalized": {
+        "remark": "TUIC v5",
+        "protocol": "tuic",
+        "address": "edge.example.com",
+        "port": 8444,
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "password": "tuicpass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "tuic.example.com",
+          "alpn": [
+            "h3"
+          ]
+        },
+        "tuic": {
+          "congestion_control": "bbr",
+          "udp_relay_mode": "native",
+          "zero_rtt_handshake": true,
+          "heartbeat": 10
+        }
+      },
+      "uri": "tuic://b831381d-6324-4d53-ad4f-8cda48b30811:tuicpass@edge.example.com:8444?alpn=h3\u0026congestion_control=bbr\u0026sni=tuic.example.com\u0026udp_relay_mode=native#TUIC%20v5",
+      "clash": {
+        "alpn": [
+          "h3"
+        ],
+        "congestion-controller": "bbr",
+        "heartbeat-interval": 10000,
+        "name": "TUIC v5",
+        "password": "tuicpass",
+        "port": 8444,
+        "reduce-rtt": true,
+        "server": "edge.example.com",
+        "sni": "tuic.example.com",
+        "type": "tuic",
+        "udp": true,
+        "udp-relay-mode": "native",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811"
+      },
+      "singbox": {
+        "congestion_control": "bbr",
+        "heartbeat": "10s",
+        "password": "tuicpass",
+        "server": "edge.example.com",
+        "server_port": 8444,
+        "tag": "proxy",
+        "tls": {
+          "alpn": [
+            "h3"
+          ],
+          "enabled": true,
+          "server_name": "tuic.example.com"
+        },
+        "type": "tuic",
+        "udp_relay_mode": "native",
+        "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+        "zero_rtt_handshake": true
+      },
+      "xray_error": "render/xray: protocol \"tuic\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "anytls",
+      "input": {
+        "remark": "AnyTLS",
+        "protocol": "anytls",
+        "address": "edge.example.com",
+        "port": 8445,
+        "password": "anytlspass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "anytls.example.com"
+        },
+        "anytls": {
+          "idle_session_check_interval": 30,
+          "idle_session_timeout": 30,
+          "min_idle_sessions": 2
+        }
+      },
+      "normalized": {
+        "remark": "AnyTLS",
+        "protocol": "anytls",
+        "address": "edge.example.com",
+        "port": 8445,
+        "password": "anytlspass",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "tls",
+          "server_name": "anytls.example.com"
+        },
+        "anytls": {
+          "idle_session_check_interval": 30,
+          "idle_session_timeout": 30,
+          "min_idle_sessions": 2
+        }
+      },
+      "uri": "anytls://anytlspass@edge.example.com:8445?security=tls\u0026sni=anytls.example.com\u0026type=tcp#AnyTLS",
+      "clash": {
+        "idle-session-check-interval": 30,
+        "idle-session-timeout": 30,
+        "min-idle-session": 2,
+        "name": "AnyTLS",
+        "password": "anytlspass",
+        "port": 8445,
+        "server": "edge.example.com",
+        "sni": "anytls.example.com",
+        "type": "anytls",
+        "udp": true
+      },
+      "singbox": {
+        "idle_session_check_interval": "30s",
+        "idle_session_timeout": "30s",
+        "min_idle_session": 2,
+        "password": "anytlspass",
+        "server": "edge.example.com",
+        "server_port": 8445,
+        "tag": "proxy",
+        "tls": {
+          "enabled": true,
+          "server_name": "anytls.example.com"
+        },
+        "type": "anytls"
+      },
+      "xray_error": "render/xray: protocol \"anytls\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "wireguard-warp",
+      "input": {
+        "remark": "WARP 1",
+        "protocol": "wireguard",
+        "address": "162.159.192.1",
+        "port": 2408,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "wireguard": {
+          "private_key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "peer_private_key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ],
+          "mtu": 1280,
+          "persistent_keepalive": 25,
+          "reserved": [
+            55,
+            218,
+            131
+          ],
+          "local_address": [
+            "172.16.0.2/32",
+            "2606:4700:110:8fd2::1/128"
+          ]
+        }
+      },
+      "normalized": {
+        "remark": "WARP 1",
+        "protocol": "wireguard",
+        "address": "162.159.192.1",
+        "port": 2408,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "wireguard": {
+          "private_key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "peer_private_key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ],
+          "mtu": 1280,
+          "persistent_keepalive": 25,
+          "reserved": [
+            55,
+            218,
+            131
+          ],
+          "local_address": [
+            "172.16.0.2/32",
+            "2606:4700:110:8fd2::1/128"
+          ]
+        }
+      },
+      "uri": "wireguard://4NyxMUme2zGv5r3QWI0hJBlNglm1J%2FthoCE55PK29G8%3D@162.159.192.1:2408?address=172.16.0.2%2F32%2C2606%3A4700%3A110%3A8fd2%3A%3A1%2F128\u0026mtu=1280\u0026publickey=bmXOC%2BF1FxEMF9dyiK2H5%2F1SUtzH0JuVo51h2wPfgyo%3D\u0026reserved=55%2C218%2C131#WARP%201",
+      "clash": {
+        "allowed-ips": [
+          "0.0.0.0/0",
+          "::/0"
+        ],
+        "ip": "172.16.0.2/32",
+        "ipv6": "2606:4700:110:8fd2::1/128",
+        "mtu": 1280,
+        "name": "WARP 1",
+        "persistent-keepalive": 25,
+        "port": 2408,
+        "private-key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+        "public-key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+        "reserved": [
+          55,
+          218,
+          131
+        ],
+        "server": "162.159.192.1",
+        "type": "wireguard",
+        "udp": true
+      },
+      "singbox": {
+        "local_address": [
+          "172.16.0.2/32",
+          "2606:4700:110:8fd2::1/128"
+        ],
+        "mtu": 1280,
+        "peer_public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+        "private_key": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=",
+        "reserved": [
+          55,
+          218,
+          131
+        ],
+        "server": "162.159.192.1",
+        "server_port": 2408,
+        "tag": "proxy",
+        "type": "wireguard"
+      },
+      "xray": {
+        "protocol": "wireguard",
+        "settings": {
+          "address": [
+            "172.16.0.2/32",
+            "2606:4700:110:8fd2::1/128"
+          ],
+          "mtu": 1280,
+          "peers": [
+            {
+              "allowedIPs": [
+                "0.0.0.0/0",
+                "::/0"
+              ],
+              "endpoint": "162.159.192.1:2408",
+              "publicKey": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+            }
+          ],
+          "reserved": [
+            55,
+            218,
+            131
+          ],
+          "secretKey": "4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8="
+        },
+        "tag": "proxy"
+      }
+    },
+    {
+      "name": "shadowtls",
+      "input": {
+        "remark": "ShadowTLS v3",
+        "protocol": "shadowtls",
+        "address": "edge.example.com",
+        "port": 8446,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "shadowtls": {
+          "version": 3,
+          "password": "stlspass",
+          "handshake_host": "www.apple.com",
+          "handshake_port": 443,
+          "strict_mode": true
+        }
+      },
+      "normalized": {
+        "remark": "ShadowTLS v3",
+        "protocol": "shadowtls",
+        "address": "edge.example.com",
+        "port": 8446,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "shadowtls": {
+          "version": 3,
+          "password": "stlspass",
+          "handshake_host": "www.apple.com",
+          "handshake_port": 443,
+          "strict_mode": true,
+          "inner_method": "2022-blake3-aes-128-gcm",
+          "inner_password": "1AquAQKyDkuVUXo/H8Vb0g=="
+        }
+      },
+      "uri_error": "shadowtls has no standalone URI; export the wrapped shadowsocks node",
+      "clash_error": "export/clash: not representable in Clash.Meta: shadowtls; export the wrapped shadowsocks node",
+      "singbox": {
+        "password": "stlspass",
+        "server": "edge.example.com",
+        "server_port": 8446,
+        "strict_mode": true,
+        "tag": "proxy",
+        "tls": {
+          "enabled": true,
+          "server_name": "www.apple.com"
+        },
+        "type": "shadowtls",
+        "version": 3
+      },
+      "xray_error": "render/xray: protocol \"shadowtls\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "ssh",
+      "input": {
+        "remark": "SSH tunnel",
+        "protocol": "ssh",
+        "address": "edge.example.com",
+        "port": 22,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "ssh": {
+          "user": "forge",
+          "password": "sshpass"
+        }
+      },
+      "normalized": {
+        "remark": "SSH tunnel",
+        "protocol": "ssh",
+        "address": "edge.example.com",
+        "port": 22,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "ssh": {
+          "user": "forge",
+          "password": "sshpass"
+        }
+      },
+      "uri": "ssh://forge@edge.example.com:22#SSH%20tunnel",
+      "clash_error": "export/clash: not representable in Clash.Meta: protocol \"ssh\"",
+      "singbox": {
+        "password": "sshpass",
+        "server": "edge.example.com",
+        "server_port": 22,
+        "tag": "proxy",
+        "type": "ssh",
+        "user": "forge"
+      },
+      "xray_error": "render/xray: protocol \"ssh\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "brook",
+      "input": {
+        "remark": "Brook wsserver",
+        "protocol": "brook",
+        "address": "edge.example.com",
+        "port": 9700,
+        "password": "brookpw",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "brook": {
+          "mode": "wsserver",
+          "path": "/ws"
+        }
+      },
+      "normalized": {
+        "remark": "Brook wsserver",
+        "protocol": "brook",
+        "address": "edge.example.com",
+        "port": 9700,
+        "password": "brookpw",
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "brook": {
+          "mode": "wsserver",
+          "path": "/ws"
+        }
+      },
+      "uri": "brook://wsserver?password=brookpw\u0026server=edge.example.com%3A9700#Brook%20wsserver",
+      "clash_error": "export/clash: not representable in Clash.Meta: protocol \"brook\"",
+      "singbox_error": "render/singbox: protocol \"brook\" is not a sing-box protocol; use engine \"brook\"",
+      "xray_error": "render/xray: protocol \"brook\" is not an Xray protocol; use sing-box"
+    },
+    {
+      "name": "forgedns",
+      "input": {
+        "remark": "ForgeDNS tunnel",
+        "protocol": "forgedns",
+        "address": "ns1.tunnel.example.com",
+        "port": 53,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "forgedns": {
+          "adapter": "stormdns",
+          "zone": "t.example.com.",
+          "ns_host": "ns1.example.com",
+          "key": "dnskey",
+          "rrtype": "txt"
+        }
+      },
+      "normalized": {
+        "remark": "ForgeDNS tunnel",
+        "protocol": "forgedns",
+        "address": "ns1.tunnel.example.com",
+        "port": 53,
+        "transport": {
+          "network": "tcp"
+        },
+        "security": {
+          "type": "none"
+        },
+        "forgedns": {
+          "adapter": "stormdns",
+          "zone": "t.example.com",
+          "ns_host": "ns1.example.com",
+          "key": "dnskey",
+          "rrtype": "TXT",
+          "edns_buffer": 1232
+        }
+      },
+      "uri": "forgedns://stormdns@t.example.com?key=dnskey\u0026ns=ns1.example.com\u0026rr=TXT#ForgeDNS%20tunnel",
+      "clash_error": "export/clash: not representable in Clash.Meta: protocol \"forgedns\"",
+      "singbox_error": "render/singbox: protocol \"forgedns\" is not a sing-box protocol; use engine \"forgedns\"",
+      "xray_error": "render/xray: protocol \"forgedns\" is not an Xray protocol; use sing-box"
+    }
+  ],
+  "clash_yaml": "proxies:\n  - name: \"Edge 1. VLESS - Domain : 443\"\n    type: vless\n    server: edge.example.com\n    port: 443\n    alpn:\n      - http/1.1\n    client-fingerprint: chrome\n    network: ws\n    servername: eDgE.exAmple.com\n    tls: true\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n    ws-opts:\n      early-data-header-name: Sec-WebSocket-Protocol\n      headers:\n        Host: edge.example.com\n      max-early-data: 2560\n      path: /vl/9f2c1a\n  - name: \"Edge 2. VLESS - IPv4 : 8080\"\n    type: vless\n    server: 104.16.0.1\n    port: 8080\n    network: ws\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n    ws-opts:\n      early-data-header-name: Sec-WebSocket-Protocol\n      headers:\n        Host: edge.example.com\n      max-early-data: 2560\n      path: /vl/9f2c1a\n  - name: VPS REALITY\n    type: vless\n    server: 203.0.113.10\n    port: 443\n    client-fingerprint: chrome\n    flow: xtls-rprx-vision\n    reality-opts:\n      public-key: xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU\n      short-id: 0123abcd\n    servername: www.datadoghq.com\n    tls: true\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n  - name: gRPC node\n    type: vless\n    server: edge.example.com\n    port: 443\n    client-fingerprint: firefox\n    grpc-opts:\n      grpc-service-name: forge/grpc\n    network: grpc\n    servername: grpc.example.com\n    tls: true\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n  - name: \"Edge 1. Trojan - Domain : 443\"\n    type: trojan\n    server: edge.example.com\n    port: 443\n    alpn:\n      - http/1.1\n    client-fingerprint: chrome\n    network: ws\n    password: \"p@ss w/ord+special\u0026chars\"\n    udp: true\n    ws-opts:\n      early-data-header-name: Sec-WebSocket-Protocol\n      headers:\n        Host: edge.example.com\n      max-early-data: 2560\n      path: /tr/aa11\n  - name: \"VMess \u003cws\u003e \u0026 tls\"\n    type: vmess\n    server: edge.example.com\n    port: 443\n    alpn:\n      - h2\n      - http/1.1\n    alterId: 0\n    cipher: auto\n    client-fingerprint: chrome\n    network: ws\n    servername: vm.example.com\n    tls: true\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n    ws-opts:\n      headers:\n        Host: vm.example.com\n      path: /vm\n  - name: VMess tcp http\n    type: vmess\n    server: edge.example.com\n    port: 443\n    alterId: 0\n    cipher: auto\n    http-opts:\n      headers:\n        Host:\n          - obfs.example.com\n      method: GET\n      path:\n        - /index\n    network: http\n    udp: true\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n  - name: SS 2022\n    type: ss\n    server: edge.example.com\n    port: 443\n    cipher: 2022-blake3-aes-128-gcm\n    password: SGVsbG8gV29ybGQhIQ==\n    udp: true\n  - name: SS + v2ray-plugin\n    type: ss\n    server: edge.example.com\n    port: 443\n    cipher: chacha20-ietf-poly1305\n    password: hunter2\n    plugin: v2ray-plugin\n    plugin-opts:\n      host: ss.example.com\n      tls: true\n    udp: true\n  - name: SOCKS chain\n    type: socks5\n    server: edge.example.com\n    port: 1080\n    password: pass\n    udp: true\n    username: user\n  - name: HTTPS proxy\n    type: http\n    server: edge.example.com\n    port: 8443\n    password: \"p@ss\"\n    sni: proxy.example.com\n    tls: true\n    username: user\n  - name: Hy2\n    type: hysteria2\n    server: edge.example.com\n    port: 8443\n    alpn:\n      - h3\n    down: 200 Mbps\n    hop-interval: 30\n    obfs: salamander\n    obfs-password: obfspw\n    password: hy2pass\n    ports: 20000-50000\n    sni: hy2.example.com\n    udp: true\n    up: 50 Mbps\n  - name: TUIC v5\n    type: tuic\n    server: edge.example.com\n    port: 8444\n    alpn:\n      - h3\n    congestion-controller: bbr\n    heartbeat-interval: 10000\n    password: tuicpass\n    reduce-rtt: true\n    sni: tuic.example.com\n    udp: true\n    udp-relay-mode: native\n    uuid: b831381d-6324-4d53-ad4f-8cda48b30811\n  - name: AnyTLS\n    type: anytls\n    server: edge.example.com\n    port: 8445\n    idle-session-check-interval: 30\n    idle-session-timeout: 30\n    min-idle-session: 2\n    password: anytlspass\n    sni: anytls.example.com\n    udp: true\n  - name: WARP 1\n    type: wireguard\n    server: 162.159.192.1\n    port: 2408\n    allowed-ips:\n      - 0.0.0.0/0\n      - \"::/0\"\n    ip: 172.16.0.2/32\n    ipv6: \"2606:4700:110:8fd2::1/128\"\n    mtu: 1280\n    persistent-keepalive: 25\n    private-key: 4NyxMUme2zGv5r3QWI0hJBlNglm1J/thoCE55PK29G8=\n    public-key: bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=\n    reserved:\n      - 55\n      - 218\n      - 131\n    udp: true\nproxy-groups:\n  - name: PROXY\n    type: select\n    proxies:\n      - \"Edge 1. VLESS - Domain : 443\"\n      - \"Edge 2. VLESS - IPv4 : 8080\"\n      - VPS REALITY\n      - gRPC node\n      - \"Edge 1. Trojan - Domain : 443\"\n      - \"VMess \u003cws\u003e \u0026 tls\"\n      - VMess tcp http\n      - SS 2022\n      - SS + v2ray-plugin\n      - SOCKS chain\n      - HTTPS proxy\n      - Hy2\n      - TUIC v5\n      - AnyTLS\n      - WARP 1\nrules:\n  - \"MATCH,PROXY\"\n",
+  "links": "vless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?alpn=http%2F1.1\u0026fp=chrome\u0026host=edge.example.com\u0026path=%2Fvl%2F9f2c1a\u0026security=tls\u0026sni=eDgE.exAmple.com\u0026type=ws#Edge%201.%20VLESS%20-%20Domain%20:%20443\nvless://b831381d-6324-4d53-ad4f-8cda48b30811@104.16.0.1:8080?host=edge.example.com\u0026path=%2Fvl%2F9f2c1a\u0026security=none\u0026type=ws#Edge%202.%20VLESS%20-%20IPv4%20:%208080\nvless://b831381d-6324-4d53-ad4f-8cda48b30811@203.0.113.10:443?flow=xtls-rprx-vision\u0026fp=chrome\u0026pbk=xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU\u0026security=reality\u0026sid=0123abcd\u0026sni=www.datadoghq.com\u0026type=tcp#VPS%20REALITY\nvless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?fp=firefox\u0026mode=multi\u0026security=tls\u0026serviceName=forge%2Fgrpc\u0026sni=grpc.example.com\u0026type=grpc#gRPC%20node\nvless://b831381d-6324-4d53-ad4f-8cda48b30811@edge.example.com:443?fp=chrome\u0026host=cdn.example.com\u0026mode=packet-up\u0026path=%2Fxh\u0026pbk=pubkeyhere\u0026security=reality\u0026sid=aabb\u0026sni=www.speedtest.net\u0026type=xhttp#XHTTP%20+%20REALITY\ntrojan://p%40ss+w%2Ford%2Bspecial%26chars@edge.example.com:443?alpn=http%2F1.1\u0026fp=chrome\u0026host=edge.example.com\u0026path=%2Ftr%2Faa11\u0026security=tls\u0026sni=edge.example.com\u0026type=ws#Edge%201.%20Trojan%20-%20Domain%20:%20443\nvmess://eyJhZGQiOiJlZGdlLmV4YW1wbGUuY29tIiwiYWlkIjoiMCIsImFscG4iOiJoMixodHRwLzEuMSIsImZwIjoiY2hyb21lIiwiaG9zdCI6InZtLmV4YW1wbGUuY29tIiwiaWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEiLCJuZXQiOiJ3cyIsInBhdGgiOiIvdm0iLCJwb3J0IjoiNDQzIiwicHMiOiJWTWVzcyBcdTAwM2N3c1x1MDAzZSBcdTAwMjYgdGxzIiwic2N5IjoiYXV0byIsInNuaSI6InZtLmV4YW1wbGUuY29tIiwidGxzIjoidGxzIiwidHlwZSI6Im5vbmUiLCJ2IjoiMiJ9\nvmess://eyJhZGQiOiJlZGdlLmV4YW1wbGUuY29tIiwiYWlkIjoiMCIsImFscG4iOiIiLCJmcCI6IiIsImhvc3QiOiJvYmZzLmV4YW1wbGUuY29tIiwiaWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEiLCJuZXQiOiJ0Y3AiLCJwYXRoIjoiL2luZGV4IiwicG9ydCI6IjQ0MyIsInBzIjoiVk1lc3MgdGNwIGh0dHAiLCJzY3kiOiJhdXRvIiwic25pIjoiIiwidGxzIjoiIiwidHlwZSI6Imh0dHAiLCJ2IjoiMiJ9\nss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206U0dWc2JHOGdWMjl5YkdRaElRPT0@edge.example.com:443#SS%202022\nss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpodW50ZXIy@edge.example.com:443?plugin=v2ray-plugin%3Btls%3Bhost%3Dss.example.com#SS%20+%20v2ray-plugin\nsocks://dXNlcjpwYXNz@edge.example.com:1080#SOCKS%20chain\nhttps://user:p%40ss@edge.example.com:8443#HTTPS%20proxy\nhysteria2://hy2pass@edge.example.com:8443?down=200\u0026hop_interval=30\u0026mport=20000-50000\u0026obfs=salamander\u0026obfs-password=obfspw\u0026sni=hy2.example.com\u0026up=50#Hy2\ntuic://b831381d-6324-4d53-ad4f-8cda48b30811:tuicpass@edge.example.com:8444?alpn=h3\u0026congestion_control=bbr\u0026sni=tuic.example.com\u0026udp_relay_mode=native#TUIC%20v5\nanytls://anytlspass@edge.example.com:8445?security=tls\u0026sni=anytls.example.com\u0026type=tcp#AnyTLS\nwireguard://4NyxMUme2zGv5r3QWI0hJBlNglm1J%2FthoCE55PK29G8%3D@162.159.192.1:2408?address=172.16.0.2%2F32%2C2606%3A4700%3A110%3A8fd2%3A%3A1%2F128\u0026mtu=1280\u0026publickey=bmXOC%2BF1FxEMF9dyiK2H5%2F1SUtzH0JuVo51h2wPfgyo%3D\u0026reserved=55%2C218%2C131#WARP%201\nssh://forge@edge.example.com:22#SSH%20tunnel\nbrook://wsserver?password=brookpw\u0026server=edge.example.com%3A9700#Brook%20wsserver\nforgedns://stormdns@t.example.com?key=dnskey\u0026ns=ns1.example.com\u0026rr=TXT#ForgeDNS%20tunnel\n"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "forgeedge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ForgeEdge — the Cloudflare Worker deployment target for ForgePanel. VLESS/Trojan over WebSocket at the edge, DoH, WARP, and one canonical subscription shared with the VPS panel.",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "bun run typecheck && bun test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250801.0",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}
