@@ -31,10 +31,11 @@ The panel did not work end to end. The root causes, in the order a user hit them
 
 `docs/E2E_REPORT.md` has the real, pasted command output. In short:
 
-- **17 protocol × transport × security combinations carry real bytes** end to end
+- **20 protocol × transport × security combinations carry real bytes** end to end
   through the actual cores (VLESS ws/grpc/xhttp/httpupgrade/vision-tls, VMess
-  tcp/ws, Trojan tcp/ws/grpc, Shadowsocks incl. 2022, SOCKS, HTTP, Hysteria2,
-  TUIC, AnyTLS).
+  tcp/ws/grpc, Trojan tcp/ws/grpc, Shadowsocks incl. 2022, SOCKS, HTTP, Hysteria2,
+  TUIC, AnyTLS) — 24 total with the 4 REALITY variants, which are verified on a
+  public IP because their steal-handshake cannot complete on loopback.
 - The **live Verify** engine carries traffic through one canonical node (vmess,
   shadowsocks proven in ~3 ms).
 - **Playwright** drives the real browser through login, the bilingual Domains
@@ -47,11 +48,9 @@ The panel did not work end to end. The root causes, in the order a user hit them
 
 - **REALITY** relays its handshake to a real steal-site and cannot be verified on
   a loopback interface; it is verified against a public deployment IP.
-- **VMess over gRPC** is experimental: xray-core 26 deprecates both VMess and the
-  gRPC transport, and the combination does not carry traffic on that core version
-  even though the panel's rendered config is byte-identical to the VLESS/Trojan
-  gRPC cases that do pass. It is flagged experimental (ADR-0007), not presented as
-  production-ready.
+- **VMess over gRPC** works but is deprecated upstream: xray-core 26 warns that
+  both VMess and the gRPC transport are deprecated. It carries traffic in the
+  matrix; prefer VLESS for new deployments.
 - **Per-user traffic accounting** covers Xray-served protocols; sing-box protocols
   (Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard) are not metered because the official
   sing-box release is built without `v2ray_api` (see `docs/PROTOCOLS.md`).

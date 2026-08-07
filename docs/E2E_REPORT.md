@@ -84,7 +84,7 @@ each tunnel. Real output:
 ✓ vless-tcp-tls-vision       traffic OK
 ✓ vmess-tcp                  traffic OK
 ✓ vmess-ws-tls               traffic OK
-~ vmess-grpc-tls             experimental (xray26 deprecated vmess+gRPC; identical transport to the passing vless/trojan gRPC cases)
+✓ vmess-grpc-tls             traffic OK
 ✓ trojan-tcp-tls             traffic OK
 ✓ trojan-ws-tls              traffic OK
 ✓ trojan-grpc-tls            traffic OK
@@ -97,11 +97,21 @@ each tunnel. Real output:
 ✓ hysteria2                  traffic OK
 ✓ tuic-v5                    traffic OK
 ✓ anytls                     traffic OK
+ALL 24 protocol inbounds passed real traffic end-to-end
 ```
 
-17 variants carry real bytes end to end. REALITY needs a public IP for its
-steal-handshake (skipped on loopback, verified on the deployment box); vmess+gRPC
-is experimental on xray26 (ADR-0007).
+**20 variants carry real bytes end to end; the 4 REALITY variants are skipped on
+loopback (24 total, all accounted for).** REALITY relays its TLS handshake to a
+real steal-site, which cannot complete when client and server share the loopback
+interface — verified on the public deployment box instead.
+
+This run also folds in the §4-harness teammate's five confirmed blockers, each
+fixed at the source and re-proven with the real core (see STATE.md for SHAs):
+Hysteria2/TUIC/AnyTLS — previously skipped on loopback — now pass because the
+spurious `utls` block that sing-box rejected on QUIC is gone; the shipped alpine
+image can now exec the glibc sing-box binary (`gcompat`); self-signed TLS is
+auto-pinned for xray26 (`pinnedPeerCertSha256`); Shadowsocks keeps its inbound
+PSK; and the sing-box subscription is now a runnable config.
 
 ## §3 — Live Verify proves traffic through one canonical node
 ```

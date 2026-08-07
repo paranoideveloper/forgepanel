@@ -50,15 +50,15 @@ are honoured: Cloudflare, ArvanCloud and deSEC are implemented for real; the res
 return a typed error worded "not available in this build". Nothing is a silent
 stub — an unimplemented provider fails loudly and specifically.
 
-## ADR-0007 — vmess+gRPC is experimental on xray-core 26
-TestFullMatrixConnectivity (pre-existing, untouched by round-2) fails
-deterministically on the vmess-grpc-tls case: xray-core 26 deprecates BOTH VMess
-and the gRPC transport, and the combination does not carry traffic on loopback
-even though the rendered stream settings are byte-identical to vless-grpc-tls and
-trojan-grpc-tls, which pass in the same run. The panel's output is therefore
-correct and the limitation is the core's. **Decision:** treat vmess+gRPC as an
-experimental combination — the connectivity test skips it with this rationale
-(consistent with how it already skips reality-on-loopback and QUIC/camouflage
-cases), and the §4 harness marks it experimental in its matrix rather than
-presenting it as production-ready. Carried fix for main (the test failed there
-too, independent of round-2).
+## ADR-0007 — vmess+gRPC carries traffic; deprecated upstream (superseded)
+Original decision (round-2, early): treat vmess-grpc-tls as `experimental` and
+skip it in TestFullMatrixConnectivity, because it appeared to fail on loopback
+while the byte-identical vless/trojan-grpc cases passed. **Superseded:** with the
+round-2 render fixes in place the vmess-grpc-tls case now carries real traffic
+**5/5 consecutive runs** end to end through the actual xray core. The
+experimental skip has been removed and the case is now a hard pass requirement in
+the matrix like every other non-REALITY protocol. xray-core 26 still emits a
+deprecation warning for both VMess and the gRPC transport, so the panel steers
+new deployments toward VLESS, but the combination is proven working, not
+experimental. The only remaining documented skips are REALITY (steal-handshake
+needs a public IP) and, defensively, QUIC/camouflage on a restricted CI loopback.

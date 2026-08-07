@@ -92,17 +92,6 @@ func TestFullMatrixConnectivity(t *testing.T) {
 			t.Logf("~ %-26s skipped on loopback (%s; env-sensitive; verified on public IP)", n.Remark, detail)
 			continue
 		}
-		// VMess-over-gRPC is doubly-deprecated in xray-core 26 (it warns on BOTH
-		// "VMess is deprecated" and "gRPC transport is deprecated") and does not
-		// carry traffic on this core version even with a correctly-rendered config
-		// — the rendered stream settings are byte-identical to vless-grpc-tls and
-		// trojan-grpc-tls, which DO pass here, so the panel's output is correct and
-		// the failure is the core's. It is surfaced as `experimental` in the §4
-		// connectivity-harness matrix rather than presented as production-ready.
-		if n.Protocol == model.ProtoVMess && n.Transport.Network == model.NetGRPC {
-			t.Logf("~ %-26s experimental (xray26 deprecated vmess+gRPC; identical transport to the passing vless/trojan gRPC cases)", n.Remark)
-			continue
-		}
 		fails = append(fails, n.Remark+": "+detail)
 		t.Logf("✗ %-26s FAILED: %s", n.Remark, detail)
 	}
