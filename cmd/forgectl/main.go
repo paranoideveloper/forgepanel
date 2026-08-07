@@ -37,6 +37,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "provision":
+		err = cmdProvision(os.Args[2:])
 	case "keygen":
 		err = cmdKeygen(os.Args[2:])
 	case "convert":

@@ -26,6 +26,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core"
+	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/domain"
 	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
@@ -383,6 +384,17 @@ func (s *Server) routes() {
 			admin.POST("/inbounds/validate", s.handleValidateInbound)
 			admin.POST("/inbounds/:id/verify", s.handleVerifyInbound)
 			admin.GET("/doctor", s.handleDoctor)
+			// §5 Domain & DNS automation wizard (Cloudflare-first). Mounted under
+			// /api/admin/dns/…; its own DB-backed store + AES-GCM credential
+			// encryption. Registration is best-effort: a store/key failure must not
+			// take the rest of the admin API down.
+			if s.db != nil {
+				if gs, err := dns.NewGormStore(s.db.DB()); err == nil {
+					if enc, err := dns.NewAESGCMFromPassphrase(deriveSecret(s.cfg)); err == nil {
+						dns.RegisterRoutes(admin, dns.Deps{Credentials: gs, Encryptor: enc, Pools: gs, CleanIPs: gs})
+					}
+				}
+			}
 			admin.GET("/groups", s.handleListGroups)
 			admin.POST("/groups", s.handleCreateGroup)
 			admin.GET("/groups/:id", s.handleGetGroup)
