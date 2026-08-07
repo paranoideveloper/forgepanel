@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1
+#
+# ForgePanel, built for the connectivity harness.
+#
+# It mirrors the production Dockerfile at the repository root — same builder,
+# same static CGO-free build, same non-root runtime user and data directory —
+# with two deliberate differences:
+#
+#   * The frontend build (bun) is skipped. The harness drives the REST API, and
+#     the committed assets under internal/api/web satisfy the //go:embed, so
+#     bringing a JS toolchain into the image would only slow the run down.
+#   * The proxy cores are NOT downloaded here. They are bind-mounted at the exact
+#     path internal/core/binmgr resolves, so the panel and the client container
+#     drive byte-identical binaries and a run needs no network.
+#
+# RUNTIME BASE. Production uses alpine:3.21. This image uses debian-slim, and
+# that difference is a finding rather than a convenience: the sing-box release
+# archive binmgr pins (sing-box-<v>-linux-amd64.tar.gz) is dynamically linked
+# against glibc, so on Alpine it cannot be executed at all —
+#
+#     $ docker run --rm -v cores:/cores alpine:3.21 /cores/sing-box-1.13.15/sing-box version
+#     sh: /cores/sing-box-1.13.15/sing-box: not found      (exit 127)
+#
+# — which would make every sing-box protocol (Hysteria2, TUIC, AnyTLS,
+# ShadowTLS, WireGuard, SSH) untestable here and, more importantly, unusable in
+# the shipped image. run.sh re-runs that check against alpine:3.21 on every run
+# and records the result in the matrix, so the harness reports the production
+# defect instead of hiding it behind its own base image.
+#
+# Build from the repository root:
+#   docker build -f test/harness/Dockerfile.panel -t forgepanel-harness-panel .
+FROM golang:1.25-alpine AS build
+ENV GOTOOLCHAIN=auto
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=harness
+ARG COMMIT=harness
+ARG BUILD_DATE=harness
+RUN VP=github.com/forgepanel/forgepanel/internal/version && \
+    LD="-s -w -X ${VP}.Version=${VERSION} -X ${VP}.Commit=${COMMIT} -X ${VP}.Date=${BUILD_DATE}" && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgepanel ./cmd/forgepanel && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgectl   ./cmd/forgectl
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata libcap2-bin curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
+COPY --from=build /out/forgectl   /usr/local/bin/forgectl
+
+# Same privilege model as production: a non-root user plus the single capability
+# that covers binding low ports. The harness uses high ports, but running with a
+# different privilege model than production would make its results say less.
+RUN groupadd -g 65532 forge && \
+    useradd -u 65532 -g forge -M -d /var/lib/forgepanel -s /usr/sbin/nologin forge && \
+    mkdir -p /var/lib/forgepanel/bin && \
+    chown -R forge:forge /var/lib/forgepanel && \
+    setcap cap_net_bind_service=+ep /usr/local/bin/forgepanel
+
+ENV FORGEPANEL_DATA=/var/lib/forgepanel
+WORKDIR /var/lib/forgepanel
+USER forge
+
+HEALTHCHECK --interval=3s --timeout=4s --start-period=3s --retries=20 \
+  CMD curl -fsS "http://127.0.0.1:${FORGEPANEL_PANEL_PORT:-2053}/healthz" || exit 1
+
+CMD ["/usr/local/bin/forgepanel"]

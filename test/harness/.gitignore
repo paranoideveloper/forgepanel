@@ -1,0 +1,4 @@
+# Downloaded proxy cores (fetched and SHA-256 verified by run.sh) and the
+# per-run output. Both are reproducible; neither belongs in the repository.
+.cache/
+results/
