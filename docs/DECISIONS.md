@@ -49,3 +49,16 @@ while §8 forbids the literal string "not implemented" outside third_party. Both
 are honoured: Cloudflare, ArvanCloud and deSEC are implemented for real; the rest
 return a typed error worded "not available in this build". Nothing is a silent
 stub — an unimplemented provider fails loudly and specifically.
+
+## ADR-0007 — vmess+gRPC is experimental on xray-core 26
+TestFullMatrixConnectivity (pre-existing, untouched by round-2) fails
+deterministically on the vmess-grpc-tls case: xray-core 26 deprecates BOTH VMess
+and the gRPC transport, and the combination does not carry traffic on loopback
+even though the rendered stream settings are byte-identical to vless-grpc-tls and
+trojan-grpc-tls, which pass in the same run. The panel's output is therefore
+correct and the limitation is the core's. **Decision:** treat vmess+gRPC as an
+experimental combination — the connectivity test skips it with this rationale
+(consistent with how it already skips reality-on-loopback and QUIC/camouflage
+cases), and the §4 harness marks it experimental in its matrix rather than
+presenting it as production-ready. Carried fix for main (the test failed there
+too, independent of round-2).
