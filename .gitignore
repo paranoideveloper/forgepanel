@@ -8,6 +8,6 @@ web/dist/
 third_party/
 
 # build artifacts / local run state
-forgectl
+/forgectl
 .claude-flow/
 e2e/.paneldata
