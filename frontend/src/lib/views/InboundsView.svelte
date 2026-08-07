@@ -9,12 +9,13 @@
   interface Row {
     id: number; remark: string; protocol: string; port: number; enabled: boolean;
     reachable?: boolean;
-    node?: { transport?: { network?: string }; security?: { type?: string } };
+    node?: any;
   }
 
   let rows = $state<Row[]>([]);
   let loading = $state(true);
   let creating = $state(false);
+  let editRow = $state<Row | null>(null);
   let verifyResults = $state<Record<number, { pass: boolean; latency?: number; detail?: string }>>({});
 
   let cfgOpen = $state(false);
@@ -62,7 +63,13 @@
 
   function onSaved() {
     creating = false;
+    editRow = null;
     load();
+  }
+
+  function edit(r: Row) {
+    creating = false;
+    editRow = editRow?.id === r.id ? null : r;
   }
 
   async function quickReality() {
@@ -150,6 +157,15 @@
   </div>
 {/if}
 
+{#if editRow}
+  <div class="card creator" data-testid="inbound-editor">
+    <h3>Edit inbound #{editRow.id} — {editRow.remark || editRow.protocol}</h3>
+    {#key editRow.id}
+      <InboundForm onSaved={onSaved} initial={editRow.node} editId={editRow.id} />
+    {/key}
+  </div>
+{/if}
+
 <div class="card">
   {#if loading}
     <p class="muted">Loading…</p>
@@ -184,6 +200,7 @@
             </td>
             <td class="row-actions">
               <button class="sm" data-testid="config-btn" onclick={() => showConfig(r)}>Config</button>
+              <button class="sm" data-testid="edit-btn" onclick={() => edit(r)}>Edit</button>
               <button class="sm" onclick={() => verify(r)}>Verify</button>
               <button class="sm" onclick={() => clone(r)}>Clone</button>
               <button class="sm" onclick={() => toggle(r)}>{r.enabled ? 'Disable' : 'Enable'}</button>

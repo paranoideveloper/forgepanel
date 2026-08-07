@@ -2,11 +2,13 @@
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
-  import { buildNode, fieldsFor, type Schema, type Field } from '$lib/nodebuild';
+  import { buildNode, fieldsFor, getPath, type Schema, type Field } from '$lib/nodebuild';
 
-  let { onSaved = () => {}, initialProto = 'vless' } = $props<{
+  let { onSaved = () => {}, initialProto = 'vless', initial = null, editId = 0 } = $props<{
     onSaved?: () => void;
     initialProto?: string;
+    initial?: Record<string, any> | null;
+    editId?: number;
   }>();
 
   let schema = $state<Schema | null>(null);
@@ -30,13 +32,31 @@
   onMount(async () => {
     try {
       schema = await apiFetch<Schema>('/protocols/schema');
-      // seed defaults for the initial protocol
-      applyDefaults();
+      if (initial) prefillFrom(initial);
+      else applyDefaults();
       schedulePreview();
     } catch (e: any) {
       loadError = e.message || 'failed to load protocol schema';
     }
   });
+
+  // prefillFrom decomposes an existing node back into the flat form model, so an
+  // inbound can be edited with every field pre-populated.
+  function prefillFrom(node: Record<string, any>) {
+    if (!schema) return;
+    proto = node.protocol || proto;
+    transport = node.transport?.network || 'tcp';
+    security = node.security?.type || 'none';
+    values['remark'] = node.remark ?? '';
+    values['port'] = node.port ?? 443;
+    values['address'] = node.address ?? '';
+    for (const sec of fieldsFor(schema, proto, transport, security)) {
+      for (const f of sec.fields) {
+        const v = getPath(node, f.key);
+        if (v !== undefined) values[f.key] = Array.isArray(v) ? v.join(',') : v;
+      }
+    }
+  }
 
   function applyDefaults() {
     if (!schema) return;
@@ -118,11 +138,15 @@
     saving = true;
     try {
       const node = buildNode(schema, proto, transport, security, values);
-      const created = await apiFetch<{ id: number }>('/admin/inbounds', {
-        method: 'POST',
-        body: JSON.stringify(node),
-      });
-      showToast(`Inbound #${created.id} created (${proto})`, 'success');
+      if (editId) {
+        // confirm=true accepts breaking changes (port/proto/transport/security)
+        // the safe-edit guard would otherwise refuse.
+        await apiFetch(`/admin/inbounds/${editId}?confirm=true`, { method: 'PUT', body: JSON.stringify(node) });
+        showToast(`Inbound #${editId} updated`, 'success');
+      } else {
+        const created = await apiFetch<{ id: number }>('/admin/inbounds', { method: 'POST', body: JSON.stringify(node) });
+        showToast(`Inbound #${created.id} created (${proto})`, 'success');
+      }
       onSaved();
     } catch (e: any) {
       showToast(e.message || 'failed to create inbound', 'error');
@@ -221,7 +245,7 @@
       {/each}
 
       <button class="save" data-testid="save-inbound" onclick={save} disabled={saving}>
-        {saving ? 'Saving…' : 'Save Inbound'}
+        {saving ? 'Saving…' : editId ? 'Update Inbound' : 'Save Inbound'}
       </button>
     </div>
 
