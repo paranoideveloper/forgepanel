@@ -17,6 +17,7 @@
 
   const viewLoaders: Record<string, () => Promise<{ default: Component }>> = {
     overview: () => import('$lib/views/OverviewView.svelte'),
+    inbounds: () => import('$lib/views/InboundsView.svelte'),
     users: () => import('$lib/views/UsersView.svelte'),
     nodes: () => import('$lib/views/NodesView.svelte'),
     studio: () => import('../routes/studio/StudioView.svelte'),

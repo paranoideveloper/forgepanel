@@ -9,6 +9,7 @@
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
     { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
     { id: 'studio', label: 'Config Studio', icon: '⚙️' },
