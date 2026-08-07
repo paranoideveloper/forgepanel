@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/core/engine"
+	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -124,7 +125,19 @@ func (s *Server) reloadEngines() {
 	if s.isClosed() || s.engine == nil {
 		return
 	}
-	_, _ = s.engine.ReloadSpecs(s.enabledInboundSpecs())
+	specs := s.enabledInboundSpecs()
+	_, _ = s.engine.ReloadSpecs(specs)
+	// Keep the host firewall in sync with the inbound ports so a created inbound
+	// is actually reachable from the internet — otherwise it listens, passes the
+	// loopback Verify, and ufw silently drops every external client (a phone).
+	// Best-effort and backgrounded; never blocks or fails the reload.
+	ports := make([]int, 0, len(specs))
+	for _, sp := range specs {
+		if sp.Node != nil && sp.Node.Port > 0 {
+			ports = append(ports, sp.Node.Port)
+		}
+	}
+	go firewall.EnsureOpen(ports)
 }
 
 // handleEngines returns the supervised cores' live status (spec §6).

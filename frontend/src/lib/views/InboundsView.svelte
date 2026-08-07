@@ -8,6 +8,7 @@
 
   interface Row {
     id: number; remark: string; protocol: string; port: number; enabled: boolean;
+    reachable?: boolean;
     node?: { transport?: { network?: string }; security?: { type?: string } };
   }
 
@@ -168,7 +169,12 @@
             <td>{r.node?.transport?.network || '—'}</td>
             <td>{r.node?.security?.type || 'none'}</td>
             <td>{r.port}</td>
-            <td><span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? 'Enabled' : 'Disabled'}</span></td>
+            <td>
+              <span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? 'Enabled' : 'Disabled'}</span>
+              {#if r.enabled && r.reachable === false}
+                <span class="badge err" data-testid="fw-blocked" title="This port is blocked by the host firewall (ufw). External clients — a phone — cannot reach it even though Verify passes on loopback. Open it: ufw allow {r.port}">🔥 firewall</span>
+              {/if}
+            </td>
             <td>
               {#if verifyResults[r.id]}
                 <span class="badge {verifyResults[r.id].pass ? 'ok' : 'err'}" title={verifyResults[r.id].detail || ''}>

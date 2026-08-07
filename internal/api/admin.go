@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/auth"
+	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -153,10 +154,12 @@ func (s *Server) handleListInbounds(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	reach := firewall.Reachability()
 	out := make([]gin.H, 0, len(ins))
 	for _, in := range ins {
 		n, _ := in.Node()
-		out = append(out, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port, "enabled": in.Enabled, "node": n})
+		out = append(out, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port,
+			"enabled": in.Enabled, "node": n, "reachable": reach(in.Port)})
 	}
 	c.JSON(200, out)
 }
