@@ -423,16 +423,31 @@ func grade(res *Result) {
 		return
 	}
 	if res.Accounting != nil && !res.Accounting.OK {
-		if res.Engine == "sing-box" {
+		switch {
+		case res.Engine == "sing-box":
 			res.Status = StatusExperimental
 			res.Reason = "traffic is proven, but per-user accounting cannot be proven for this engine: " +
 				"the official sing-box archives the panel pins are built without with_v2ray_api, so the " +
 				"panel collects no counters for sing-box inbounds (documented in internal/core/engine/multi.go). " +
 				res.Accounting.Reason
-			return
+		case singleCredentialInbound(res.Protocol):
+			// These inbounds carry ONE credential shared by every user:
+			// engine.applyXrayClients returns early for them, so no per-user email
+			// is ever stamped and the stats poller has no identity to attribute
+			// bytes to. The tunnel is proven; the accounting is not implemented for
+			// this inbound shape, which is a different claim and recorded as such.
+			res.Status = StatusExperimental
+			res.Reason = "traffic is proven, but this inbound carries a single shared credential: " +
+				"internal/core/engine/multi.go applyXrayClients expands settings.clients only for VLESS, " +
+				"VMess and Trojan and returns early for " + res.Protocol + ", so no per-user email tag " +
+				"exists and `xray api statsquery -pattern user>>>` reports nothing to attribute. " +
+				"(SS-2022 could support this — xray's shadowsocks inbound takes a multi-user clients " +
+				"array — so for the 2022-blake3 ciphers this is unimplemented rather than impossible.) " +
+				res.Accounting.Reason
+		default:
+			res.Status = StatusFail
+			res.Reason = "traffic flows but the panel did not account it: " + res.Accounting.Reason
 		}
-		res.Status = StatusFail
-		res.Reason = "traffic flows but the panel did not account it: " + res.Accounting.Reason
 		return
 	}
 	res.Status = StatusPass
@@ -727,4 +742,16 @@ func listenOrEmpty(hasTCPPort bool, listen string) string {
 		return listen
 	}
 	return ""
+}
+
+// singleCredentialInbound reports whether the panel serves this protocol from
+// one credential shared by every entitled user, rather than materialising a
+// client per user onto the inbound.
+func singleCredentialInbound(protocol string) bool {
+	switch protocol {
+	case "shadowsocks", "socks", "http":
+		return true
+	default:
+		return false
+	}
 }
