@@ -1,6 +1,6 @@
 module github.com/forgepanel/forgepanel
 
-go 1.25.0
+go 1.25.12
 
 require (
 	github.com/gin-gonic/gin v1.10.1
@@ -9,9 +9,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/miekg/dns v1.1.62
 	github.com/pelletier/go-toml/v2 v2.2.4
-	golang.org/x/crypto v0.31.0
-	golang.org/x/net v0.33.0
-	golang.org/x/term v0.28.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/net v0.56.0
+	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.31.2
 )
@@ -44,11 +44,11 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
-	golang.org/x/tools v0.28.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	modernc.org/libc v1.22.5 // indirect
