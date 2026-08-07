@@ -66,8 +66,15 @@ token (or via the GitHub UI) to enable branch dispatch. Not retried; does not ga
 - `2318d00` govulncheck: x/net v0.56.0, x/text v0.39.0, go directive -> 1.25.12.
 - `2e5e06e` shellcheck: install.sh SC2155/SC2015.
 These heal main's red CI when the branch is merged.
+- `fa4740f` SPA asset serving (the panel UI was entirely non-functional on main).
+- `b7e47c8` frontend↔backend API contract (login, overview, groups, presets) — the SPA could not log in or load on main.
 
 ## Log
+
+- `c88256c` feat(inbounds): BUG-4 — safe-edit warnings (confirm on port/proto/transport change), clone, toggle, bulk, undo. 4 tests.
+- `fa4740f` fix(panel): serve the SvelteKit SPA assets — the UI was 100% dead (/_app/* 404). CRITICAL. Carried for main.
+- `b7e47c8` fix(panel): repair frontend↔backend contract (login /api/login+access_token, /admin/overview, /admin/groups, /protocols/presets) + Playwright e2e desktop+mobile bilingual, 6/6. Carried for main.
+
 
 - `126117a` feat(domains): BUG-3 backend — registry, cascade (SNI/Host/addr), one-click TLS w/ honest preflight, no-domain REALITY guidance (EN+FA). 9 tests.
 - `be1ef0c` feat(domains): BUG-3 frontend — Domains view + nav tab + no-domain banner + REALITY one-click. 2 vitest tests. Proven live: inbound inherits default domain, link rides it.

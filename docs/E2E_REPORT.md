@@ -47,3 +47,21 @@ The inbound carried no domain of its own, yet the exported client link dials the
 domain and its SNI + WS Host both cascaded from it. `allowInsecure=1` appears only
 because no real certificate exists for the test domain (honest self-signed
 fallback) — the panel never presents it as verified.
+
+## BUG-4 + UI wiring (Playwright, real browser, desktop + mobile)
+
+Two critical bugs were found only by driving the real UI: the SvelteKit assets
+were never served (/_app/* → 404, the panel had no working UI), and the SPA
+called endpoints that do not exist (login hit /api/auth/login not /api/login;
+the dashboard hit /api/health). Both fixed.
+
+```
+$ make e2e   (cd e2e && bunx playwright test)
+  ✓ [desktop] panel UI boots — login works and the shell renders
+  ✓ [desktop] Domains: no-domain banner is bilingual and a domain can be added
+  ✓ [desktop] BUG-4: inbound edit lifecycle persists and undo restores
+  ✓ [mobile]  panel UI boots — login works and the shell renders
+  ✓ [mobile]  Domains: no-domain banner is bilingual and a domain can be added
+  ✓ [mobile]  BUG-4: inbound edit lifecycle persists and undo restores
+  6 passed
+```
