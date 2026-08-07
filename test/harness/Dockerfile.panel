@@ -13,19 +13,20 @@
 #     path internal/core/binmgr resolves, so the panel and the client container
 #     drive byte-identical binaries and a run needs no network.
 #
-# RUNTIME BASE. Production uses alpine:3.21. This image uses debian-slim, and
-# that difference is a finding rather than a convenience: the sing-box release
-# archive binmgr pins (sing-box-<v>-linux-amd64.tar.gz) is dynamically linked
-# against glibc, so on Alpine it cannot be executed at all —
+# RUNTIME BASE. This image mirrors production: alpine:3.21 with the same runtime
+# package set. That is deliberate and load-bearing.
 #
-#     $ docker run --rm -v cores:/cores alpine:3.21 /cores/sing-box-1.13.15/sing-box version
-#     sh: /cores/sing-box-1.13.15/sing-box: not found      (exit 127)
+# The sing-box release archive binmgr pins is dynamically linked against glibc,
+# so on a bare Alpine it cannot be executed at all — `sh: …/sing-box: not found`,
+# exit 127 — which made every sing-box protocol (Hysteria2, TUIC, AnyTLS,
+# ShadowTLS, WireGuard, SSH) dead in the shipped container. The production
+# Dockerfile now installs `gcompat`, which supplies the glibc shim.
 #
-# — which would make every sing-box protocol (Hysteria2, TUIC, AnyTLS,
-# ShadowTLS, WireGuard, SSH) untestable here and, more importantly, unusable in
-# the shipped image. run.sh re-runs that check against alpine:3.21 on every run
-# and records the result in the matrix, so the harness reports the production
-# defect instead of hiding it behind its own base image.
+# Running the harness panel on the same base is what turns that fix into
+# something proven rather than asserted: if gcompat were ever dropped, every
+# sing-box row in the matrix would go red here. run.sh additionally re-execs each
+# pinned core inside the production runtime package set on every run and records
+# the outcome in results/preflight.json.
 #
 # Build from the repository root:
 #   docker build -f test/harness/Dockerfile.panel -t forgepanel-harness-panel .
@@ -46,11 +47,12 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgepanel ./cmd/forgepanel && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgectl   ./cmd/forgectl
 
-FROM debian:bookworm-slim
+FROM alpine:3.21
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tzdata libcap2-bin curl && \
-    rm -rf /var/lib/apt/lists/*
+# The same packages the production runtime stage installs, plus curl for the
+# healthcheck. gcompat is the one that matters: without it the pinned sing-box
+# cannot be exec'd at all.
+RUN apk add --no-cache ca-certificates tzdata libcap gcompat curl
 
 COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
 COPY --from=build /out/forgectl   /usr/local/bin/forgectl
@@ -58,8 +60,8 @@ COPY --from=build /out/forgectl   /usr/local/bin/forgectl
 # Same privilege model as production: a non-root user plus the single capability
 # that covers binding low ports. The harness uses high ports, but running with a
 # different privilege model than production would make its results say less.
-RUN groupadd -g 65532 forge && \
-    useradd -u 65532 -g forge -M -d /var/lib/forgepanel -s /usr/sbin/nologin forge && \
+RUN addgroup -g 65532 -S forge && \
+    adduser -u 65532 -S -G forge -h /var/lib/forgepanel forge && \
     mkdir -p /var/lib/forgepanel/bin && \
     chown -R forge:forge /var/lib/forgepanel && \
     setcap cap_net_bind_service=+ep /usr/local/bin/forgepanel

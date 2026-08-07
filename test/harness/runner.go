@@ -327,7 +327,7 @@ func (r *Runner) Run(c Case) Result {
 			return err
 		}
 		core = cr
-		tcp = r.probeWithRetry(core.Addr(), seed)
+		tcp = r.probeWithRetry(core.Addr(), listenOrEmpty(tcpProto, listen), seed)
 		return nil
 	}
 
@@ -496,18 +496,30 @@ func credField(engine, field string) string {
 // probeWithRetry gives a freshly reloaded engine a moment to pick up the user's
 // credential. Creating a user and assigning an inbound each trigger their own
 // asynchronous engine reload, so the first attempt can legitimately race.
-func (r *Runner) probeWithRetry(socksAddr string, seed int64) TCPResult {
-	// A shorter budget than Env.Timeout: 256 KiB across a container bridge is
-	// milliseconds, so anything near this deadline is a stall, and the whole
+// probeWithRetry pushes the payload, retrying around the panel's own churn.
+//
+// Creating the inbound, creating the user and assigning it each fire a separate
+// asynchronous engine reload, and every reload REPLACES the running core — so
+// an inbound that was listening a moment ago answers the next connection with a
+// reset. That is a property of the panel under test, not a flaw in the tunnel,
+// so the probe waits for the listener to come back before each attempt instead
+// of scoring the restart as a failure. listen may be empty for QUIC protocols,
+// where there is no TCP port to wait on.
+func (r *Runner) probeWithRetry(socksAddr, listen string, seed int64) TCPResult {
+	// A shorter per-attempt budget than Env.Timeout: 256 KiB across a container
+	// bridge is milliseconds, so anything near this deadline is a stall, and the
 	// matrix would otherwise spend minutes waiting on tunnels that are dead.
-	budget := 12 * time.Second
+	const budget = 15 * time.Second
 	var last TCPResult
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 5; attempt++ {
+		if listen != "" {
+			_ = waitPort(listen, 10*time.Second)
+		}
 		last = ProbeHTTP(socksAddr, r.Env.Origin, seed, budget)
 		if last.OK {
 			return last
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 	return last
 }
@@ -706,4 +718,13 @@ func sanitize(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// listenOrEmpty returns the inbound's listen address for the protocols that
+// have a TCP port to wait on, and "" for the QUIC ones that do not.
+func listenOrEmpty(hasTCPPort bool, listen string) string {
+	if hasTCPPort {
+		return listen
+	}
+	return ""
 }

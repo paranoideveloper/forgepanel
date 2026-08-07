@@ -102,25 +102,33 @@ fetch_cores
 # ---------------------------------------------------------------------------
 # 1b. can the SHIPPED image actually execute these cores?
 #
-# The harness runs its panel on a glibc base so every protocol is testable, but
-# production ships alpine. That is exactly the kind of difference a harness must
-# not paper over, so each pinned core is exec'd inside the production base image
-# and the outcome is written next to the matrix for the driver to report.
+# The pinned sing-box release is dynamically linked against glibc, so on a bare
+# musl userland it cannot be exec'd at all. The production Dockerfile installs
+# `gcompat` to supply the shim. Whether that is still true is not something to
+# take on trust: each pinned core is exec'd inside the production runtime base
+# WITH THE PACKAGE SET THAT DOCKERFILE INSTALLS — read out of the Dockerfile, so
+# dropping gcompat there turns this check red — and the outcome is written next
+# to the matrix for the driver to fold into the report.
 # ---------------------------------------------------------------------------
 PROD_BASE="$(grep -oE '^FROM alpine:[0-9.]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^FROM //')"
 PROD_BASE="${PROD_BASE:-alpine:3.21}"
+# The runtime stage's apk line is the last one in the file; the builder stage's
+# comes first and is irrelevant here.
+PROD_PKGS="$(grep -oE '^RUN apk add --no-cache [a-z0-9 .+-]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^RUN apk add --no-cache //')"
+PROD_PKGS="${PROD_PKGS:-ca-certificates}"
 
 preflight() {
   mkdir -p "$RESULTS"
   local out="$RESULTS/preflight.json"
   local entries=()
+  log "preflight base=$PROD_BASE packages=[$PROD_PKGS]"
   for pair in "xray:xray-$XRAY_VERSION/xray" "sing-box:sing-box-$SINGBOX_VERSION/sing-box"; do
     local engine="${pair%%:*}" rel="${pair#*:}"
     local text rc
     text="$(docker run --rm -v "$CACHE:/cores:ro" "$PROD_BASE" \
-              /cores/"$rel" version 2>&1 | head -2 || true)"
+              sh -c "apk add --no-cache $PROD_PKGS >/dev/null 2>&1; /cores/$rel version 2>&1 | head -2" || true)"
     rc="$(docker run --rm -v "$CACHE:/cores:ro" "$PROD_BASE" \
-              sh -c "/cores/$rel version >/dev/null 2>&1; echo \$?" 2>/dev/null | tail -1)"
+              sh -c "apk add --no-cache $PROD_PKGS >/dev/null 2>&1; /cores/$rel version >/dev/null 2>&1; echo \$?" 2>/dev/null | tail -1)"
     rc="${rc:-1}"
     local ok=false; [[ "$rc" == "0" ]] && ok=true
     entries+=("$(printf '{"engine":"%s","binary":"/cores/%s","ok":%s,"exit":%s,"output":%s}' \

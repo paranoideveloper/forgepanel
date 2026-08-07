@@ -37,9 +37,9 @@ import (
 // zone is what the DNS responder is authoritative for. The names exist nowhere
 // else, so resolving one is itself evidence the query reached this process.
 var zone = map[string][]string{
-	harness.ProbeName:      {harness.ProbeAddr},
-	"origin.harness.test":  {"203.0.113.8"},
-	"steal.harness.test":   {"203.0.113.9"},
+	harness.ProbeName:     {harness.ProbeAddr},
+	"origin.harness.test": {"203.0.113.8"},
+	"steal.harness.test":  {"203.0.113.9"},
 }
 
 func main() {

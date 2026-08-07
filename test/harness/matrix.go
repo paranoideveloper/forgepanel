@@ -218,7 +218,7 @@ func QuickCases() []Case {
 		"vless/tcp/reality": true,
 		"trojan/tcp/tls":    true,
 		"shadowsocks/tcp/none/2022-blake3-aes-128-gcm": true,
-		"vmess/ws/none":  true,
+		"vmess/ws/none":     true,
 		"hysteria2/tcp/tls": true,
 	}
 	var out []Case

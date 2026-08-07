@@ -22,16 +22,14 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -tags harness -trimpath -o /out/harness   ./test/harness/cmd/harness && \
     CGO_ENABLED=0 GOOS=linux go build -tags harness -trimpath -o /out/internetd ./test/harness/cmd/internetd
 
-# debian-slim, not alpine, for the same reason as Dockerfile.panel: the pinned
-# sing-box release is glibc-linked and will not execute on musl. See that file's
-# header for the check that proves it.
-FROM debian:bookworm-slim
+# alpine + gcompat, matching Dockerfile.panel and production. The client side
+# runs the same glibc-linked sing-box the server side does, so it needs the same
+# shim; see that file's header for why this base is the load-bearing choice.
+FROM alpine:3.21
 
-# ca-certificates for outbound TLS; the rest are the tools an operator reaches
-# for when a case fails and the container is still up.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl dnsutils iproute2 && \
-    rm -rf /var/lib/apt/lists/*
+# ca-certificates for outbound TLS, gcompat so the pinned sing-box can exec, and
+# the tools an operator reaches for when a case fails and the container is up.
+RUN apk add --no-cache ca-certificates gcompat curl bind-tools iproute2
 
 COPY --from=build /out/harness   /usr/local/bin/harness
 COPY --from=build /out/internetd /usr/local/bin/internetd

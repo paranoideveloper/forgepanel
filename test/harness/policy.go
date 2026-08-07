@@ -108,7 +108,7 @@ func (r *Runner) RunPolicy(c Case) Result {
 	res.Artifacts = append(res.Artifacts, r.save(c.ID+".client.json", cfg.JSON), core.LogPath())
 
 	seed := time.Now().UnixNano()
-	base := r.probeWithRetry(core.Addr(), seed)
+	base := r.probeWithRetry(core.Addr(), listen, seed)
 	res.TCP = &base
 	if !step("baseline-allowed", errFrom(base.OK, base.Error), fmt.Sprintf("%d bytes", base.Bytes)) {
 		res.Reason = "baseline tunnel never worked, so the denial cannot be attributed: " + base.Error
@@ -140,8 +140,8 @@ func (r *Runner) RunPolicy(c Case) Result {
 			return res
 		}
 		// Push more than the limit, then wait for the traffic poller to notice.
-		_ = r.probeWithRetry(core.Addr(), seed+1)
-		_ = r.probeWithRetry(core.Addr(), seed+2)
+		_ = r.probeWithRetry(core.Addr(), listen, seed+1)
+		_ = r.probeWithRetry(core.Addr(), listen, seed+2)
 		settle = 45 * time.Second
 		step("await-limit", r.waitStatus(user.ID, "limited", settle), "status must become limited")
 	case "inbound-disabled":

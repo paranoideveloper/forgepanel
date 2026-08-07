@@ -90,8 +90,8 @@ func main() {
 
 	rep := harness.NewReport(out)
 	rep.Topology = harness.Topology{
-		PanelURL: hcfg.PanelURL,
-		Origin:   fmt.Sprintf("%s:%d", hcfg.Origin.Host, hcfg.Origin.HTTPPort),
+		PanelURL:        hcfg.PanelURL,
+		Origin:          fmt.Sprintf("%s:%d", hcfg.Origin.Host, hcfg.Origin.HTTPPort),
 		DirectReachable: !isolated,
 		IsolationNote: "the client container is attached only to the panel-facing network; the origin " +
 			"is on a separate network reachable solely from the panel, so a payload that arrives " +

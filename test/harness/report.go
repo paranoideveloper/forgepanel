@@ -18,12 +18,12 @@ import (
 
 // Report is the whole run.
 type Report struct {
-	GeneratedAt  string         `json:"generated_at"`
-	PanelVersion map[string]any `json:"panel_version,omitempty"`
+	GeneratedAt  string            `json:"generated_at"`
+	PanelVersion map[string]any    `json:"panel_version,omitempty"`
 	Cores        map[string]string `json:"cores"`
-	Topology     Topology       `json:"topology"`
-	Summary      Summary        `json:"summary"`
-	Cases        []Result       `json:"cases"`
+	Topology     Topology          `json:"topology"`
+	Summary      Summary           `json:"summary"`
+	Cases        []Result          `json:"cases"`
 	// Preflight is the check of whether the production runtime image can even
 	// execute the cores the panel pins. It is separate from the matrix because
 	// it is a property of the shipped image, not of any one protocol.
@@ -83,10 +83,10 @@ func (r *Report) AddPreflight(p *Preflight) {
 // Topology records the isolation the run relied on, because every "pass" is
 // only meaningful relative to it.
 type Topology struct {
-	PanelURL       string `json:"panel_url"`
-	Origin         string `json:"origin"`
-	DirectReachable bool  `json:"origin_reachable_without_tunnel"`
-	IsolationNote  string `json:"isolation_note"`
+	PanelURL        string `json:"panel_url"`
+	Origin          string `json:"origin"`
+	DirectReachable bool   `json:"origin_reachable_without_tunnel"`
+	IsolationNote   string `json:"isolation_note"`
 }
 
 // Summary is the headline count.
