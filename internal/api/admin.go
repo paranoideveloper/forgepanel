@@ -200,6 +200,37 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Safe edit: a port, protocol or transport change invalidates every client
+	// config already handed out for this inbound. Refuse such a change unless the
+	// caller confirms, and report exactly what breaks — never silently orphan
+	// users. keep_old clones the current inbound (disabled) as a migration copy
+	// so the old config keeps working during the switch-over window.
+	old, _ := in.Node()
+	if old != nil {
+		breaking := inboundBreakingChanges(old, &n)
+		if len(breaking) > 0 && !boolParam(c, "confirm") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "this change invalidates existing client configurations",
+				"code":  "breaking_edit", "breaking": breaking,
+				"hint": "re-send with ?confirm=true to apply. Add ?keep_old=true to keep the current inbound alive (disabled) as a migration copy so existing clients are not cut off immediately.",
+			})
+			return
+		}
+		if len(breaking) > 0 && boolParam(c, "keep_old") {
+			// Keep the current config as a DISABLED "pre-edit" snapshot the
+			// operator can re-enable if the edit goes wrong. Disabled, so it does
+			// not fight the edited inbound for the port.
+			if clone, cerr := s.db.CreateInbound(old); cerr == nil {
+				clone.Enabled = false
+				clone.Remark = old.Remark + " (pre-edit)"
+				_ = clone.SetNode(old)
+				_ = s.db.SaveInbound(clone)
+			}
+		}
+	}
+
+	in.PrevNodeJSON = in.NodeJSON // capture for one-level undo
 	if err := in.SetNode(&n); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

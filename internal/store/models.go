@@ -141,6 +141,9 @@ type Inbound struct {
 	Port     int    `json:"port"`
 	Enabled  bool   `gorm:"default:true" json:"enabled"`
 	NodeJSON string `gorm:"type:text" json:"-"` // marshalled model.Node
+	// PrevNodeJSON holds the config as it was BEFORE the last edit, so a single
+	// level of undo can restore it. Empty means there is nothing to undo.
+	PrevNodeJSON string `gorm:"type:text" json:"-"`
 }
 
 // Node rehydrates the canonical model.Node from the stored JSON.

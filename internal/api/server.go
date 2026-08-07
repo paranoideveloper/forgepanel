@@ -373,6 +373,11 @@ func (s *Server) routes() {
 			admin.GET("/inbounds/:id/config", s.handleInboundConfig)
 			admin.GET("/inbounds/:id/porthop", s.handlePortHop)
 			admin.DELETE("/inbounds/:id", s.handleDeleteInbound)
+			// Edit lifecycle (BUG-4): clone, toggle, undo, bulk.
+			admin.POST("/inbounds/:id/clone", s.handleCloneInbound)
+			admin.POST("/inbounds/:id/toggle", s.handleToggleInbound)
+			admin.POST("/inbounds/:id/undo", s.handleUndoInbound)
+			admin.POST("/inbounds/bulk", s.handleBulkInbounds)
 			admin.GET("/groups", s.handleListGroups)
 			admin.POST("/groups", s.handleCreateGroup)
 			admin.GET("/groups/:id", s.handleGetGroup)
