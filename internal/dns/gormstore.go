@@ -86,11 +86,7 @@ func NewGormStore(db *gorm.DB) (*GormStore, error) {
 
 // PutCredential implements CredentialRepo with an upsert.
 func (g *GormStore) PutCredential(rec CredentialRecord) error {
-	row := DNSCredential{
-		ID: rec.ID, Provider: rec.Provider, Label: rec.Label, Secret: rec.Secret,
-		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
-		LastVerifiedAt: rec.LastVerifiedAt, LastVerifyError: rec.LastVerifyError,
-	}
+	row := DNSCredential(rec)
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = time.Now().UTC()
 	}
@@ -130,11 +126,7 @@ func (g *GormStore) DeleteCredential(id string) error {
 }
 
 func credentialFromRow(row DNSCredential) CredentialRecord {
-	return CredentialRecord{
-		ID: row.ID, Provider: row.Provider, Label: row.Label, Secret: row.Secret,
-		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		LastVerifiedAt: row.LastVerifiedAt, LastVerifyError: row.LastVerifyError,
-	}
+	return CredentialRecord(row)
 }
 
 // ListPoolEntries implements PoolRepo.

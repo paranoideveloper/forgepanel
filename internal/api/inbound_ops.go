@@ -17,10 +17,7 @@ import (
 
 // boolParam reads a boolean from the query string or a JSON body flag.
 func boolParam(c *gin.Context, name string) bool {
-	if c.Query(name) == "true" {
-		return true
-	}
-	return false
+	return c.Query(name) == "true"
 }
 
 // inboundBreakingChanges lists the edits that invalidate client configs already

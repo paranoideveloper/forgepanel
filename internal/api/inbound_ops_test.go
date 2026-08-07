@@ -32,7 +32,7 @@ func TestSafeEditWarnsOnBreakingChange(t *testing.T) {
 	var c struct {
 		ID uint `json:"id"`
 	}
-	json.Unmarshal([]byte(cr.Body.String()), &c)
+	json.Unmarshal(cr.Body.Bytes(), &c)
 	id := strconv.FormatUint(uint64(c.ID), 10)
 
 	// change the port without confirm -> 409 with breaking list
@@ -61,7 +61,7 @@ func TestUndoRestoresPreviousConfig(t *testing.T) {
 	var c struct {
 		ID uint `json:"id"`
 	}
-	json.Unmarshal([]byte(cr.Body.String()), &c)
+	json.Unmarshal(cr.Body.Bytes(), &c)
 	id := strconv.FormatUint(uint64(c.ID), 10)
 
 	dreq(t, r, "PUT", "/api/admin/inbounds/"+id,
@@ -89,7 +89,7 @@ func TestCloneAndToggle(t *testing.T) {
 	var c struct {
 		ID uint `json:"id"`
 	}
-	json.Unmarshal([]byte(cr.Body.String()), &c)
+	json.Unmarshal(cr.Body.Bytes(), &c)
 	id := strconv.FormatUint(uint64(c.ID), 10)
 
 	rec := dreq(t, r, "POST", "/api/admin/inbounds/"+id+"/clone", "")
@@ -101,7 +101,7 @@ func TestCloneAndToggle(t *testing.T) {
 		Port    int  `json:"port"`
 		Enabled bool `json:"enabled"`
 	}
-	json.Unmarshal([]byte(rec.Body.String()), &cl)
+	json.Unmarshal(rec.Body.Bytes(), &cl)
 	if cl.Port == 22443 {
 		t.Fatal("clone must get a fresh port")
 	}
@@ -126,7 +126,7 @@ func TestBulkDisable(t *testing.T) {
 		var c struct {
 			ID uint `json:"id"`
 		}
-		json.Unmarshal([]byte(cr.Body.String()), &c)
+		json.Unmarshal(cr.Body.Bytes(), &c)
 		ids = append(ids, c.ID)
 	}
 	body, _ := json.Marshal(map[string]any{"action": "disable", "ids": ids})

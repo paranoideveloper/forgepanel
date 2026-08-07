@@ -158,7 +158,7 @@ func (s *Server) handleDomainStatus(c *gin.Context) {
 		"count":            len(ds),
 		"domain_free":      domainFreeProtocols,
 		"guidance_en":      "No domain is set. Domain-based TLS protocols cannot be secured, so only IP-based protocols will work. REALITY is the recommended domain-free option — it needs no owned domain or certificate. Add a domain in the Domains section to unlock one-click TLS.",
-		"guidance_fa":      "هیچ دامنه‌ای تنظیم نشده است. پروتکل‌های مبتنی بر TLS بدون دامنه امن نمی‌شوند، بنابراین فقط پروتکل‌های مبتنی بر IP کار می‌کنند. REALITY گزینهٔ پیشنهادی بدون دامنه است و به دامنه یا گواهی نیاز ندارد. برای فعال‌سازی TLS یک‌کلیکی، در بخش دامنه‌ها یک دامنه اضافه کنید.",
+		"guidance_fa":      "هیچ دامنه\u200cای تنظیم نشده است. پروتکل\u200cهای مبتنی بر TLS بدون دامنه امن نمی\u200cشوند، بنابراین فقط پروتکل\u200cهای مبتنی بر IP کار می\u200cکنند. REALITY گزینهٔ پیشنهادی بدون دامنه است و به دامنه یا گواهی نیاز ندارد. برای فعال\u200cسازی TLS یک\u200cکلیکی، در بخش دامنه\u200cها یک دامنه اضافه کنید.",
 		"reality_oneclick": "/api/admin/inbounds/reality-quickstart",
 	})
 }
@@ -263,7 +263,7 @@ func (s *Server) handleInboundOneClickTLS(c *gin.Context) {
 	preflight["dns_resolves"] = resolves
 	preflight["a_records"] = v4
 	preflight["aaaa_records"] = v6
-	preflight["challenge_port_80_reachable"] = settings.PortFree("0.0.0.0", 80) == false // in use == a listener present
+	preflight["challenge_port_80_reachable"] = !settings.PortFree("0.0.0.0", 80) // in use == a listener present
 	ready := resolves
 
 	// Apply the TLS config and cascade, no manual paths.

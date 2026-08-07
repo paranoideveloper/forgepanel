@@ -80,20 +80,6 @@ func (m *cfMock) addZone(id, name, status string, ns ...string) cfZone {
 	return z
 }
 
-func (m *cfMock) addRecord(zoneID string, rec cfRecord) cfRecord {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.nextID++
-	if rec.ID == "" {
-		rec.ID = fmt.Sprintf("rec%03d", m.nextID)
-	}
-	if m.Records[zoneID] == nil {
-		m.Records[zoneID] = map[string]cfRecord{}
-	}
-	m.Records[zoneID][rec.ID] = rec
-	return rec
-}
-
 func (m *cfMock) denied(method, path string) (cfMessage, int, bool) {
 	for key, msg := range m.Deny {
 		parts := strings.SplitN(key, " ", 2)
