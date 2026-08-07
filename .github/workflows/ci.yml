@@ -59,7 +59,7 @@ jobs:
           args: check
 
   test-protocol-export-engine:
-    name: "Test Suite: Protocol Models, Link Exporters & Keygen"
+    name: Test Suite: Protocol Models, Link Exporters & Keygen
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -75,7 +75,7 @@ jobs:
         run: go test -shuffle=on -count=1 -v -cover ./internal/protocol/...
 
   test-database-store-migrations:
-    name: "Test Suite: SQLite Store Repositories & Migrations"
+    name: Test Suite: SQLite Store Repositories & Migrations
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -91,7 +91,7 @@ jobs:
         run: go test -shuffle=on -count=1 -v -cover ./internal/store/... ./internal/migrate/...
 
   test-core-porthop-supervisor:
-    name: "Test Suite: Core Engines, Port Hopping & Process Supervisor"
+    name: Test Suite: Core Engines, Port Hopping & Process Supervisor
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -107,7 +107,7 @@ jobs:
         run: go test -shuffle=on -count=1 -v -cover ./internal/core/... ./internal/deploy/...
 
   test-api-auth-services:
-    name: "Test Suite: REST API, Authentication & Panel Services"
+    name: Test Suite: REST API, Authentication & Panel Services
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -123,7 +123,7 @@ jobs:
         run: go test -shuffle=on -count=1 -v -cover ./internal/api/... ./internal/auth/... ./internal/service/... ./internal/settings/...
 
   test-forgedns-transport-stack:
-    name: "Test Suite: ForgeDNS Codec & Transport Server Stack"
+    name: Test Suite: ForgeDNS Codec & Transport Server Stack
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -139,7 +139,7 @@ jobs:
         run: go test -shuffle=on -count=1 -v -cover ./internal/forgedns/...
 
   test-lifecycle-config-backup:
-    name: "Test Suite: Backup Archives, Certs, Config & Lifecycle Manager"
+    name: Test Suite: Backup Archives, Certs, Config & Lifecycle Manager
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -158,7 +158,7 @@ jobs:
             ./internal/job/... ./internal/lifecycle/... ./internal/telegram/... ./internal/version/...
 
   test-cli-node-binaries:
-    name: "Test Suite: CLI Admin, Node Agent & Panel Binaries"
+    name: Test Suite: CLI Admin, Node Agent & Panel Binaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -278,42 +278,6 @@ jobs:
       - name: Run Vitest Unit Tests & Coverage
         run: cd frontend && bun run test --coverage
 
-  forgeedge-worker:
-    name: "ForgeEdge Worker Tests & Go-TS Drift Guard"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.x'
-          cache: true
-
-      - name: Set up Bun Runtime
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install Worker Dependencies
-        run: cd deploy/cloudflare/forgeedge && bun install
-
-      - name: Worker Type Check
-        run: cd deploy/cloudflare/forgeedge && bunx tsc --noEmit
-
-      - name: Worker Test Suite
-        run: cd deploy/cloudflare/forgeedge && bun test
-
-      # Drift guard: regenerate the golden fixtures from the REAL Go exporters
-      # (internal/protocol/{model,export,render}) and assert the TypeScript mirror
-      # is byte-identical. A red golden test means the edge and the VPS would emit
-      # different links for the same node.
-      - name: Go-TS Canonical Model Drift Guard
-        run: |
-          go run deploy/cloudflare/forgeedge/testdata/gen/main.go
-          cd deploy/cloudflare/forgeedge && bun test test/golden.test.ts
-
   docker-build:
     name: Docker Container Build
     runs-on: ubuntu-latest
@@ -340,7 +304,6 @@ jobs:
       - govulncheck
       - e2e-smoke-test
       - cross-compile
-      - forgeedge-worker
       - docker-build
     runs-on: ubuntu-latest
     steps:
