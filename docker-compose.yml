@@ -11,11 +11,11 @@
 # checking out the matching release tag and reading its release notes.
 services:
   forgepanel:
-    image: forgepanel:${FORGEPANEL_VERSION:-v1.3.0}
+    image: forgepanel:${FORGEPANEL_VERSION:-v1.3.1}
     build:
       context: .
       args:
-        VERSION: ${FORGEPANEL_VERSION:-v1.3.0}
+        VERSION: ${FORGEPANEL_VERSION:-v1.3.1}
         COMMIT: ${FORGEPANEL_COMMIT:-local}
         BUILD_DATE: ${FORGEPANEL_BUILD_DATE:-local}
     container_name: forgepanel
