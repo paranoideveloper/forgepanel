@@ -84,11 +84,11 @@ func TestHostArch(t *testing.T) {
 	}
 }
 
-// TestDescriptorsFallsBackWhenOrderIsIncomplete: the UI listing must never lose
+// TestDescriptorsOrderFallback: the UI listing must never lose
 // an adapter just because someone added one to the table and forgot the order
 // list. Mutating the package-level order is safe here — no test in this package
 // runs in parallel.
-func TestDescriptorsFallsBackWhenOrderIsIncomplete(t *testing.T) {
+func TestDescriptorsOrderFallback(t *testing.T) {
 	full := Descriptors()
 	if len(full) != len(descriptors) || full[0].Adapter != DefaultAdapter {
 		t.Fatalf("Descriptors = %+v, want every fork with the default first", full)
@@ -110,7 +110,7 @@ func TestDescriptorsFallsBackWhenOrderIsIncomplete(t *testing.T) {
 }
 
 // TestSplitAndJoinDomains covers the store column format.
-func TestSplitAndJoinDomains(t *testing.T) {
+func TestSplitAndJoinDomainsColumn(t *testing.T) {
 	if got := SplitList("a, b;c\nd\te"); strings.Join(got, "|") != "a|b|c|d|e" {
 		t.Errorf("SplitList = %v", got)
 	}

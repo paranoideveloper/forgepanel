@@ -535,7 +535,7 @@ func TestExtractTarGzRefusesAnUnwritableDir(t *testing.T) {
 
 // TestValidateOptionUnknownType guards the manifest itself: a key declared with
 // a type the validator does not implement must be an error, never a pass.
-func TestValidateOptionUnknownType(t *testing.T) {
+func TestValidateOptionRejectsUnknownType(t *testing.T) {
 	err := ValidateOption(Option{Key: "X", Type: OptionType("mystery")}, "anything")
 	if err == nil || !strings.Contains(err.Error(), "unknown option type") {
 		t.Fatalf("ValidateOption = %v, want an unknown-type error", err)
