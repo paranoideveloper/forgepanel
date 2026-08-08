@@ -162,3 +162,38 @@ func TestUserEmailHelper(t *testing.T) {
 		t.Fatalf("parseUserEmail(invalid) = %d, want 0", id)
 	}
 }
+
+// TestLastSeenStampedOnTraffic: the "online" indicator is built on LastSeenAt,
+// which the poll cycle must stamp whenever a user actually moves bytes — and
+// leave untouched for a user with no delta (who is not online).
+func TestLastSeenStampedOnTraffic(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := &store.User{Username: "active", Status: store.StatusActive, SubToken: "a"}
+	idle := &store.User{Username: "idle", Status: store.StatusActive, SubToken: "b"}
+	if err := db.CreateUser(active); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser(idle); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(Config{
+		DB: db,
+		PollTraffic: func(reset bool) (map[string]int64, error) {
+			return map[string]int64{UserEmail(active.ID): 4096}, nil // only 'active' moved bytes
+		},
+	})
+	s.pollAndAccount()
+
+	got, _ := db.UserByID(active.ID)
+	if got.LastSeenAt == nil {
+		t.Fatal("a user who transferred bytes must have LastSeenAt stamped")
+	}
+	gotIdle, _ := db.UserByID(idle.ID)
+	if gotIdle.LastSeenAt != nil {
+		t.Fatal("a user with no traffic delta must not be marked seen")
+	}
+}

@@ -1,3 +1,24 @@
+# ForgePanel v1.9.1 — Release Notes
+
+## Feature: online / last-seen status per user
+
+The Users table now shows a live presence dot per user — green when they are
+online, grey when not — with a hover tooltip ("active 12s ago", "last seen 4m
+ago", "never seen").
+
+"Online" is derived from a new `last_seen_at`, which the traffic-poll cycle
+stamps whenever a user actually moves bytes. That makes it **core-agnostic** —
+it works identically for xray and sing-box and every protocol, instead of
+depending on a core-specific connection API. The Users view refreshes the rows
+every 30s so the dots stay live without a page reload; the field is exposed on
+`GET /admin/users` as `last_seen_at`.
+
+Verified: the poll cycle stamps `last_seen_at` only for users with a non-zero
+traffic delta (an idle user is not marked online), and the field round-trips
+through the API. Existing installs get the column on the next start (auto-migrated).
+
+---
+
 # ForgePanel v1.9.0 — Release Notes
 
 ## Feature: true per-user Shadowsocks (SS-2022 multi-PSK)

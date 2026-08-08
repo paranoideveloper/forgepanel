@@ -125,6 +125,11 @@ type User struct {
 	ExpireAt       *time.Time `json:"expire_at"`
 	OnHoldDuration int64      `json:"on_hold_duration"` // seconds; used when Status=on_hold
 	FirstConnectAt *time.Time `json:"first_connect_at"`
+	// LastSeenAt is the last time the user actually transferred bytes, stamped by
+	// the traffic-poll cycle. It is the basis for the "online" indicator (seen
+	// within a recent window) — a universal, core-agnostic signal that works for
+	// xray and sing-box alike, unlike a core-specific connection API.
+	LastSeenAt *time.Time `json:"last_seen_at"`
 
 	IPLimit    int        `json:"ip_limit"`
 	TelegramID int64      `json:"telegram_id"`

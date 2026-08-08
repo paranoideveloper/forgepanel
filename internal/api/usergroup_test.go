@@ -70,6 +70,7 @@ func newUGFixture(t *testing.T) *ugFixture {
 
 	r := gin.New()
 	api := r.Group("/api/admin", s.signer.Middleware())
+	api.GET("/users", s.handleListUsers)
 	api.GET("/users/:id", s.handleGetUser)
 	api.PATCH("/users/:id", s.handleUpdateUser)
 	api.PUT("/users/:id/inbounds", s.handleSetUserInbounds)
@@ -675,3 +676,33 @@ func TestUnknownStateIsNotReportedAsCritical(t *testing.T) {
 }
 
 var _ = auth.ClaimsFrom
+
+// TestUserListExposesLastSeen: the online indicator reads last_seen_at off the
+// user list, so the field must survive the API's JSON serialization (present as
+// a key, and carrying the stamped time once the poll cycle has seen the user).
+func TestUserListExposesLastSeen(t *testing.T) {
+	f := newUGFixture(t)
+
+	// Before any traffic: the key is present and null.
+	rec := f.do(t, http.MethodGet, "/api/admin/users", f.ownerTok, "")
+	if rec.Code != 200 {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "\"last_seen_at\"") {
+		t.Fatalf("user list is missing the last_seen_at field: %s", rec.Body)
+	}
+
+	// Stamp it as the poll cycle would, then confirm it round-trips.
+	u, _ := f.s.db.UserByID(f.user.ID)
+	now := time.Now().UTC().Truncate(time.Second)
+	u.LastSeenAt = &now
+	if err := f.s.db.SaveUser(u); err != nil {
+		t.Fatal(err)
+	}
+	rec = f.do(t, http.MethodGet, "/api/admin/users", f.ownerTok, "")
+	var list []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list) == 0 || list[0]["last_seen_at"] == nil {
+		t.Fatalf("last_seen_at did not round-trip through the API: %s", rec.Body)
+	}
+}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { User, UserGroup } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
@@ -205,7 +205,36 @@
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(b / 1024 ** 2).toFixed(0)} MB`;
   }
 
-  onMount(loadData);
+  // "Online" = the user moved traffic within the last few minutes (the poll
+  // cycle stamps last_seen_at whenever they transfer). Generous 3-minute window
+  // so a default ~60s poll comfortably marks an active user online.
+  const ONLINE_WINDOW_MS = 3 * 60 * 1000;
+  function isOnline(u: any): boolean {
+    if (!u?.last_seen_at) return false;
+    return Date.now() - new Date(u.last_seen_at).getTime() < ONLINE_WINDOW_MS;
+  }
+  function lastSeenLabel(u: any): string {
+    if (!u?.last_seen_at) return 'never seen';
+    const s = Math.floor((Date.now() - new Date(u.last_seen_at).getTime()) / 1000);
+    if (s < 60) return `active ${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `last seen ${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `last seen ${h}h ago`;
+    return `last seen ${Math.floor(h / 24)}d ago`;
+  }
+
+  // Refresh just the user rows periodically so the presence dots stay live
+  // without a full reload or a page refresh. Silent — never toasts on failure.
+  let presenceTimer: ReturnType<typeof setInterval> | undefined;
+  async function refreshUsers() {
+    try { users = await apiFetch<User[]>('/admin/users'); } catch (_) { /* keep last good */ }
+  }
+  onMount(() => {
+    loadData();
+    presenceTimer = setInterval(refreshUsers, 30_000);
+  });
+  onDestroy(() => { if (presenceTimer) clearInterval(presenceTimer); });
 </script>
 
 <div class="view-header">
@@ -255,7 +284,10 @@
       <tbody>
         {#each users as u (u.id)}
           <tr>
-            <td><strong>{u.username}</strong></td>
+            <td>
+              <span class="presence {isOnline(u) ? 'online' : 'offline'}" title={lastSeenLabel(u)}></span>
+              <strong>{u.username}</strong>
+            </td>
             <td>{groups.find(g => g.id === u.group_id)?.name || '—'}</td>
             <td>{fmtBytes((u as any).data_limit)}</td>
             <td>{fmtBytes((u as any).used_traffic)}</td>
@@ -365,6 +397,9 @@
   .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
   .badge.off { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+  .presence { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; cursor: help; }
+  .presence.online { background: #27D17C; box-shadow: 0 0 6px #27D17C; }
+  .presence.offline { background: rgba(255,255,255,0.22); }
   .muted { color: rgba(255,255,255,0.45); }
   .err { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
   .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }

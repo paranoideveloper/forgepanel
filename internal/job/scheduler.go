@@ -129,6 +129,9 @@ func (s *Scheduler) pollAndAccount() {
 		} else {
 			u.UsedTraffic += bytes
 		}
+		// A non-zero delta means the user moved traffic this cycle: they are live.
+		seen := s.now()
+		u.LastSeenAt = &seen
 		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
 			u.Status = store.StatusLimited
 			changed = true
