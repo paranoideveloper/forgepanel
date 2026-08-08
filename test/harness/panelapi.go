@@ -8,6 +8,7 @@ package harness
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 
 // Panel is an authenticated session against one panel instance.
 type Panel struct {
-	BaseURL string // e.g. http://panel:2053
+	BaseURL string // e.g. https://panel:2053
 	HTTP    *http.Client
 	token   string
 	// Credentials are retained so an expired access token can be renewed
@@ -32,11 +33,19 @@ type Panel struct {
 }
 
 // NewPanel returns a session with sane timeouts. Login must be called before
-// any /api/admin route.
+// any /api/admin route. The panel serves HTTPS by default (self-signed when it
+// has no domain, which is the harness case), so the client skips verification —
+// the harness reaches the panel by container hostname, not a public name, and
+// what it is testing is the API surface, not the panel's own certificate.
 func NewPanel(baseURL string) *Panel {
 	return &Panel{
 		BaseURL: strings.TrimRight(baseURL, "/"),
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		HTTP: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed panel cert on a container hostname
+			},
+		},
 	}
 }
 

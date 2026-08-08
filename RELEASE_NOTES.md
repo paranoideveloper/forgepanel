@@ -1,3 +1,24 @@
+# ForgePanel v1.7.6 — Release Notes
+
+## Fixes
+
+- **Hysteria2 inbounds with an assigned user now serve.** The sing-box user list
+  put a `uuid` field on Hysteria2 users, but sing-box's Hysteria2 users are
+  `{name, password}` only — its strict decoder rejected the unknown `uuid`
+  (`json: unknown field "uuid"`), which failed the *entire* sing-box config load
+  and took the engine down, so the inbound listened on nothing. Hysteria2 users
+  no longer carry `uuid`; TUIC users (which legitimately use it) still do. This
+  is what made a created Hysteria2 inbound "not work" with no error anywhere.
+
+- **Salamander obfuscation gets a password automatically.** Creating a Hysteria2
+  inbound with `obfs_type: salamander` but no obfs password produced a config
+  sing-box refuses to start (`missing obfs password`). The panel now mints an
+  obfs password on create (carried into the client link too), and the renderer
+  drops an obfs block with no password rather than letting one misconfigured
+  inbound take the whole sing-box engine down.
+
+---
+
 # ForgePanel v1.7.5 — Release Notes
 
 ## Fixes

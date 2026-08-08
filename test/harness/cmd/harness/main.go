@@ -23,7 +23,7 @@ func main() {
 		set        = flag.String("set", "all", "which cases to run: all | connectivity | policy | quick")
 		only       = flag.String("only", "", "comma-separated case id substrings to run")
 		results    = flag.String("results", getenv("HARNESS_RESULTS", "/results"), "results directory")
-		panelURL   = flag.String("panel", getenv("HARNESS_PANEL_URL", "http://panel:2053"), "panel base URL")
+		panelURL   = flag.String("panel", getenv("HARNESS_PANEL_URL", "https://panel:2053"), "panel base URL")
 		originHost = flag.String("origin", getenv("HARNESS_ORIGIN_HOST", "internet"), "origin hostname (resolvable only past the tunnel)")
 		xrayBin    = flag.String("xray", getenv("HARNESS_XRAY_BIN", ""), "xray client binary")
 		singboxBin = flag.String("singbox", getenv("HARNESS_SINGBOX_BIN", ""), "sing-box client binary")

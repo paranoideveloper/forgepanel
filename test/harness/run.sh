@@ -92,6 +92,22 @@ fetch_cores() {
     install -m 0755 "$tmp/sing-box" "$sbin"
     rm -rf "$tmp"
   fi
+  # xray needs geoip.dat/geosite.dat for routing rules that reference geoip:/
+  # geosite: — the panel emits geoip:private to route private ranges direct, so
+  # without these the client core fails with exit 23 before it carries a byte.
+  # They ship inside the Xray release zip; the binary-only extract above skips
+  # them, so pull them in (independent of the binary guard, so an already-cached
+  # binary still gets its data files).
+  local xdir="$CACHE/xray-$XRAY_VERSION"
+  if [[ ! -f "$xdir/geoip.dat" || ! -f "$xdir/geosite.dat" ]]; then
+    log "fetching xray geoip.dat/geosite.dat"
+    local tmp; tmp="$(mktemp -d)"
+    curl -fsSL -o "$tmp/x.zip" \
+      "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ASSET}"
+    (cd "$tmp" && unzip -qo x.zip geoip.dat geosite.dat)
+    install -m 0644 "$tmp/geoip.dat" "$tmp/geosite.dat" "$xdir/"
+    rm -rf "$tmp"
+  fi
   # The panel container runs as uid 65532 and must be able to execute these.
   chmod -R a+rX "$CACHE"
   log "cores ready: $("$xbin" version | head -1) / $("$sbin" version | head -1)"
@@ -110,12 +126,16 @@ fetch_cores
 # dropping gcompat there turns this check red — and the outcome is written next
 # to the matrix for the driver to fold into the report.
 # ---------------------------------------------------------------------------
-PROD_BASE="$(grep -oE '^FROM alpine:[0-9.]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^FROM //')"
+PROD_BASE="$(grep -oE '^FROM alpine:[0-9.]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^FROM //' || true)"
 PROD_BASE="${PROD_BASE:-alpine:3.21}"
-# The runtime stage's apk line is the last one in the file; the builder stage's
-# comes first and is irrelevant here.
-PROD_PKGS="$(grep -oE '^RUN apk add --no-cache [a-z0-9 .+-]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^RUN apk add --no-cache //')"
-PROD_PKGS="${PROD_PKGS:-ca-certificates}"
+# The runtime stage installs its packages from a `pkgs="..."` shell variable (a
+# mirror-fallback loop), not a bare `RUN apk add`. Read that list; a bare
+# `RUN apk add --no-cache <pkgs>` is still supported for older Dockerfiles.
+# `|| true` keeps a no-match from tripping `set -euo pipefail` before the
+# fallback default on the next line.
+PROD_PKGS="$(grep -oE 'pkgs="[a-z0-9 .+-]+"' "$ROOT/Dockerfile" | tail -1 | sed -E 's/^pkgs="//; s/"$//' || true)"
+[[ -n "$PROD_PKGS" ]] || PROD_PKGS="$(grep -oE '^RUN apk add --no-cache [a-z0-9 .+-]+' "$ROOT/Dockerfile" | tail -1 | sed 's/^RUN apk add --no-cache //' || true)"
+PROD_PKGS="${PROD_PKGS:-ca-certificates tzdata libcap gcompat wireguard-tools iptables nftables iproute2}"
 
 preflight() {
   mkdir -p "$RESULTS"
@@ -177,7 +197,7 @@ log "starting panel + origin on isolated networks"
 
 log "waiting for the panel to answer /healthz"
 for i in $(seq 1 60); do
-  if "${COMPOSE[@]}" exec -T panel curl -fsS http://127.0.0.1:2053/healthz >/dev/null 2>&1; then
+  if "${COMPOSE[@]}" exec -T panel curl -fsSk https://127.0.0.1:2053/healthz >/dev/null 2>&1; then
     break
   fi
   if [[ "$i" == "60" ]]; then

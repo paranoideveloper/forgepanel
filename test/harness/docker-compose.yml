@@ -96,7 +96,7 @@ services:
     depends_on:
       - panel
     environment:
-      HARNESS_PANEL_URL: http://panel:2053
+      HARNESS_PANEL_URL: https://panel:2053
       HARNESS_ORIGIN_HOST: internet
       HARNESS_ORIGIN_HTTP: "8080"
       HARNESS_ORIGIN_TLS: "8443"

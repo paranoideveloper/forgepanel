@@ -156,7 +156,7 @@ func singboxProtocol(n *model.Node) (jobj, error) {
 			if h.DownMbps > 0 {
 				o["down_mbps"] = h.DownMbps
 			}
-			if h.ObfsType != "" {
+			if h.ObfsType != "" && h.ObfsPassword != "" {
 				o["obfs"] = jobj{"type": h.ObfsType, "password": h.ObfsPassword}
 			}
 			if ports := sbPortRanges(h.PortHopping); len(ports) > 0 {
@@ -573,7 +573,7 @@ func SingboxInbound(n *model.Node) (jobj, error) {
 			if h.DownMbps > 0 {
 				in["down_mbps"] = h.DownMbps
 			}
-			if h.ObfsType != "" {
+			if h.ObfsType != "" && h.ObfsPassword != "" {
 				in["obfs"] = jobj{"type": h.ObfsType, "password": h.ObfsPassword}
 			}
 			if h.IgnoreClientBandwidth {

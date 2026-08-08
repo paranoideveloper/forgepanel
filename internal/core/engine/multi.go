@@ -180,14 +180,17 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 			arr = append(arr, jobj{"uuid": cl.UUID, "name": name, "alterId": 0})
 		case model.ProtoTrojan:
 			arr = append(arr, jobj{"password": cl.Password, "name": name})
-		case model.ProtoHysteria2, model.ProtoTUIC:
-			// Hysteria2/TUIC also carry a name so sing-box can attribute per-user
-			// traffic stats — without it these protocols reported no per-user data.
-			e := jobj{"password": cl.Password, "name": name}
-			if cl.UUID != "" {
-				e["uuid"] = cl.UUID
-			}
-			arr = append(arr, e)
+		case model.ProtoHysteria2:
+			// sing-box hysteria2 users are {name, password} ONLY. A uuid field is
+			// rejected by sing-box's strict decoder ("json: unknown field uuid"),
+			// which fails the whole config load and takes the sing-box engine down —
+			// so a hysteria2 inbound with any assigned user silently stops serving.
+			// The name is still carried for per-user attribution in sing-box's logs.
+			arr = append(arr, jobj{"password": cl.Password, "name": name})
+		case model.ProtoTUIC:
+			// sing-box tuic users are {name, uuid, password} — uuid is part of the
+			// TUIC identity here, unlike hysteria2 above.
+			arr = append(arr, jobj{"uuid": cl.UUID, "password": cl.Password, "name": name})
 		case model.ProtoAnyTLS:
 			// AnyTLS + ShadowTLS were previously skipped (default: return), so every
 			// panel user shared the inbound's single template password with no

@@ -101,6 +101,14 @@ func applyCreateDefaults(n *model.Node) {
 		if n.Password == "" {
 			n.Password, _ = keygen.Password(16)
 		}
+		// Salamander obfuscation needs its own password; sing-box refuses to start a
+		// hysteria2 inbound whose obfs password is empty (and takes the whole engine
+		// down with it). Mint one when the operator ticks salamander but leaves it
+		// blank, so the inbound works and the client link carries the same value.
+		if n.Protocol == model.ProtoHysteria2 && n.Hysteria2 != nil &&
+			n.Hysteria2.ObfsType != "" && n.Hysteria2.ObfsPassword == "" {
+			n.Hysteria2.ObfsPassword, _ = keygen.Password(16)
+		}
 	case model.ProtoTUIC:
 		if n.UUID == "" {
 			n.UUID = keygen.UUID()

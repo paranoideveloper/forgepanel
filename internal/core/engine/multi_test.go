@@ -71,6 +71,25 @@ func TestApplySingboxUsersNameTags(t *testing.T) {
 	}
 }
 
+// TestHysteria2UsersHaveNoUUID pins the bug where a uuid field on a sing-box
+// hysteria2 user made sing-box reject the whole config ("json: unknown field
+// uuid"), taking the engine down so the inbound served nothing. Hysteria2 users
+// are {name, password} only; TUIC users legitimately carry uuid.
+func TestHysteria2UsersHaveNoUUID(t *testing.T) {
+	usersFor := func(proto model.Protocol) jobj {
+		in := jobj{}
+		applySingboxUsers(in, &model.Node{Protocol: proto},
+			[]ClientCred{{Email: "u", Password: "p", UUID: "2842501c-d4ec-4593-b4a1-c6375c3ed2f4"}})
+		return in["users"].([]any)[0].(jobj)
+	}
+	if hy2 := usersFor(model.ProtoHysteria2); hy2["uuid"] != nil {
+		t.Fatalf("hysteria2 user must NOT carry uuid (sing-box rejects it), got %v", hy2)
+	}
+	if tuic := usersFor(model.ProtoTUIC); tuic["uuid"] == nil {
+		t.Fatalf("tuic user must carry uuid, got %v", tuic)
+	}
+}
+
 func TestApplySingboxUsersAnyTLSShadowTLS(t *testing.T) {
 	// Regression: AnyTLS/ShadowTLS used to hit default:return, so all users shared
 	// one template password. Now each gets its own {name,password}.
