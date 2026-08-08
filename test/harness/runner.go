@@ -430,19 +430,29 @@ func grade(res *Result) {
 				"the official sing-box archives the panel pins are built without with_v2ray_api, so the " +
 				"panel collects no counters for sing-box inbounds (documented in internal/core/engine/multi.go). " +
 				res.Accounting.Reason
-		case singleCredentialInbound(res.Protocol):
-			// These inbounds carry ONE credential shared by every user:
-			// engine.applyXrayClients returns early for them, so no per-user email
-			// is ever stamped and the stats poller has no identity to attribute
-			// bytes to. The tunnel is proven; the accounting is not implemented for
-			// this inbound shape, which is a different claim and recorded as such.
+		case res.Protocol == "socks" || res.Protocol == "http":
+			// These now carry a per-user account each — engine.applyXrayClients
+			// expands settings.accounts to one {user,pass} per assigned user — so
+			// per-user AUTH is proven. But xray attributes traffic stats by the
+			// clients[].email tag, and a SOCKS/HTTP account has no email field, so
+			// per-user accounting/quota is an xray limitation for this inbound shape
+			// (not a shared credential). The tunnel and the per-user login are
+			// proven; the accounting is not, which is a different claim.
 			res.Status = StatusExperimental
-			res.Reason = "traffic is proven, but this inbound carries a single shared credential: " +
-				"internal/core/engine/multi.go applyXrayClients expands settings.clients only for VLESS, " +
-				"VMess and Trojan and returns early for " + res.Protocol + ", so no per-user email tag " +
-				"exists and `xray api statsquery -pattern user>>>` reports nothing to attribute. " +
-				"(SS-2022 could support this — xray's shadowsocks inbound takes a multi-user clients " +
-				"array — so for the 2022-blake3 ciphers this is unimplemented rather than impossible.) " +
+			res.Reason = "traffic and per-user auth are proven, but xray has no per-user stats tag for " +
+				res.Protocol + " accounts (no email field on settings.accounts), so per-user " +
+				"accounting/quota is unavailable for this inbound shape. " + res.Accounting.Reason
+		case singleCredentialInbound(res.Protocol):
+			// Shadowsocks (non-2022) authenticates against ONE inbound-wide key, so
+			// no per-user email is stamped and the stats poller has no identity to
+			// attribute bytes to. The tunnel is proven; per-user accounting is not
+			// implemented for this shape. (SS-2022 could support it — xray's
+			// shadowsocks inbound takes a multi-user clients array — so for the
+			// 2022-blake3 ciphers this is unimplemented rather than impossible.)
+			res.Status = StatusExperimental
+			res.Reason = "traffic is proven, but this inbound carries a single shared credential " +
+				"(shadowsocks shared key), so no per-user email tag exists and " +
+				"`xray api statsquery -pattern user>>>` reports nothing to attribute. " +
 				res.Accounting.Reason
 		default:
 			res.Status = StatusFail
@@ -749,7 +759,9 @@ func listenOrEmpty(hasTCPPort bool, listen string) string {
 // client per user onto the inbound.
 func singleCredentialInbound(protocol string) bool {
 	switch protocol {
-	case "shadowsocks", "socks", "http":
+	// SOCKS/HTTP now expand per-user accounts (per-user auth); only shadowsocks
+	// (non-2022) still authenticates against one inbound-wide shared key.
+	case "shadowsocks":
 		return true
 	default:
 		return false

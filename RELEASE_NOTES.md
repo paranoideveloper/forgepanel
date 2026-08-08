@@ -1,3 +1,24 @@
+# ForgePanel v1.7.8 — Release Notes
+
+## Fix
+
+- **Per-user credentials for SOCKS and HTTP inbounds.** `stampIdentity` put each
+  user's `username`/`password` in their subscription, but the served config kept
+  the single *template* account — so a user's credential was rejected (auth
+  mismatch) while only the inbound's own login worked. `applyXrayClients` now
+  expands `settings.accounts` to one `{user, pass}` per assigned user (and sets
+  SOCKS `auth: password`), so every user authenticates with their own login.
+  `ClientCred` carries the username end to end. Verified through the real xray
+  core: a SOCKS/HTTP inbound with two users now carries two distinct accounts and
+  each user's own credential authenticates.
+
+  Note: per-user *accounting/quota* for SOCKS/HTTP remains an xray limitation —
+  its `accounts` have no stats tag, so traffic can't be attributed per user
+  (per-user auth works; per-user quota does not). Shadowsocks still uses one
+  shared key; true per-user SS needs SS-2022 multi-PSK (tracked next).
+
+---
+
 # ForgePanel v1.7.7 — Release Notes
 
 ## Fix

@@ -233,3 +233,37 @@ func TestBuildMultiZeroClientsRendersEmptyArray(t *testing.T) {
 		t.Fatalf("expected 0 clients, got %d", len(vlessClients))
 	}
 }
+
+// TestSocksHTTPPerUserAccounts pins the fix where SOCKS/HTTP inbounds kept the
+// single template account (settings.accounts) instead of one per assigned user —
+// so a user's subscription credential (set by stampIdentity) could never
+// authenticate. Each user must get their own {user,pass} account.
+func TestSocksHTTPPerUserAccounts(t *testing.T) {
+	for _, proto := range []model.Protocol{model.ProtoSOCKS, model.ProtoHTTP} {
+		in := jobj{"settings": jobj{"accounts": []any{jobj{"user": "tmpl", "pass": "tmpl"}}}}
+		applyXrayClients(in, &model.Node{Protocol: proto}, []ClientCred{
+			{Username: "alice", Password: "pa"}, {Username: "bob", Password: "pb"},
+		})
+		accts, _ := in["settings"].(jobj)["accounts"].([]any)
+		if len(accts) != 2 {
+			t.Fatalf("%s: want 2 per-user accounts, got %d (%v)", proto, len(accts), accts)
+		}
+		got := map[string]string{}
+		for _, a := range accts {
+			m := a.(jobj)
+			got[m["user"].(string)] = m["pass"].(string)
+		}
+		if got["alice"] != "pa" || got["bob"] != "pb" {
+			t.Fatalf("%s: per-user creds wrong: %v", proto, got)
+		}
+		if proto == model.ProtoSOCKS && in["settings"].(jobj)["auth"] != "password" {
+			t.Fatalf("socks: auth must be password when accounts present")
+		}
+	}
+	// No usernames -> keep the rendered config untouched (don't force auth).
+	in := jobj{"settings": jobj{}}
+	applyXrayClients(in, &model.Node{Protocol: model.ProtoSOCKS}, []ClientCred{{Email: "x", UUID: "u"}})
+	if _, has := in["settings"].(jobj)["accounts"]; has {
+		t.Fatal("socks: no-username clients must not add accounts")
+	}
+}

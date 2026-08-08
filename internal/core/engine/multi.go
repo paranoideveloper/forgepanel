@@ -16,6 +16,7 @@ import (
 // poller can attribute traffic per user (spec §11).
 type ClientCred struct {
 	Email    string
+	Username string // SOCKS/HTTP account login (matches the subscription's user field)
 	UUID     string
 	Password string
 	Flow     string
@@ -138,6 +139,31 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 	if settings == nil {
 		return
 	}
+	// SOCKS/HTTP authenticate with username:password accounts (settings.accounts),
+	// not a clients[] list. Emit one account per client that has a username, so
+	// every assigned user has their own login instead of the single template
+	// account the render produced (which the subscription's per-user credential
+	// could never match). Clients without a username — e.g. an inbound-own cred on
+	// a no-auth inbound — are skipped.
+	if n.Protocol == model.ProtoSOCKS || n.Protocol == model.ProtoHTTP {
+		var accts []any
+		seen := map[string]bool{}
+		for _, cl := range clients {
+			if cl.Username == "" || cl.Password == "" || seen[cl.Username] {
+				continue
+			}
+			seen[cl.Username] = true
+			accts = append(accts, jobj{"user": cl.Username, "pass": cl.Password})
+		}
+		if len(accts) == 0 {
+			return // no credentialled users; keep the rendered (noauth/template) config
+		}
+		settings["accounts"] = accts
+		if n.Protocol == model.ProtoSOCKS {
+			settings["auth"] = "password"
+		}
+		return
+	}
 	var arr = []any{}
 	for _, cl := range clients {
 		switch n.Protocol {
@@ -154,7 +180,8 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 		case model.ProtoTrojan:
 			arr = append(arr, jobj{"password": cl.Password, "email": cl.Email})
 		default:
-			// SS/SOCKS/HTTP are single-credential in this build; keep template.
+			// Shadowsocks is single-key (shared) in this build; per-user SS needs
+			// SS-2022 multi-PSK support, tracked separately. Keep the template.
 			return
 		}
 	}

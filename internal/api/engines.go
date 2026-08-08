@@ -104,13 +104,13 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		// users are materialized in addition, for per-user multi-tenant access.
 		if n.UUID != "" || n.Password != "" {
 			sp.Clients = append(sp.Clients, engine.ClientCred{
-				Email: "inbound-" + strconv.FormatUint(uint64(in.ID), 10),
-				UUID:  n.UUID, Password: n.Password, Flow: n.Flow,
+				Email:    "inbound-" + strconv.FormatUint(uint64(in.ID), 10),
+				Username: n.Username, UUID: n.UUID, Password: n.Password, Flow: n.Flow,
 			})
 		}
 		for _, u := range byInbound[in.ID] {
 			sp.Clients = append(sp.Clients, engine.ClientCred{
-				Email: job.UserEmail(u.ID), UUID: u.UUID, Password: u.Password, Flow: n.Flow,
+				Email: job.UserEmail(u.ID), Username: u.Username, UUID: u.UUID, Password: u.Password, Flow: n.Flow,
 			})
 		}
 		specs = append(specs, sp)
