@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -130,9 +131,17 @@ func EnsureOpen(ports []int) {
 			opened[p] = true
 			continue
 		}
-		_, _ = run("ufw", "allow", fmt.Sprintf("%d/tcp", p))
-		_, _ = run("ufw", "allow", fmt.Sprintf("%d/udp", p))
-		opened[p] = true
+		_, terr := run("ufw", "allow", fmt.Sprintf("%d/tcp", p))
+		_, uerr := run("ufw", "allow", fmt.Sprintf("%d/udp", p))
+		if terr == nil || uerr == nil {
+			opened[p] = true // at least one family opened; don't re-shell ufw for it
+			continue
+		}
+		// Both families failed — do NOT cache, so the next reload retries instead
+		// of marking the port done forever. The classic cause is a read-only /etc
+		// under a hardened unit (ProtectSystem=full without ReadWritePaths=/etc/ufw),
+		// which used to leave every custom inbound port silently unreachable.
+		fmt.Fprintf(os.Stderr, "forgepanel: could not open firewall port %d via ufw: %v; %v\n", p, terr, uerr)
 	}
 }
 

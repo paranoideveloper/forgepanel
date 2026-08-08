@@ -1,3 +1,22 @@
+# ForgePanel v1.7.7 — Release Notes
+
+## Fix
+
+- **The panel now actually opens the host firewall for custom inbound ports.**
+  The hardened systemd unit sets `ProtectSystem=full`, which makes `/etc`
+  read-only — but `ufw` persists its rules to `/etc/ufw/user.rules`, so every
+  `ufw allow` the panel ran at runtime failed with *"/etc/ufw/user.rules is not
+  writable"*. The error was swallowed, so a created inbound on a non-default port
+  listened but was **silently unreachable from the internet** (ufw dropped it),
+  even though a loopback Verify looked green — the "firewalled" badge with no way
+  to fix it. The unit now grants `ReadWritePaths=/etc/ufw` (optional, so hosts
+  without ufw are unaffected), and `firewall.EnsureOpen` no longer caches a port
+  as opened when the `ufw` call failed — so a transient failure is retried and
+  logged instead of marked done forever. Existing installs get the unit fix on
+  `sudo bash install.sh --update`.
+
+---
+
 # ForgePanel v1.7.6 — Release Notes
 
 ## Fixes

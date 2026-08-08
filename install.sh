@@ -883,7 +883,10 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictNamespaces=false
 LockPersonality=true
-ReadWritePaths=${DATA_DIR} ${ENV_DIR}
+# /etc/ufw writable (optional via '-') so the panel can open the host firewall for
+# inbound ports at runtime; ufw persists rules there and ProtectSystem=full would
+# otherwise make it read-only, silently breaking auto-firewalling.
+ReadWritePaths=${DATA_DIR} ${ENV_DIR} -/etc/ufw
 
 [Install]
 WantedBy=multi-user.target

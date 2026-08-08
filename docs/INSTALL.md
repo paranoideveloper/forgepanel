@@ -12,7 +12,7 @@ checksum**. Fetch the pinned copy for the release you want and verify it before
 running it as root:
 
 ```bash
-VERSION=v1.7.6
+VERSION=v1.7.7
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh
 curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/install.sh.sha256
 sha256sum -c install.sh.sha256 && sudo bash install.sh
@@ -87,13 +87,13 @@ works on a censored/flaky build network):
 docker run -d --name forgepanel --restart unless-stopped \
   -p 2053:2053 -p 80:80 -p 443:443 -p 2096:2096 -p 53:53/udp \
   -v forgepanel-data:/var/lib/forgepanel \
-  ghcr.io/paranoideveloper/forgepanel:v1.7.6
+  ghcr.io/paranoideveloper/forgepanel:v1.7.7
 ```
 
 Or with Compose (defaults to the same GHCR image, so this **pulls** it):
 
 ```bash
-VERSION=v1.7.6
+VERSION=v1.7.7
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 FORGEPANEL_VERSION=$VERSION docker compose up -d
@@ -128,8 +128,8 @@ implicit floating-image pull.
 ### Verifying a local image
 
 ```bash
-docker image inspect forgepanel:v1.7.6
-docker run --rm --entrypoint /usr/local/bin/forgectl forgepanel:v1.7.6 version
+docker image inspect forgepanel:v1.7.7
+docker run --rm --entrypoint /usr/local/bin/forgectl forgepanel:v1.7.7 version
 ```
 
 ## From source
