@@ -21,12 +21,20 @@ BUILDFLAGS := -trimpath -ldflags "$(LDFLAGS)"
 IMAGE ?= forgepanel:latest
 
 .PHONY: all build install uninstall check test race vet fmt tidy run \
-        docker docker-run release snapshot clean help
+        docker docker-run release snapshot clean help edge-bundle
 
 all: build
 
 web-build:
 	cd frontend && bun install && bun run build
+
+# edge-bundle compiles the ForgeEdge Worker (deploy/cloudflare/forgeedge/src) into
+# a single ESM module embedded by internal/edge (//go:embed). Run after changing
+# the Worker source; the committed artifact keeps `go build` free of a JS toolchain.
+edge-bundle:
+	cd deploy/cloudflare/forgeedge && bun install && \
+	  bun build src/worker.ts --outfile ../../../internal/edge/assets/forgeedge.worker.js \
+	  --format=esm --target=browser --external cloudflare:sockets --minify
 
 build: web-build
 	@mkdir -p $(BIN)

@@ -231,12 +231,17 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.Bundle) == "" {
-		edgeFail(c, &edge.Error{Op: "edge-deploy", Kind: edge.KindValidation,
-			Message: "no Worker bundle was supplied",
-			Remediation: "the panel binary does not carry the ForgeEdge bundle. Build it with " +
-				"`cd deploy/cloudflare/forgeedge && bun run build` and deploy with `forgectl edge deploy`, " +
-				"or POST the built worker.js as the `bundle` field."})
-		return
+		// Default to the bundle compiled into the panel binary, so a one-click
+		// deploy from the UI (or `forgectl edge deploy`) needs no external build.
+		if edge.HasBundle() {
+			req.Bundle = string(edge.Bundle())
+		} else {
+			edgeFail(c, &edge.Error{Op: "edge-deploy", Kind: edge.KindValidation,
+				Message: "no Worker bundle was supplied and none is compiled in",
+				Remediation: "rebuild the panel with the embedded bundle (`make edge-bundle` then rebuild), " +
+					"or POST the built worker.js as the `bundle` field."})
+			return
+		}
 	}
 	if req.Name == "" {
 		n, err := edge.RandomName()
