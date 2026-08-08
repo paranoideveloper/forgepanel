@@ -27,6 +27,26 @@ type Result struct {
 	Finding    Finding   `json:"finding"`
 	ClientLog  string    `json:"client_log,omitempty"`
 	VerifiedAt time.Time `json:"verified_at"`
+	// Unprovable marks a config that cannot be proven by this loopback harness —
+	// REALITY (needs a live TLS-1.3 dest) and the UDP/QUIC protocols (TUIC,
+	// Hysteria2, WireGuard/AmneziaWG, Brook). It is NOT a failure: the config is
+	// very likely fine, it just has to be tested from a real client. The UI shows
+	// it neutrally rather than as a red ✗.
+	Unprovable bool `json:"unprovable,omitempty"`
+}
+
+// loopbackUnprovable reports whether a node cannot be honestly proven by the
+// TCP-loopback verifier — REALITY and the UDP/QUIC-listening protocols, whose
+// server end never opens the TCP port this harness waits on.
+func loopbackUnprovable(node *model.Node) bool {
+	if node.Security.Type == model.SecReality {
+		return true
+	}
+	switch node.Protocol {
+	case model.ProtoHysteria2, model.ProtoTUIC, model.ProtoWireGuard, model.ProtoAmneziaWG, model.ProtoBrook:
+		return true
+	}
+	return false
 }
 
 // Cores is where the client/server binaries live.
@@ -58,9 +78,12 @@ func FindSingbox() string {
 // offline); the caller uses the environment layer for that.
 func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	now := time.Now()
-	if node.Security.Type == model.SecReality {
-		return Result{Pass: false, VerifiedAt: now,
-			Finding: New("FP-VERIFY-FAIL", "REALITY cannot be proven offline; it needs a live TLS-1.3 dest — use an environment probe against the dest")}
+	if loopbackUnprovable(node) {
+		msg := "REALITY can't be proven on loopback (needs a live TLS-1.3 destination) — test it from a real client."
+		if node.Security.Type != model.SecReality {
+			msg = string(node.Protocol) + " is a UDP/QUIC protocol that can't be proven by the loopback verifier — test it from a real client. This is NOT a failure."
+		}
+		return Result{Unprovable: true, VerifiedAt: now, Finding: New("FP-VERIFY-UNPROVABLE", msg)}
 	}
 	bin := cores.Singbox
 	if bin == "" {

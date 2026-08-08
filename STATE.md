@@ -3,6 +3,25 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.7.2 — Honest status + ForgeDNS multi-domain (parity batch 5)
+
+- **Verify honesty**: diag.Result.Unprovable; loopbackUnprovable() = REALITY +
+  UDP protos (tuic/hy2/wireguard/amneziawg/brook) → Unprovable (not Pass:false).
+  Frontend renders neutral "— n/a" not red ✗. Tests updated.
+- **Firewall honesty**: firewall.ufwBlocksByDefault() parses `ufw status verbose`
+  Default incoming; Reachability/IsReachableLocally return true when default=allow,
+  so working ports aren't falsely flagged 🔥.
+- **ForgeDNS multi-domain**: create form has extra-domains input → domains[] in the
+  create body (backend already stored Zone + Domains → DOMAIN array). Research
+  confirmed CottenDNS/MasterDNS/StormDNS all take a DOMAIN array + server generates
+  encrypt_key.txt (v1.5.7 read-back is the right model).
+- **Transport labels**: WG/AWG→udp, hy2/tuic→udp/quic (were showing tcp).
+STILL OPEN (big/queued): DNS key for cotten/storm needs LIVE diagnosis if still
+wrong on a FRESH zone (read-back deployed); **CF Worker free-config generator**
+(BPB/Nova/patterniha-style — huge new subsystem); **Amnezia config generator**
+(darknessshade style). v1.7.1 shipped GHCR prebuilt image (docker pull works on
+the user's censored build network; confirmed pull + boot).
+
 ## v1.7.0 — Setup Wizard + UX fixes (parity batch 4)
 
 - **SetupWizardView** (sidebar ✨): 4-step guided onboarding (domain/TLS →

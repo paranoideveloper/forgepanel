@@ -59,6 +59,29 @@ func ufwActive() bool {
 	return strings.Contains(strings.ToLower(out), "status: active")
 }
 
+// ufwBlocksByDefault reports whether ufw's DEFAULT incoming policy drops/rejects
+// traffic. When the default is allow (many VPS images ship that way), an inbound
+// port is reachable WITHOUT an explicit allow rule — so treating "not in the
+// allow list" as blocked is a false alarm. Parsed from `ufw status verbose`,
+// whose header reads e.g. "Default: deny (incoming), allow (outgoing), ...".
+func ufwBlocksByDefault() bool {
+	out, err := run("ufw", "status", "verbose")
+	if err != nil {
+		return true // can't tell — assume the stricter default so the warning is conservative
+	}
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.ToLower(line)
+		if !strings.Contains(l, "default:") {
+			continue
+		}
+		if i := strings.Index(l, "(incoming)"); i >= 0 {
+			seg := l[:i] // "... default: deny "
+			return strings.Contains(seg, "deny") || strings.Contains(seg, "reject")
+		}
+	}
+	return true
+}
+
 // ufwAllowed parses `ufw status` into the set of already-allowed ports, so we
 // skip the (slow) allow call for ports that are already open.
 func ufwAllowed() map[int]bool {
@@ -117,7 +140,9 @@ func EnsureOpen(ports []int) {
 // so a list handler can annotate many inbounds without re-shelling ufw per row.
 // The checker reports whether an external client would be allowed to the port.
 func Reachability() func(port int) bool {
-	if !ufwActive() {
+	if !ufwActive() || !ufwBlocksByDefault() {
+		// No active firewall, or the default incoming policy already allows
+		// traffic — every port is reachable, so never flag one.
 		return func(int) bool { return true }
 	}
 	allowed := ufwAllowed()
@@ -130,7 +155,7 @@ func Reachability() func(port int) bool {
 // green. When ufw is not active it returns true (we cannot tell, and there is no
 // ufw blocking).
 func IsReachableLocally(port int) bool {
-	if !ufwActive() {
+	if !ufwActive() || !ufwBlocksByDefault() {
 		return true
 	}
 	return ufwAllowed()[port]

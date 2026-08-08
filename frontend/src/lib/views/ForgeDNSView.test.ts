@@ -58,7 +58,7 @@ describe('ForgeDNSView Component', () => {
 
     // POSITIVE: the create request used the backend's field name.
     expect(await screen.findByTestId('setup-panel')).toBeTruthy();
-    expect(postBody).toEqual({ zone: 'new.example.com', adapter: 'cottendns' });
+    expect(postBody).toEqual({ zone: 'new.example.com', adapter: 'cottendns', domains: [] });
     // POSITIVE: real delegation records rendered from the bundle (async load).
     expect(await screen.findByText('203.0.113.10')).toBeTruthy();
 

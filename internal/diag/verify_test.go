@@ -66,6 +66,18 @@ func TestVerifyRealityIsHonestlyUnprovable(t *testing.T) {
 	if res.Pass {
 		t.Fatal("REALITY should not report a pass offline")
 	}
+	if !res.Unprovable {
+		t.Fatal("REALITY should be reported as Unprovable (not a failure)")
+	}
+}
+
+func TestVerifyUDPProtocolsAreUnprovableNotFailed(t *testing.T) {
+	for _, p := range []model.Protocol{model.ProtoTUIC, model.ProtoHysteria2, model.ProtoWireGuard} {
+		res := VerifySingbox(context.Background(), &model.Node{Protocol: p, Port: 443}, Cores{})
+		if res.Pass || !res.Unprovable {
+			t.Fatalf("%s should be Unprovable (not pass, not fail), got %+v", p, res)
+		}
+	}
 }
 
 var _ = time.Second

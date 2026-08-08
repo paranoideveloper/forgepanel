@@ -1,3 +1,31 @@
+# ForgePanel v1.7.2 — Release Notes
+
+## Honest status (no more false "broken")
+
+- **Verify no longer lies for REALITY / UDP protocols.** A working REALITY, TUIC,
+  Hysteria2 or WireGuard inbound showed a red ✗ because the loopback verifier
+  can't prove them (REALITY needs a live TLS-1.3 dest; the others listen on UDP,
+  which the TCP readiness gate never sees). These now report a neutral **“— n/a”
+  (can't prove on loopback — test from a client)** instead of a failure.
+- **Firewall badge respects ufw's default policy.** The 🔥 warning fired whenever a
+  port wasn't in ufw's explicit allow list — but if the default incoming policy is
+  *allow* (many VPS images), the port is reachable anyway. It now only warns when
+  the default is deny/reject, so a working inbound stops being flagged.
+
+## ForgeDNS
+
+- **Multiple tunnel domains.** CottenDNS/MasterDNS/StormDNS all handle a `DOMAIN`
+  array; the create form now takes additional comma-separated domains (each must
+  be delegated to this server), not just one.
+
+## Fixes
+
+- **Accurate transport labels.** WireGuard/AmneziaWG show **udp** and Hysteria2/TUIC
+  show **udp/quic** instead of a meaningless `tcp` (WireGuard is a UDP protocol by
+  design — it can't be TCP).
+
+---
+
 # ForgePanel v1.7.1 — Release Notes
 
 ## Docker without building

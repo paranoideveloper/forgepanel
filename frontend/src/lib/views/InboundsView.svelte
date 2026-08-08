@@ -34,7 +34,7 @@
       load();
     } catch (e: any) { showToast(e.message || 'bulk action failed', 'error'); }
   }
-  let verifyResults = $state<Record<number, { pass: boolean; latency?: number; detail?: string }>>({});
+  let verifyResults = $state<Record<number, { pass: boolean; unprovable?: boolean; latency?: number; detail?: string }>>({});
 
   let cfgOpen = $state(false);
   let cfgKind = $state('');
@@ -113,12 +113,23 @@
     }
   }
 
+  // WireGuard/AmneziaWG are UDP protocols with no stream transport, and
+  // Hysteria2/TUIC ride QUIC (UDP) — showing the xray `transport.network` (which
+  // defaults to "tcp") for them is misleading, so report their real wire protocol.
+  function transportLabel(r: Row): string {
+    const p = (r as any).protocol as string;
+    if (p === 'wireguard' || p === 'amneziawg') return 'udp';
+    if (p === 'hysteria2' || p === 'tuic') return 'udp/quic';
+    return (r as any).node?.transport?.network || '—';
+  }
+
   async function verify(r: Row) {
     verifyResults[r.id] = { pass: false, detail: 'verifying…' } as any;
     try {
-      const res = await apiFetch<{ pass: boolean; latency_ms?: number; finding?: { detail?: string } }>(`/admin/inbounds/${r.id}/verify`, { method: 'POST' });
-      verifyResults[r.id] = { pass: res.pass, latency: res.latency_ms, detail: res.finding?.detail };
-      showToast(res.pass ? `Verify OK (${res.latency_ms}ms)` : `Verify failed: ${res.finding?.detail || ''}`, res.pass ? 'success' : 'error');
+      const res = await apiFetch<{ pass: boolean; unprovable?: boolean; latency_ms?: number; finding?: { detail?: string } }>(`/admin/inbounds/${r.id}/verify`, { method: 'POST' });
+      verifyResults[r.id] = { pass: res.pass, unprovable: res.unprovable, latency: res.latency_ms, detail: res.finding?.detail };
+      if (res.unprovable) showToast(res.finding?.detail || 'Cannot verify on loopback — test from a client', 'info');
+      else showToast(res.pass ? `Verify OK (${res.latency_ms}ms)` : `Verify failed: ${res.finding?.detail || ''}`, res.pass ? 'success' : 'error');
     } catch (e: any) {
       verifyResults[r.id] = { pass: false, detail: e.message };
       showToast(e.message || 'verify failed', 'error');
@@ -210,7 +221,7 @@
             <td>{r.id}</td>
             <td><strong>{r.remark || '—'}</strong></td>
             <td><span class="proto">{r.protocol}</span></td>
-            <td>{r.node?.transport?.network || '—'}</td>
+            <td>{transportLabel(r)}</td>
             <td>{r.node?.security?.type || 'none'}</td>
             <td>{r.port}</td>
             <td>
@@ -221,8 +232,8 @@
             </td>
             <td>
               {#if verifyResults[r.id]}
-                <span class="badge {verifyResults[r.id].pass ? 'ok' : 'err'}" title={verifyResults[r.id].detail || ''}>
-                  {verifyResults[r.id].pass ? `✓ ${verifyResults[r.id].latency}ms` : '✗'}
+                <span class="badge {verifyResults[r.id].unprovable ? 'neutral' : verifyResults[r.id].pass ? 'ok' : 'err'}" title={verifyResults[r.id].detail || ''}>
+                  {verifyResults[r.id].unprovable ? '— n/a' : verifyResults[r.id].pass ? `✓ ${verifyResults[r.id].latency}ms` : '✗'}
                 </span>
               {:else}<span class="muted">—</span>{/if}
             </td>
@@ -280,6 +291,7 @@
   .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
   .badge.off { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
   .badge.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
+  .badge.neutral { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.65); }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
   .sm.danger { background: rgba(255,77,77,0.15); color: #FF4D4D; border-color: rgba(255,77,77,0.3); }

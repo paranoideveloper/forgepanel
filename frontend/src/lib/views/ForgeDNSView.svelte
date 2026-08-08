@@ -11,6 +11,7 @@
   let loading = $state(true);
 
   let newDomain = $state('');
+  let extraDomains = $state('');
   let selectedAdapter = $state('');
   let createErr = $state('');
 
@@ -36,12 +37,16 @@
       return;
     }
     try {
-      // Backend keys the zone on `zone` (the primary tunnel domain) + `adapter`.
+      // Backend keys the zone on `zone` (the primary tunnel domain) + `adapter`,
+      // and carries any additional tunnel domains in `domains` — CottenDNS/Master/
+      // StormDNS all handle a DOMAIN array, every one delegated to this server.
+      const domains = extraDomains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
       const created = await apiFetch<DNSZone>('/admin/forgedns/zones', {
         method: 'POST',
-        body: JSON.stringify({ zone: newDomain.trim(), adapter: selectedAdapter })
+        body: JSON.stringify({ zone: newDomain.trim(), adapter: selectedAdapter, domains })
       });
       newDomain = '';
+      extraDomains = '';
       showToast('DNS Tunnel Zone created & activated', 'success');
       await loadData();
       await showSetup(created);
@@ -99,6 +104,9 @@
       {/each}
     </select>
     <button class="btn-primary" onclick={createZone} data-testid="create-zone">Create &amp; Activate</button>
+  </div>
+  <div class="form-row" style="margin-top:10px">
+    <input type="text" bind:value={extraDomains} placeholder="Additional tunnel domains (optional, comma-separated)" data-testid="zone-extra-domains" style="flex:1" />
   </div>
   {#if createErr}<p class="err-text">{createErr}</p>{/if}
   {#if selectedAdapter}
