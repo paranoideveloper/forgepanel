@@ -3,6 +3,25 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.6.0 — Self-provisioning + routing presets (BPB/Nova parity, batch 1)
+
+Rasoul wants ForgePanel to have every option BPB-Worker-Panel / Nova-Proxy have
+(see memory reference_forgepanel_feature_parity) and the install to "do all the
+work". Batch 1:
+- **Installer opens the firewall** (`open_firewall` in install.sh): panel port +
+  80/443/53 across ufw/firewalld/iptables, best-effort, after health check.
+- **Dynamic `:80` ACME helper** (`Server.StartACMEHelper`/`StopACMEHelper`): TLS
+  comes up on domain-save with no restart; main.go + handlePanelAddressUpdate wire
+  it. Fixes the "port 80 helper only starts at boot" limitation.
+- **Routing presets** — new `internal/protocol/routing` package: bypass-Iran /
+  direct-LAN / block ads·malware·porn·QUIC for sing-box (rule-sets via
+  download_detour=proxy), Xray (built-in geoip/geosite), Clash (rule-providers,
+  spliced into the exporter YAML via clashWithRouting). Query `?routing=` +
+  per-flag override; default from setting `sub_routing_preset` (="iran"). VERIFIED
+  by real `sing-box check` + `xray run -test`. Remaining parity batches: node
+  naming templates, subscription page + format links, WARP configs, Farsi i18n,
+  chain proxy, clean-IP surfacing.
+
 ## v1.5.8 — Certificates page: truthful trust banner (cert-honesty)
 
 On a server exposing only :2053 (80/443 closed), ACME failed with

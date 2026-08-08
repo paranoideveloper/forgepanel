@@ -65,13 +65,10 @@ func main() {
 		// still encrypted rather than crossing the wire in cleartext).
 		httpSrv.TLSConfig = srv.CertTLSConfig()
 		if p.Domain != "" {
-			// :80 helper answers ACME HTTP-01 challenges and redirects to HTTPS.
-			go func() {
-				h := &http.Server{Addr: ":80", Handler: srv.ACMEHTTPHandler(), ReadHeaderTimeout: 10 * time.Second}
-				if e := h.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {
-					fmt.Fprintln(os.Stderr, "forgepanel: :80 ACME helper:", e)
-				}
-			}()
+			// :80 helper answers ACME HTTP-01 challenges; the same managed helper is
+			// (re)started from the address handler when a domain is saved at runtime,
+			// so TLS never needs a restart to come up.
+			srv.StartACMEHelper()
 			// Issue/renew the domain's cert ahead of the first visit so the panel is
 			// browser-trusted from the start instead of on the first domain handshake.
 			srv.PrimePanelCert()

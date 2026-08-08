@@ -12,7 +12,22 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
+	"github.com/forgepanel/forgepanel/internal/protocol/routing"
 )
+
+// subRoutingPreset is the operator's default routing preset for generated
+// sing-box/Xray/Clash configs. Defaults to the Iran preset (bypass Iran + direct
+// LAN + block ads/malware); a per-request ?routing= overrides it. Stored under
+// the "sub_routing_preset" setting so an operator can change or disable it.
+func (s *Server) subRoutingPreset() string {
+	if s.db == nil {
+		return "iran"
+	}
+	if v := s.db.GetSetting("sub_routing_preset"); v != "" {
+		return v
+	}
+	return "iran"
+}
 
 // subFormats are the subscription formats this endpoint can render, listed for
 // the error message when a client asks for something else.
@@ -114,6 +129,11 @@ func (s *Server) handleSub(c *gin.Context) {
 	c.Header("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte("ForgePanel")))
 	c.Header("Access-Control-Allow-Origin", "*")
 
+	// Routing preset for the runnable config formats (sing-box/Xray/Clash): the
+	// operator default, overridable per request with ?routing= (and fine-grained
+	// block_ads / bypass_iran / … flags).
+	route := routing.FromQuery(c.Request.URL.Query(), s.subRoutingPreset())
+
 	switch format {
 	case "clash":
 		y, err := export.ClashYAML(nodes)
@@ -121,15 +141,15 @@ func (s *Server) handleSub(c *gin.Context) {
 			c.String(500, err.Error())
 			return
 		}
-		c.Data(200, "text/yaml; charset=utf-8", []byte(y))
+		c.Data(200, "text/yaml; charset=utf-8", []byte(clashWithRouting(y, route)))
 	case "links":
 		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinks(nodes)))
 	case "json":
 		c.JSON(200, nodes)
 	case "sing-box":
-		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes))
+		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes, route))
 	case "xray":
-		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes))
+		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes, route))
 	case "surge":
 		c.Data(200, "text/plain; charset=utf-8", surgeSubscription(nodes))
 	case "loon":
@@ -168,7 +188,7 @@ func (s *Server) subscriptionUserinfo(token string) string {
 // clients (v2rayN and others) import a raw Xray JSON directly; this is that, and
 // it is accepted by `xray run -test`. Tags are de-duplicated the same way the
 // sing-box builder reserves its own, so no two outbounds collide.
-func xraySubscription(nodes []*model.Node) []byte {
+func xraySubscription(nodes []*model.Node, route routing.Options) []byte {
 	const (
 		xrayDirectTag = "direct"
 		xrayBlockTag  = "block"
@@ -199,25 +219,33 @@ func xraySubscription(nodes []*model.Node) []byte {
 		map[string]any{"protocol": "freedom", "tag": xrayDirectTag},
 		map[string]any{"protocol": "blackhole", "tag": xrayBlockTag},
 	)
+	// Preset rules (direct-Iran/LAN, block ads/porn/QUIC) come first, then the
+	// catch-all that sends everything else through the first proxy.
 	rules := []any{}
+	strategy := "AsIs"
+	if route.Enabled() {
+		rules = append(rules, route.Xray(xrayDirectTag, xrayBlockTag)...)
+		strategy = route.XrayDomainStrategy()
+	}
 	if len(proxyTags) > 0 {
 		rules = append(rules, map[string]any{
 			"type": "field", "outboundTag": proxyTags[0], "network": "tcp,udp",
 		})
 	}
+	socks := map[string]any{
+		"tag": "socks", "port": 10808, "listen": "127.0.0.1", "protocol": "socks",
+		"settings": map[string]any{"udp": true, "auth": "noauth"},
+	}
+	if route.Enabled() {
+		// Domain-based routing rules need the destination host; sniff it off the
+		// forwarded connection so geosite matching works.
+		socks["sniffing"] = map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}}
+	}
 	doc := map[string]any{
-		"log": map[string]any{"loglevel": "warning"},
-		"inbounds": []any{
-			map[string]any{
-				"tag": "socks", "port": 10808, "listen": "127.0.0.1", "protocol": "socks",
-				"settings": map[string]any{"udp": true, "auth": "noauth"},
-			},
-			map[string]any{
-				"tag": "http", "port": 10809, "listen": "127.0.0.1", "protocol": "http",
-			},
-		},
+		"log":       map[string]any{"loglevel": "warning"},
+		"inbounds":  []any{socks, map[string]any{"tag": "http", "port": 10809, "listen": "127.0.0.1", "protocol": "http"}},
 		"outbounds": outs,
-		"routing":   map[string]any{"domainStrategy": "AsIs", "rules": rules},
+		"routing":   map[string]any{"domainStrategy": strategy, "rules": rules},
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return b
@@ -241,7 +269,7 @@ const (
 	sbDirectTag   = "direct"
 )
 
-func singboxSubscription(nodes []*model.Node) []byte {
+func singboxSubscription(nodes []*model.Node, route routing.Options) []byte {
 	outs := make([]any, 0, len(nodes)+2)
 	// Pre-reserve the tags this function emits itself, so no node can claim them.
 	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1}
@@ -292,16 +320,69 @@ func singboxSubscription(nodes []*model.Node) []byte {
 	// `sing-box run -c <sub>` actually forwards traffic — matching the xray
 	// format's socks/http inbounds. Without an inbound the config parses but can
 	// carry nothing.
+	routeBlock := map[string]any{"final": final}
+	if route.Enabled() {
+		// Direct/block preset rules come before the implicit final selector; every
+		// remote rule-set downloads through the proxy so a censored GitHub is fine.
+		rules, ruleSets := route.Singbox(final, sbDirectTag)
+		if len(rules) > 0 {
+			routeBlock["rules"] = rules
+		}
+		if len(ruleSets) > 0 {
+			routeBlock["rule_set"] = ruleSets
+		}
+	}
 	doc := map[string]any{
 		"log": map[string]any{"level": "warn"},
 		"inbounds": []any{
 			map[string]any{"type": "mixed", "tag": "in", "listen": "127.0.0.1", "listen_port": 10808},
 		},
 		"outbounds": outs,
-		"route":     map[string]any{"final": final},
+		"route":     routeBlock,
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return b
+}
+
+// clashWithRouting splices a routing preset into a Clash-Meta document produced
+// by export.ClashYAML. The base ends with `rules:` / `  - MATCH,PROXY`; the
+// preset's rules are inserted immediately before that catch-all, and a
+// rule-providers block is prepended (a top-level key Clash accepts anywhere). It
+// works at the text level so the canonical Clash exporter stays untouched.
+func clashWithRouting(base string, route routing.Options) string {
+	if !route.Enabled() {
+		return base
+	}
+	rules, providers := route.Clash(export.ClashProxySelector)
+	// The exporter quotes list scalars (commas), so the catch-all is `  - "MATCH,PROXY"`.
+	match := "  - \"MATCH," + export.ClashProxySelector + "\""
+	if !strings.Contains(base, match) {
+		return base // formatting changed unexpectedly — never emit a broken doc
+	}
+	var inject strings.Builder
+	for _, r := range rules {
+		inject.WriteString("  - \"" + r + "\"\n")
+	}
+	out := strings.Replace(base, match, inject.String()+match, 1)
+
+	if len(providers) == 0 {
+		return out
+	}
+	var head strings.Builder
+	head.WriteString("rule-providers:\n")
+	for tag, p := range providers {
+		m, _ := p.(map[string]any)
+		head.WriteString("  " + tag + ":\n")
+		for _, k := range []string{"type", "behavior", "format", "url", "path", "interval"} {
+			switch k {
+			case "url", "path":
+				head.WriteString(fmt.Sprintf("    %s: %q\n", k, m[k]))
+			default:
+				head.WriteString(fmt.Sprintf("    %s: %v\n", k, m[k]))
+			}
+		}
+	}
+	return head.String() + out
 }
 
 // redactNodesForClient returns copies of the nodes with server-only secrets

@@ -892,6 +892,46 @@ UNIT
   mv -f "$unit_tmp" "$UNIT_PATH"
 }
 
+# open_firewall opens the ports the panel itself binds — the panel UI/API port,
+# 80 and 443 (ACME HTTP-01 + HTTPS/TLS-ALPN + QUIC), and 53 (ForgeDNS) — on
+# whatever managed host firewall is active. Proxy inbound ports are opened by the
+# panel at runtime (internal/firewall). Best-effort and idempotent: it never
+# installs a firewall, and on a host with no managed firewall it just advises.
+open_firewall() {
+  local tcp=(80 443 53 "$PANEL_PORT") udp=(53 443)
+  # de-duplicate (PANEL_PORT may already be 80/443/53)
+  local seen=" " p list_tcp=()
+  for p in "${tcp[@]}"; do case "$seen" in *" $p "*) ;; *) list_tcp+=("$p"); seen="$seen$p ";; esac; done
+
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    for p in "${list_tcp[@]}"; do ufw allow "${p}/tcp" >/dev/null 2>&1 || true; done
+    for p in "${udp[@]}"; do ufw allow "${p}/udp" >/dev/null 2>&1 || true; done
+    ufw reload >/dev/null 2>&1 || true
+    ok "Firewall (ufw): opened tcp ${list_tcp[*]} and udp ${udp[*]}."
+    return 0
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    for p in "${list_tcp[@]}"; do firewall-cmd --permanent --add-port="${p}/tcp" >/dev/null 2>&1 || true; done
+    for p in "${udp[@]}"; do firewall-cmd --permanent --add-port="${p}/udp" >/dev/null 2>&1 || true; done
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    ok "Firewall (firewalld): opened tcp ${list_tcp[*]} and udp ${udp[*]}."
+    return 0
+  fi
+  # Raw iptables — only touch it when there is actually a restrictive INPUT policy
+  # to open (DROP/REJECT). If INPUT already defaults to ACCEPT, adding rules would
+  # be noise, and we must not risk disturbing a hand-built ruleset.
+  if command -v iptables >/dev/null 2>&1 && iptables -L INPUT -n 2>/dev/null | head -1 | grep -qiE 'policy (DROP|REJECT)'; then
+    for p in "${list_tcp[@]}"; do iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true; done
+    for p in "${udp[@]}"; do iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || true; done
+    command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
+    ok "Firewall (iptables): allowed tcp ${list_tcp[*]} and udp ${udp[*]}."
+    return 0
+  fi
+  info "No active host firewall detected. If your VPS provider has an external firewall,"
+  info "allow: TCP ${list_tcp[*]} and UDP ${udp[*]} (80/443 are needed for automatic TLS)."
+  return 0
+}
+
 step_install() {
   step 7 "Installing"
 
@@ -1002,6 +1042,10 @@ step_install() {
   [[ -n "$env_backup" ]] && resources+=(--backup "${ENV_FILE}=${env_backup}")
   "$CTL_PATH" lifecycle record-install --method curl --version "$VERSION" --data "$DATA_DIR" --manifest "$MANIFEST_PATH" "${resources[@]}" || rollback_install
   ok "Service started and health check passed."
+
+  # Open the ports the panel binds so the panel, automatic TLS and ForgeDNS are
+  # reachable without a manual firewall step. Best-effort — never fatal.
+  open_firewall || true
 }
 
 verify_release_asset() {

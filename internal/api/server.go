@@ -10,8 +10,10 @@ import (
 	"crypto/tls"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -61,6 +63,12 @@ type Server struct {
 	background  sync.WaitGroup
 	closeOnce   sync.Once
 	closeErr    error
+
+	// acmeHTTP is the :80 HTTP-01 helper. It is started whenever a panel domain
+	// is configured — at boot and, so TLS needs no restart, the moment a domain
+	// is saved from the UI. Guarded by acmeMu.
+	acmeMu   sync.Mutex
+	acmeHTTP *http.Server
 
 	// edgePush debounces canonical-feed pushes to registered ForgeEdge
 	// deployments (§6); see EdgePushSoon in edge.go.
@@ -319,6 +327,46 @@ func (s *Server) CertTLSConfig() *tls.Config { return s.certs.TLSConfig() }
 // ACMEHTTPHandler returns the handler for the :80 helper: it answers ACME
 // HTTP-01 challenges and redirects everything else to HTTPS.
 func (s *Server) ACMEHTTPHandler() http.Handler { return s.certs.ACMEManager().HTTPHandler(nil) }
+
+// StartACMEHelper ensures the :80 HTTP-01 helper is listening so Let's Encrypt
+// can validate the panel domain. It is idempotent and safe to call at boot and
+// again the instant a domain is saved from the UI, so a browser-trusted cert is
+// obtained without a restart. Binding :80 needs CAP_NET_BIND_SERVICE (the
+// systemd unit and the Docker root process both have it); a bind failure (port
+// already in use, missing capability) is logged, never fatal.
+func (s *Server) StartACMEHelper() {
+	s.acmeMu.Lock()
+	defer s.acmeMu.Unlock()
+	if s.acmeHTTP != nil {
+		return // already running
+	}
+	ln, err := net.Listen("tcp", ":80")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "forgepanel: ACME :80 helper not started:", err)
+		return
+	}
+	srv := &http.Server{Handler: s.ACMEHTTPHandler(), ReadHeaderTimeout: 10 * time.Second}
+	s.acmeHTTP = srv
+	go func() {
+		if e := srv.Serve(ln); e != nil && !errors.Is(e, http.ErrServerClosed) {
+			fmt.Fprintln(os.Stderr, "forgepanel: ACME :80 helper:", e)
+		}
+	}()
+}
+
+// StopACMEHelper shuts the :80 helper down — used when the panel domain is
+// cleared, so the panel stops holding port 80.
+func (s *Server) StopACMEHelper() {
+	s.acmeMu.Lock()
+	srv := s.acmeHTTP
+	s.acmeHTTP = nil
+	s.acmeMu.Unlock()
+	if srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}
+}
 
 // configureTrustedProxies decides whether gin honors X-Forwarded-For. The secure
 // default is to trust NO proxy, so an untrusted client cannot spoof its source

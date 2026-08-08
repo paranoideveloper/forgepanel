@@ -14,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/routing"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
@@ -321,7 +323,7 @@ func TestSingboxSubscriptionHasUniqueTags(t *testing.T) {
 	var doc struct {
 		Outbounds []map[string]any `json:"outbounds"`
 	}
-	if err := json.Unmarshal(singboxSubscription(nodes), &doc); err != nil {
+	if err := json.Unmarshal(singboxSubscription(nodes, routing.Options{}), &doc); err != nil {
 		t.Fatalf("subscription is not valid JSON: %v", err)
 	}
 	seen := map[string]bool{}
@@ -366,12 +368,90 @@ func TestSingboxSubscriptionAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "sub.json")
-	if err := os.WriteFile(cfg, singboxSubscription(nodes), 0o600); err != nil {
+	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Options{}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput()
 	if err != nil {
 		t.Fatalf("sing-box rejected the subscription: %v\n%s", err, out)
+	}
+}
+
+// TestSingboxSubscriptionWithRoutingAcceptedByCore proves the routing preset
+// (bypass Iran, block ads/malware/porn, block QUIC, direct LAN — rules AND remote
+// rule-sets) produces a config the real sing-box core accepts.
+func TestSingboxSubscriptionWithRoutingAcceptedByCore(t *testing.T) {
+	bin := findSingbox()
+	if bin == "" {
+		t.Skip("sing-box binary not found; skipping semantic validation")
+	}
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoTrojan, Address: "b.example.com", Port: 443, Password: "pw1"},
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "sub-routed.json")
+	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Preset("full")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sing-box rejected the routed subscription: %v\n%s", err, out)
+	}
+}
+
+// TestXraySubscriptionWithRoutingAcceptedByCore is the same proof for Xray.
+func TestXraySubscriptionWithRoutingAcceptedByCore(t *testing.T) {
+	bin := findXray()
+	if bin == "" {
+		t.Skip("xray binary not found; skipping semantic validation")
+	}
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xray-routed.json")
+	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Preset("full")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("xray rejected the routed config: %v\n%s", err, out)
+	}
+}
+
+// TestClashWithRoutingShape checks the routing preset is spliced into the Clash
+// document correctly: a rule-providers block, the preset rules before the single
+// catch-all MATCH, and no duplicate rules: key.
+func TestClashWithRoutingShape(t *testing.T) {
+	nodes := []*model.Node{{Protocol: model.ProtoTrojan, Address: "a.example.com", Port: 443, Password: "pw"}}
+	base, err := export.ClashYAML(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := clashWithRouting(base, routing.Preset("full"))
+	if strings.Count(out, "\nrules:\n") != 1 {
+		t.Fatalf("expected exactly one rules: block, got:\n%s", out)
+	}
+	if !strings.Contains(out, "rule-providers:") {
+		t.Fatal("missing rule-providers block")
+	}
+	if !strings.Contains(out, "RULE-SET,ir-domains,DIRECT") {
+		t.Fatal("missing Iran direct rule")
+	}
+	// The catch-all MATCH must appear exactly once and be the last rule line.
+	if strings.Count(out, "MATCH,"+export.ClashProxySelector) != 1 {
+		t.Fatalf("expected exactly one MATCH catch-all:\n%s", out)
+	}
+	idxMatch := strings.LastIndex(out, "MATCH,")
+	idxRuleSet := strings.LastIndex(out, "RULE-SET,ir-domains,DIRECT")
+	if idxRuleSet > idxMatch {
+		t.Fatal("preset rules must come before the catch-all MATCH")
+	}
+	// Disabled preset returns the base untouched.
+	if clashWithRouting(base, routing.Preset("off")) != base {
+		t.Fatal("disabled routing must not modify the document")
 	}
 }
 
@@ -401,7 +481,7 @@ func TestXraySubscriptionAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xray.json")
-	if err := os.WriteFile(cfg, xraySubscription(nodes), 0o600); err != nil {
+	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Options{}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
@@ -419,7 +499,7 @@ func TestXraySubscriptionHasUniqueTags(t *testing.T) {
 	var doc struct {
 		Outbounds []map[string]any `json:"outbounds"`
 	}
-	if err := json.Unmarshal(xraySubscription(nodes), &doc); err != nil {
+	if err := json.Unmarshal(xraySubscription(nodes, routing.Options{}), &doc); err != nil {
 		t.Fatalf("not valid JSON: %v", err)
 	}
 	seen := map[string]bool{}

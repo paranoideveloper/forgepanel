@@ -239,6 +239,10 @@ func ClashProxy(n *model.Node) (map[string]any, error) {
 // "proxies", a single "PROXY" select group listing them, and a catch-all rule.
 // Nodes Clash.Meta cannot express are skipped rather than failing the document,
 // because one exotic node must not cost a user their entire subscription.
+// ClashProxySelector is the name of the select proxy-group every generated Clash
+// document routes to. Exported so routing presets can target it in their rules.
+const ClashProxySelector = "PROXY"
+
 func ClashYAML(nodes []*model.Node) (string, error) {
 	proxies := make([]any, 0, len(nodes))
 	names := make([]any, 0, len(nodes))
@@ -269,11 +273,11 @@ func ClashYAML(nodes []*model.Node) (string, error) {
 	doc := map[string]any{
 		"proxies": proxies,
 		"proxy-groups": []any{map[string]any{
-			"name":    "PROXY",
+			"name":    ClashProxySelector,
 			"type":    "select",
 			"proxies": names,
 		}},
-		"rules": []any{"MATCH,PROXY"},
+		"rules": []any{"MATCH," + ClashProxySelector},
 	}
 
 	var b strings.Builder

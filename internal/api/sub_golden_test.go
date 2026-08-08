@@ -10,6 +10,7 @@ import (
 
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/routing"
 )
 
 // goldenNodes is a fixed, deterministic matrix used to golden-file every
@@ -44,8 +45,8 @@ func TestSubscriptionFormatsStructural(t *testing.T) {
 		"v2ray":       []byte(base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))),
 		"links":       []byte(plainLinks(nodes)),
 		"clash":       []byte(clashYAML),
-		"sing-box":    singboxSubscription(nodes),
-		"xray":        xraySubscription(nodes),
+		"sing-box":    singboxSubscription(nodes, routing.Options{}),
+		"xray":        xraySubscription(nodes, routing.Options{}),
 		"surge":       surgeSubscription(nodes),
 		"loon":        loonSubscription(nodes),
 		"quantumultx": quantumultxSubscription(nodes),

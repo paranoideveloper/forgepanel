@@ -1,3 +1,36 @@
+# ForgePanel v1.6.0 — Release Notes
+
+Feature release: the installer and panel now provision themselves, and
+subscriptions carry BPB/Nova-style routing presets.
+
+## Self-provisioning
+
+- **The installer opens the firewall.** After the service is healthy, `install.sh`
+  opens the ports the panel binds — the panel port, 80, 443 and 53 — on ufw,
+  firewalld or (only when there is a restrictive policy) iptables. No more "cert
+  won't issue / DNS never answers" because a port was closed. On a host with no
+  managed firewall it prints exactly which ports an external firewall must allow.
+- **TLS comes up without a restart.** The `:80` ACME HTTP-01 helper is now a
+  managed listener: saving a panel domain from the UI starts it and primes the
+  certificate immediately, and clearing the domain releases port 80. Previously a
+  domain saved after boot needed a manual restart before Let's Encrypt could work.
+
+## Routing presets (sing-box · Xray · Clash)
+
+- Generated **sing-box, Xray and Clash** subscriptions can now carry routing
+  rules: **bypass Iran** (domestic domains/IPs go direct), **direct LAN**, **block
+  ads/trackers**, **block malware/phishing**, **block adult content**, and **block
+  QUIC**. Verified valid by the real `sing-box check` and `xray run -test`.
+- sing-box rule-sets download **through the proxy** (`download_detour`), so a
+  blocked GitHub from inside Iran is a non-issue; Xray uses the geoip/geosite
+  databases clients already bundle (no fetch).
+- Controlled by a per-request query string — `?routing=iran|full|block|off` plus
+  fine-grained `bypass_iran` / `block_ads` / `block_malware` / `block_porn` /
+  `block_quic` / `direct_lan` flags — over an operator default (setting
+  `sub_routing_preset`, defaulting to the Iran preset).
+
+---
+
 # ForgePanel v1.5.8 — Release Notes
 
 Honesty fix for the Certificates page after an ACME failure on a server where only

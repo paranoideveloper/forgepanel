@@ -217,6 +217,14 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		_ = s.db.SetSetting("public_address", *req.Domain)
 	}
 	s.writePublicURLFile()
+	// Bring TLS up without a restart: a configured domain (re)starts the :80 ACME
+	// helper and primes the certificate now; a cleared domain releases port 80.
+	if result.New.Domain != "" {
+		s.StartACMEHelper()
+		s.PrimePanelCert()
+	} else {
+		s.StopACMEHelper()
+	}
 	s.audit(c, "panel.address.update", result.New.Domain)
 	c.JSON(200, gin.H{
 		"ok": true, "restart_required": result.RestartRequired,
