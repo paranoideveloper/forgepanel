@@ -15,7 +15,7 @@ no build step, no dependencies — it runs entirely on Cloudflare's free tier.
 
 ## Deploy
 
-**Dashboard (no tools):** create a Worker, paste `_worker.js`, Save & Deploy.
+**Dashboard (no tools):** create a Worker, paste `../internal/cfedge/worker.js`, Save & Deploy.
 Optionally add a `UUID` variable (Settings → Variables) for a private id.
 
 **wrangler:**

@@ -7,7 +7,7 @@
 # Or skip wrangler entirely: create a Worker in the Cloudflare dashboard and
 # paste the contents of _worker.js.
 name = "forgeedge"
-main = "_worker.js"
+main = "../internal/cfedge/worker.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
