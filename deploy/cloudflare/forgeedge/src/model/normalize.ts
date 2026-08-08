@@ -244,15 +244,21 @@ export function normalize(n: Node): Node {
       if (!n.amneziawg) n.amneziawg = {};
       const a = n.amneziawg;
       if (!a.mtu) a.mtu = 1420;
-      if (!a.jc) a.jc = 8;
-      if (!a.jmin) a.jmin = 50;
-      if (!a.jmax) a.jmax = 1000;
-      if (!a.s1) a.s1 = 86;
-      if (!a.s2) a.s2 = 574;
-      if (!a.h1) a.h1 = 1234567;
-      if (!a.h2) a.h2 = 2345678;
-      if (!a.h3) a.h3 = 3456789;
-      if (!a.h4) a.h4 = 4567890;
+      // Use `=== undefined`, not `!a.X`: 0 is a MEANINGFUL value for these
+      // AmneziaWG params. A WARP tunnel deliberately sets s1=s2=0 because
+      // Cloudflare's server is not AmneziaWG-aware — non-zero init-packet junk
+      // (S1/S2) would corrupt the handshake and the server would drop it. The
+      // old `if (!a.s1)` test treated that intentional 0 as "unset" and
+      // clobbered it to 86/574, producing a WARP-Pro config that never connects.
+      if (a.jc === undefined) a.jc = 8;
+      if (a.jmin === undefined) a.jmin = 50;
+      if (a.jmax === undefined) a.jmax = 1000;
+      if (a.s1 === undefined) a.s1 = 86;
+      if (a.s2 === undefined) a.s2 = 574;
+      if (a.h1 === undefined) a.h1 = 1234567;
+      if (a.h2 === undefined) a.h2 = 2345678;
+      if (a.h3 === undefined) a.h3 = 3456789;
+      if (a.h4 === undefined) a.h4 = 4567890;
       break;
     }
 

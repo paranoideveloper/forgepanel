@@ -1,3 +1,30 @@
+# ForgePanel v1.8.1 — Release Notes
+
+## Fix: WARP "Pro" (AmneziaWG) configs now actually connect and reach Clash
+
+The edge already registered Cloudflare WARP accounts and emitted an AmneziaWG
+"Pro" node (WireGuard + junk-packet DPI obfuscation) — but two bugs made that
+node look present while being unusable:
+
+- **`s1`/`s2` were clobbered to 86/574, corrupting the WARP handshake.** WARP's
+  server is not AmneziaWG-aware, so the tunnel deliberately sets `S1=S2=0` (only
+  the standalone junk *packets* Jc/Jmin/Jmax are safe; init-packet junk is not).
+  Config normalization tested `if (!a.s1)`, which treats the intentional `0` as
+  "unset" and overwrote it — so every WARP-Pro config carried non-zero init junk
+  and never completed a handshake. Normalization now preserves an explicit `0`.
+- **Clash dropped AmneziaWG entirely.** The Clash renderer had no `amneziawg`
+  case, so the node threw `ClashUnsupportedError` and vanished from every Clash
+  subscription. Clash.Meta/mihomo *does* support it — the renderer now emits a
+  `wireguard` proxy with an `amnezia-wg-option` block (Jc/Jmin/Jmax/S1/S2/H1–H4).
+
+Verified against Cloudflare's live consumer API: two real WARP accounts register,
+the Pro node carries `s1=s2=0`, and the subscription renders VLESS + Trojan
+everywhere, plain WireGuard WARP in links/clash/sing-box/xray/json, and AmneziaWG
+in Clash (`amnezia-wg-option`) + the canonical JSON. sing-box and xray correctly
+omit AmneziaWG (those cores cannot express it). 320/320 worker tests pass.
+
+---
+
 # ForgePanel v1.8.0 — Release Notes
 
 ## Feature: ForgeEdge in the panel — one-click Cloudflare edge

@@ -309,6 +309,33 @@ export function clashProxy(n: Node): Record<string, YValue> {
       break;
     }
 
+    case 'amneziawg': {
+      // mihomo (Clash.Meta) expresses AmneziaWG as a wireguard proxy carrying an
+      // `amnezia-wg-option` block — the junk-packet params that survive a DPI
+      // fingerprinting WireGuard's fixed handshake. Without this case an
+      // AmneziaWG node was dropped from every Clash subscription entirely.
+      const w = c.amneziawg;
+      if (!w) throw new ClashUnsupportedError('export/clash: not representable in Clash.Meta: amneziawg node without keys');
+      p.type = 'wireguard';
+      p['private-key'] = w.private_key ?? '';
+      p['public-key'] = w.public_key ?? '';
+      p.udp = true;
+      if (w.pre_shared_key) p['pre-shared-key'] = w.pre_shared_key;
+      for (const addr of w.local_address ?? []) {
+        if (addr.includes(':')) p.ipv6 = addr; else p.ip = addr;
+      }
+      if (w.allowed_ips?.length) p['allowed-ips'] = [...w.allowed_ips];
+      if ((w.mtu ?? 0) > 0) p.mtu = w.mtu!;
+      if ((w.persistent_keepalive ?? 0) > 0) p['persistent-keepalive'] = w.persistent_keepalive!;
+      if (w.reserved?.length === 3) p.reserved = [w.reserved[0], w.reserved[1], w.reserved[2]];
+      p['amnezia-wg-option'] = {
+        jc: w.jc ?? 0, jmin: w.jmin ?? 0, jmax: w.jmax ?? 0,
+        s1: w.s1 ?? 0, s2: w.s2 ?? 0,
+        h1: w.h1 ?? 0, h2: w.h2 ?? 0, h3: w.h3 ?? 0, h4: w.h4 ?? 0,
+      };
+      break;
+    }
+
     case 'shadowtls':
       throw new ClashUnsupportedError(
         'export/clash: not representable in Clash.Meta: shadowtls; export the wrapped shadowsocks node');
