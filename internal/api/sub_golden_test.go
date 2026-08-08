@@ -46,7 +46,7 @@ func TestSubscriptionFormatsStructural(t *testing.T) {
 		"links":       []byte(plainLinks(nodes)),
 		"clash":       []byte(clashYAML),
 		"sing-box":    singboxSubscription(nodes, routing.Options{}),
-		"xray":        xraySubscription(nodes, routing.Options{}),
+		"xray":        xraySubscription(nodes, routing.Options{}, routing.Fragment{}),
 		"surge":       surgeSubscription(nodes),
 		"loon":        loonSubscription(nodes),
 		"quantumultx": quantumultxSubscription(nodes),

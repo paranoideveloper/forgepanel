@@ -3,6 +3,21 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.6.1 — Xray fragment + subscription-settings UI (parity batch 2)
+
+- **Xray TLS Fragment** (routing.Fragment): dialerProxy→freedom fragment outbound
+  splits the TLS hello; `?fragment=1` + tuning params or operator default. VERIFIED
+  by real `xray run -test`.
+- **Subscription defaults UI**: card in UsersView (routing preset dropdown +
+  fragment toggle) → GET/POST /admin/settings/subscription (settings
+  sub_routing_preset + sub_fragment_default). /sub applies the fragment default
+  when the query omits it. e2e subscription.spec.ts verifies persist + /sub honours
+  (desktop+mobile, against the built binary).
+- **install.sh shipped as a release asset** (goreleaser extra_files + before hook
+  for the .sha256) — the documented `curl install.sh` flow 404'd before.
+Remaining parity: node-naming templates, WARP configs, Farsi i18n, chain proxy,
+subscription landing page, clean-IP surfacing, Telegram control.
+
 ## v1.6.0 — Self-provisioning + routing presets (BPB/Nova parity, batch 1)
 
 Rasoul wants ForgePanel to have every option BPB-Worker-Panel / Nova-Proxy have

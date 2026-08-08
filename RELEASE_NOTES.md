@@ -1,3 +1,27 @@
+# ForgePanel v1.6.1 — Release Notes
+
+Rounds out the subscription-tuning features and makes them controllable from the
+panel.
+
+## New
+
+- **TLS Fragment (Xray).** The BPB-style DPI-evasion trick: every proxy outbound
+  dials through a freedom `fragment` outbound that splits the TLS ClientHello into
+  small pieces so an SNI filter never sees a whole handshake. Verified valid by
+  the real `xray run -test`. Enable per request with `?fragment=1`
+  (`fragment_packets` / `fragment_length` / `fragment_interval` tune it) or as an
+  operator default.
+- **Subscription defaults in the UI.** A new card under **Users & Subscriptions**
+  sets the default **routing preset** (Iran / Full / Block-only / Off) and toggles
+  **TLS Fragment** for every generated config — backed by
+  `GET`/`POST /api/admin/settings/subscription`. Per-link `?routing=` / `?fragment=`
+  still override. Verified end-to-end in a browser against the built binary.
+- **The release now ships `install.sh` + `install.sh.sha256`** as assets, so the
+  documented one-command install (`curl .../install.sh`) actually resolves — it
+  did not before.
+
+---
+
 # ForgePanel v1.6.0 — Release Notes
 
 Feature release: the installer and panel now provision themselves, and

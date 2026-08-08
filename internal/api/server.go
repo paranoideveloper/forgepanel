@@ -516,6 +516,8 @@ func (s *Server) routes() {
 			admin.GET("/2fa/recovery", s.handle2FARecoveryStatus)
 			admin.POST("/2fa/recovery/regenerate", s.handle2FARecoveryRegenerate)
 			admin.POST("/change-password", s.handleChangePassword)
+			admin.GET("/settings/subscription", s.handleGetSubSettings)
+			admin.POST("/settings/subscription", s.handleSetSubSettings)
 			admin.GET("/panel-address", s.handlePanelAddress)
 			admin.POST("/panel-address", s.handlePanelAddressUpdate)
 			admin.GET("/panel-address/dns-check", s.handlePanelDNSCheck)

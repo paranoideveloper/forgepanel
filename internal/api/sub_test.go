@@ -412,12 +412,77 @@ func TestXraySubscriptionWithRoutingAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xray-routed.json")
-	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Preset("full")), 0o600); err != nil {
+	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Preset("full"), routing.Fragment{Enabled: true, Packets: "tlshello", Length: "100-200", Interval: "10-20"}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
 	if err != nil {
 		t.Fatalf("xray rejected the routed config: %v\n%s", err, out)
+	}
+}
+
+// TestXraySubscriptionWithFragmentAcceptedByCore proves the TLS-fragment DPI
+// evasion (dialerProxy → freedom fragment outbound) yields a config the real Xray
+// core accepts, and that every proxy dials through the fragment outbound.
+func TestXraySubscriptionWithFragmentAcceptedByCore(t *testing.T) {
+	nodes := []*model.Node{
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+	}
+	frag := routing.Fragment{Enabled: true, Packets: "tlshello", Length: "100-200", Interval: "10-20"}
+	raw := xraySubscription(nodes, routing.Options{}, frag)
+
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	var hasFragment, dialers int
+	for _, o := range doc.Outbounds {
+		if o["tag"] == "fragment" {
+			hasFragment++
+		}
+		if ss, ok := o["streamSettings"].(map[string]any); ok {
+			if sock, ok := ss["sockopt"].(map[string]any); ok && sock["dialerProxy"] == "fragment" {
+				dialers++
+			}
+		}
+	}
+	if hasFragment != 1 {
+		t.Fatalf("expected exactly one fragment outbound, got %d", hasFragment)
+	}
+	if dialers != 2 {
+		t.Fatalf("expected both proxies to dial through fragment, got %d", dialers)
+	}
+
+	bin := findXray()
+	if bin == "" {
+		t.Skip("xray binary not found; skipping semantic validation")
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xray-frag.json")
+	if err := os.WriteFile(cfg, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("xray rejected the fragmented config: %v\n%s", err, out)
+	}
+}
+
+// TestFragmentFromQuery covers the query parsing + defaults.
+func TestFragmentFromQuery(t *testing.T) {
+	off := routing.FragmentFromQuery(nil)
+	if off.Enabled {
+		t.Fatal("fragment should be off by default")
+	}
+	q := make(map[string][]string)
+	q["fragment"] = []string{"1"}
+	q["fragment_length"] = []string{"40-80"}
+	on := routing.FragmentFromQuery(q)
+	if !on.Enabled || on.Length != "40-80" || on.Packets != "tlshello" {
+		t.Fatalf("fragment query parse wrong: %+v", on)
 	}
 }
 
@@ -481,7 +546,7 @@ func TestXraySubscriptionAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xray.json")
-	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Options{}), 0o600); err != nil {
+	if err := os.WriteFile(cfg, xraySubscription(nodes, routing.Options{}, routing.Fragment{}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput()
@@ -499,7 +564,7 @@ func TestXraySubscriptionHasUniqueTags(t *testing.T) {
 	var doc struct {
 		Outbounds []map[string]any `json:"outbounds"`
 	}
-	if err := json.Unmarshal(xraySubscription(nodes, routing.Options{}), &doc); err != nil {
+	if err := json.Unmarshal(xraySubscription(nodes, routing.Options{}, routing.Fragment{}), &doc); err != nil {
 		t.Fatalf("not valid JSON: %v", err)
 	}
 	seen := map[string]bool{}

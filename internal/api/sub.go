@@ -29,6 +29,50 @@ func (s *Server) subRoutingPreset() string {
 	return "iran"
 }
 
+// subFragmentDefault reports whether generated Xray subscriptions fragment the
+// TLS hello by default (operator setting; per-request ?fragment= overrides it).
+func (s *Server) subFragmentDefault() bool {
+	return s.db != nil && s.db.GetSetting("sub_fragment_default") == "1"
+}
+
+// handleGetSubSettings returns the operator's subscription defaults (routing
+// preset + fragment) and the selectable presets for the UI.
+func (s *Server) handleGetSubSettings(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"routing_preset": s.subRoutingPreset(),
+		"fragment":       s.subFragmentDefault(),
+		"presets":        []string{"iran", "full", "block", "off"},
+	})
+}
+
+// handleSetSubSettings persists the subscription defaults.
+func (s *Server) handleSetSubSettings(c *gin.Context) {
+	var req struct {
+		RoutingPreset *string `json:"routing_preset"`
+		Fragment      *bool   `json:"fragment"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid payload"})
+		return
+	}
+	if s.db == nil {
+		c.JSON(501, gin.H{"error": "no store"})
+		return
+	}
+	if req.RoutingPreset != nil {
+		_ = s.db.SetSetting("sub_routing_preset", strings.ToLower(strings.TrimSpace(*req.RoutingPreset)))
+	}
+	if req.Fragment != nil {
+		v := "0"
+		if *req.Fragment {
+			v = "1"
+		}
+		_ = s.db.SetSetting("sub_fragment_default", v)
+	}
+	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
+	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault()})
+}
+
 // subFormats are the subscription formats this endpoint can render, listed for
 // the error message when a client asks for something else.
 var subFormats = []string{"v2ray", "clash", "clash-meta", "sing-box", "xray", "surge", "loon", "quantumultx", "links", "json"}
@@ -133,6 +177,10 @@ func (s *Server) handleSub(c *gin.Context) {
 	// operator default, overridable per request with ?routing= (and fine-grained
 	// block_ads / bypass_iran / … flags).
 	route := routing.FromQuery(c.Request.URL.Query(), s.subRoutingPreset())
+	frag := routing.FragmentFromQuery(c.Request.URL.Query())
+	if _, explicit := c.Request.URL.Query()["fragment"]; !explicit {
+		frag.Enabled = s.subFragmentDefault()
+	}
 
 	switch format {
 	case "clash":
@@ -149,7 +197,7 @@ func (s *Server) handleSub(c *gin.Context) {
 	case "sing-box":
 		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes, route))
 	case "xray":
-		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes, route))
+		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes, route, frag))
 	case "surge":
 		c.Data(200, "text/plain; charset=utf-8", surgeSubscription(nodes))
 	case "loon":
@@ -188,14 +236,16 @@ func (s *Server) subscriptionUserinfo(token string) string {
 // clients (v2rayN and others) import a raw Xray JSON directly; this is that, and
 // it is accepted by `xray run -test`. Tags are de-duplicated the same way the
 // sing-box builder reserves its own, so no two outbounds collide.
-func xraySubscription(nodes []*model.Node, route routing.Options) []byte {
+func xraySubscription(nodes []*model.Node, route routing.Options, frag routing.Fragment) []byte {
 	const (
-		xrayDirectTag = "direct"
-		xrayBlockTag  = "block"
+		xrayDirectTag   = "direct"
+		xrayBlockTag    = "block"
+		xrayFragmentTag = "fragment"
 	)
-	outs := make([]any, 0, len(nodes)+2)
-	seen := map[string]int{xrayDirectTag: 1, xrayBlockTag: 1}
+	outs := make([]any, 0, len(nodes)+3)
+	seen := map[string]int{xrayDirectTag: 1, xrayBlockTag: 1, xrayFragmentTag: 1}
 	var proxyTags []string
+	var proxyOuts []map[string]any
 	for i, n := range nodes {
 		o, err := render.XrayOutbound(n)
 		if err != nil {
@@ -213,7 +263,26 @@ func xraySubscription(nodes []*model.Node, route routing.Options) []byte {
 		}
 		o["tag"] = tag
 		proxyTags = append(proxyTags, tag)
+		proxyOuts = append(proxyOuts, o)
 		outs = append(outs, o)
+	}
+	// TLS fragmentation (DPI evasion): route every proxy outbound's TCP dial
+	// through a freedom "fragment" outbound that splits the TLS hello.
+	if frag.Enabled && len(proxyOuts) > 0 {
+		for _, o := range proxyOuts {
+			ss, _ := o["streamSettings"].(map[string]any)
+			if ss == nil {
+				ss = map[string]any{}
+				o["streamSettings"] = ss
+			}
+			sock, _ := ss["sockopt"].(map[string]any)
+			if sock == nil {
+				sock = map[string]any{}
+				ss["sockopt"] = sock
+			}
+			sock["dialerProxy"] = xrayFragmentTag
+		}
+		outs = append(outs, frag.Outbound(xrayFragmentTag))
 	}
 	outs = append(outs,
 		map[string]any{"protocol": "freedom", "tag": xrayDirectTag},

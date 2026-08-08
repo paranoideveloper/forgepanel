@@ -47,12 +47,37 @@
   let gDesc = $state('');
   let gInbounds = $state<Set<number>>(new Set());
 
+  // subscription defaults (routing preset + TLS fragment) applied to every
+  // generated sing-box/Xray/Clash config.
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; }
+  let subSettings = $state<SubSettings | null>(null);
+  const routingLabels: Record<string, string> = {
+    iran: 'Iran (bypass Iran + block ads/malware)',
+    full: 'Full (bypass Iran + block ads/malware/porn/QUIC)',
+    block: 'Block-only (ads/malware, no Iran bypass)',
+    off: 'Off (no routing rules)'
+  };
+
+  async function saveSubSettings() {
+    if (!subSettings) return;
+    try {
+      await apiFetch('/admin/settings/subscription', {
+        method: 'POST',
+        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment })
+      });
+      showToast('Subscription defaults saved', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save', 'error');
+    }
+  }
+
   async function loadData() {
     loading = true;
     try {
       users = await apiFetch<User[]>('/admin/users');
       groups = await apiFetch<UserGroup[]>('/admin/groups');
       inbounds = await apiFetch<Inbound[]>('/admin/inbounds');
+      subSettings = await apiFetch<SubSettings>('/admin/settings/subscription');
     } catch (err: any) {
       showToast(err.message || 'Failed to load users', 'error');
     } finally {
@@ -187,6 +212,26 @@
   <h2>Users &amp; Subscriptions</h2>
 </div>
 
+{#if subSettings}
+  <div class="card" data-testid="sub-settings">
+    <h3>Subscription defaults</h3>
+    <p class="hint">Applied to every generated sing-box / Xray / Clash config. Clients can still override per-link with <code>?routing=</code> and <code>?fragment=</code>.</p>
+    <div class="row">
+      <label class="field">
+        <span>Routing rules</span>
+        <select bind:value={subSettings.routing_preset} data-testid="routing-preset">
+          {#each subSettings.presets as p}<option value={p}>{routingLabels[p] || p}</option>{/each}
+        </select>
+      </label>
+      <label class="field checkbox">
+        <input type="checkbox" bind:checked={subSettings.fragment} data-testid="fragment-toggle" />
+        <span>TLS Fragment (Xray, DPI evasion)</span>
+      </label>
+      <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>Save</button>
+    </div>
+  </div>
+{/if}
+
 <div class="card">
   <h3>Add user</h3>
   <div class="row">
@@ -307,6 +352,10 @@
   .row input, .row select { flex: 1; min-width: 120px; }
   input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px 10px; border-radius: 8px; font: inherit; font-size: 13px; box-sizing: border-box; width: 100%; }
   .primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .hint { color: rgba(255,255,255,0.55); font-size: 13px; margin: 0 0 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.6); flex: 1; min-width: 160px; }
+  .field.checkbox { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.85); }
+  .field.checkbox input { flex: none; width: 16px; height: 16px; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-size: 12px; }

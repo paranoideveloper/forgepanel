@@ -79,6 +79,51 @@ func truthy(v string) bool {
 	}
 }
 
+// --- Xray TLS fragment ----------------------------------------------------
+
+// Fragment configures Xray's TLS-hello fragmentation — the DPI-evasion trick
+// (BPB "Fragment") that splits the ClientHello into small pieces so a censor's
+// SNI filter never sees a whole handshake. Xray-only; sing-box has no equivalent.
+type Fragment struct {
+	Enabled  bool
+	Packets  string // which packets to split; "tlshello" splits only the TLS hello
+	Length   string // per-piece byte range, e.g. "100-200"
+	Interval string // ms between pieces, e.g. "10-20"
+}
+
+// FragmentFromQuery reads fragment settings from subscription query parameters:
+// ?fragment=1 turns it on with sane defaults; fragment_packets / fragment_length
+// / fragment_interval override them.
+func FragmentFromQuery(q url.Values) Fragment {
+	f := Fragment{Packets: "tlshello", Length: "100-200", Interval: "10-20"}
+	f.Enabled = truthy(q.Get("fragment"))
+	if v := q.Get("fragment_packets"); v != "" {
+		f.Packets = v
+	}
+	if v := q.Get("fragment_length"); v != "" {
+		f.Length = v
+	}
+	if v := q.Get("fragment_interval"); v != "" {
+		f.Interval = v
+	}
+	return f
+}
+
+// Outbound returns the Xray "fragment" freedom outbound that performs the split.
+// Proxy outbounds route through it via sockopt.dialerProxy = tag.
+func (f Fragment) Outbound(tag string) map[string]any {
+	return map[string]any{
+		"tag": tag, "protocol": "freedom",
+		"settings": map[string]any{
+			"domainStrategy": "AsIs",
+			"fragment": map[string]any{
+				"packets": f.Packets, "length": f.Length, "interval": f.Interval,
+			},
+		},
+		"streamSettings": map[string]any{"sockopt": map[string]any{"tcpNoDelay": true}},
+	}
+}
+
 // --- sing-box -------------------------------------------------------------
 
 // sing-box community rule-sets (binary .srs). Iran-maintained, widely used, and
