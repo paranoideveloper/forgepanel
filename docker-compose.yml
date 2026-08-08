@@ -11,7 +11,11 @@
 # checking out the matching release tag and reading its release notes.
 services:
   forgepanel:
-    image: forgepanel:${FORGEPANEL_VERSION:-v1.3.2}
+    # Default to the prebuilt multi-arch image on GHCR so `docker compose up -d`
+    # PULLS it — no local build, no Alpine package downloads, works on a censored
+    # build network. `docker compose up -d --build` still builds from source
+    # locally (the build: block below) when you want to.
+    image: ghcr.io/paranoideveloper/forgepanel:${FORGEPANEL_VERSION:-latest}
     build:
       context: .
       args:
