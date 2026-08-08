@@ -295,10 +295,14 @@ func RenderResolvers(list []string) string {
 	return b.String()
 }
 
-// GenerateKey mints a zone's shared secret. Hex keeps it safe to embed in TOML
-// and in a plain encrypt_key.txt without quoting or encoding surprises.
+// GenerateKey mints a zone's shared secret: 16 random bytes hex-encoded, i.e. a
+// 32-character key. StormDNS/CottenDNS/MasterDNS treat ENCRYPTION_KEY as a
+// fixed 32-char secret (their own configs use keys like 0411c15335081ae243d6070e4551bbe0),
+// and their clients reject a 64-char key outright — so this must be 16 bytes, not
+// 32. Hex keeps it safe to embed in TOML and in a plain encrypt_key.txt without
+// quoting or encoding surprises.
 func GenerateKey() (string, error) {
-	b := make([]byte, 32)
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}

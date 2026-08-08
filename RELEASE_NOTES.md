@@ -1,3 +1,19 @@
+# ForgePanel v1.7.4 — Release Notes
+
+## Fix
+
+- **ForgeDNS encryption key is now 32 characters, not 64.** `GenerateKey` minted
+  32 random bytes hex-encoded (a **64-char** key), but StormDNS / CottenDNS /
+  MasterDNS treat `ENCRYPTION_KEY` as a fixed **32-char** secret and their
+  **clients reject a 64-char key outright**. The server (with the XOR cipher)
+  quietly accepted the long key, so the panel and server *agreed* — but the
+  client could never connect, which looked like a key mismatch. Keys are now 16
+  bytes → 32 hex chars, matching the format every StormDNS deployment uses.
+  Existing zones keep their stored key; recreate a zone (or reset its key) to
+  mint a correct-length one.
+
+---
+
 # ForgePanel v1.7.3 — Release Notes
 
 ## Fix

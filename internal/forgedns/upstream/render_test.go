@@ -254,7 +254,9 @@ func TestGenerateKeyIsUniqueHex(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := GenerateKey()
-	if a == b || len(a) != 64 {
-		t.Fatalf("keys %q / %q are not distinct 32-byte hex", a, b)
+	// 16 bytes hex-encoded = 32 chars — the length StormDNS/CottenDNS/MasterDNS
+	// accept; a 64-char key is rejected by their clients.
+	if a == b || len(a) != 32 {
+		t.Fatalf("keys %q / %q are not distinct 32-char hex", a, b)
 	}
 }
