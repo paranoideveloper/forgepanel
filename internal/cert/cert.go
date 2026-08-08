@@ -181,6 +181,16 @@ func (s *Store) TLSConfig() *tls.Config {
 			// domain, or issuance not yet complete) fall back to the self-signed
 			// cert so the panel always serves HTTPS instead of failing the
 			// handshake and appearing offline.
+			// Serve an already-issued ACME certificate straight from the cache.
+			// autocert issues per key type: if it holds an RSA cert but a modern
+			// client offers ECDSA, it tries to (re)issue an ECDSA cert on the
+			// handshake — a fresh order that stalls and, if it fails, drops back
+			// to the self-signed fallback even though a valid cert is on disk.
+			// Serving the cached cert directly makes the panel present its
+			// Let's Encrypt certificate instead of appearing "Not Secure".
+			if c := s.cachedACMECert(sni); c != nil {
+				return c, nil
+			}
 			if c, err := s.acme.GetCertificate(hello); err == nil && c != nil {
 				return c, nil
 			}
@@ -226,6 +236,83 @@ func wildcardMatch(certName, sni string) bool {
 	}
 	label := sni[:len(sni)-len(suffix)] // the single left-most label
 	return label != "" && !strings.Contains(label, ".")
+}
+
+// renewWindow is how long before expiry a cached ACME cert stops being served
+// directly and instead routes through autocert, so autocert renews it in time.
+const renewWindow = 30 * 24 * time.Hour
+
+// cachedACMECert loads an already-issued ACME certificate for sni straight from
+// the autocert cache, ready to serve. autocert issues per key type, so when it
+// holds one key type (e.g. RSA) but a client offers another (ECDSA) it tries to
+// (re)issue on the handshake, which stalls and can fall back to the self-signed
+// cert even though a valid cert is on disk. Serving the cached cert avoids that.
+// Returns nil when nothing usable is cached, or when the cert is within its
+// renewal window (then autocert should handle it so it renews).
+func (s *Store) cachedACMECert(sni string) *tls.Certificate {
+	if s.cacheDir == "" {
+		return nil
+	}
+	sni = normalizeSNI(sni)
+	if sni == "" {
+		return nil
+	}
+	// autocert cache keys: "<domain>" (its preferred key type) and "<domain>+rsa".
+	for _, name := range []string{sni, sni + "+rsa"} {
+		raw, err := os.ReadFile(filepath.Join(s.cacheDir, name))
+		if err != nil {
+			continue
+		}
+		cert, leaf := splitCachedCert(raw)
+		if cert == nil || leaf == nil {
+			continue
+		}
+		now := time.Now()
+		if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+			continue // expired or not yet valid — let autocert deal with it
+		}
+		if now.After(leaf.NotAfter.Add(-renewWindow)) {
+			return nil // due for renewal — route through autocert
+		}
+		return cert
+	}
+	return nil
+}
+
+// splitCachedCert parses an autocert cache entry (the private key PEM followed by
+// the certificate chain PEM) into a usable tls.Certificate and its parsed leaf.
+func splitCachedCert(raw []byte) (*tls.Certificate, *x509.Certificate) {
+	var certPEM, keyPEM []byte
+	rest := raw
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		switch {
+		case strings.HasSuffix(block.Type, "PRIVATE KEY"):
+			keyPEM = append(keyPEM, pem.EncodeToMemory(block)...)
+		case block.Type == "CERTIFICATE":
+			certPEM = append(certPEM, pem.EncodeToMemory(block)...)
+		}
+	}
+	if len(certPEM) == 0 || len(keyPEM) == 0 {
+		return nil, nil
+	}
+	c, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, nil
+	}
+	leaf := c.Leaf
+	if leaf == nil && len(c.Certificate) > 0 {
+		leaf, _ = x509.ParseCertificate(c.Certificate[0])
+	}
+	if leaf == nil {
+		return nil, nil
+	}
+	c.Leaf = leaf
+	return &c, leaf
 }
 
 // ACMEManager exposes the autocert manager (for mounting its HTTP-01 handler).

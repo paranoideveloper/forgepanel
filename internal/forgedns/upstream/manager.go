@@ -216,6 +216,17 @@ func (m *Manager) apply(pl plan) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return m.fail(z, d, err)
 	}
+	// Resolve the real bind target before rendering, so the emitted UDP_HOST, the
+	// bind probe and the reported listen address all agree. On a stock systemd
+	// host, systemd-resolved holds :53 on loopback, which makes a wildcard bind
+	// fail; effectiveBindHost falls back to the public IP so the tunnel starts
+	// without the operator having to free port 53 by hand. (Port is defaulted here
+	// too — RenderServer would otherwise be the first place it becomes 53, leaving
+	// the probe checking port 0.)
+	if z.BindPort == 0 {
+		z.BindPort = DefaultUDPPort
+	}
+	z.BindHost = effectiveBindHost(z.BindHost, z.BindPort)
 	cfg, err := RenderServer(d, z)
 	if err != nil {
 		return m.fail(z, d, err)

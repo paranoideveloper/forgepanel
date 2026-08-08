@@ -2,7 +2,9 @@ package api
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"time"
 
@@ -245,9 +247,51 @@ func (s *Server) PrimePanelCert() {
 	}
 	domain := p.Domain
 	go func() {
+		// Give the :80 HTTP-01 helper a moment to listen, then prime the cert once.
+		// A single attempt on purpose: the cert is served from the autocert cache on
+		// later handshakes (see cert.cachedACMECert), so there is no need to keep
+		// firing ACME orders here and risk a rate limit. Crucially, RECORD the
+		// outcome — the old code discarded the error (`_, _ =`), so a genuinely
+		// failing order left the panel self-signed with an empty renewal_error and
+		// nothing in the log, which made it impossible to diagnose.
 		time.Sleep(3 * time.Second)
-		_, _ = s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
+		if s.isClosed() {
+			return
+		}
+		_, err := s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
+		s.recordACMEOutcome(domain, err)
 	}()
+}
+
+// recordACMEOutcome persists the result of a panel-certificate issuance attempt
+// so `forgectl cert status` and the panel UI show whether — and why not — the
+// panel is on a trusted certificate, and logs a failure so it is visible in the
+// journal instead of being swallowed. Safe to call from the startup goroutine:
+// it takes the settings lock and re-reads before writing, like the manual
+// Force-Renew handler.
+func (s *Server) recordACMEOutcome(domain string, issueErr error) {
+	if issueErr != nil {
+		fmt.Fprintf(os.Stderr, "forgepanel: ACME certificate for %q not obtained: %v\n", domain, issueErr)
+	}
+	release, err := config.LockSettings(s.cfg.DataDir)
+	if err != nil {
+		return
+	}
+	defer func() { _ = release() }()
+	if err := s.cfg.ReloadPanel(); err != nil {
+		return
+	}
+	p := s.cfg.Panel()
+	if p == nil || p.Domain != domain {
+		return // domain changed under us; its own attempt will record the outcome
+	}
+	p.ACME.LastRenewal = time.Now().Format(time.RFC3339)
+	if issueErr != nil {
+		p.ACME.RenewalError = issueErr.Error()
+	} else {
+		p.ACME.RenewalError = ""
+	}
+	_ = s.cfg.SavePanel()
 }
 
 // handlePanelCertRenew (admin) primes/renews the ACME certificate for the panel

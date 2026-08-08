@@ -403,6 +403,77 @@ func probeUDP(host string, port int) error {
 	}
 }
 
+// isWildcardHost reports whether host means "all interfaces", so a bind on it
+// collides with any other listener already on the port — including a loopback
+// stub resolver on 127.0.0.53:53.
+func isWildcardHost(host string) bool {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]", "*":
+		return true
+	}
+	return false
+}
+
+// loopbackStubHolds reports whether a loopback stub resolver — systemd-resolved
+// on 127.0.0.53:port or 127.0.0.54:port — already holds the port. Such a listener
+// makes a wildcard 0.0.0.0:port bind fail with "address already in use" even
+// though the public address is free (this is the default state of a stock Ubuntu
+// host). We probe the specific loopback stub addresses: "address already in use"
+// means the stub is there; "cannot assign requested address" (the alias is not
+// configured, i.e. no stub) or a clean bind means it is not.
+func loopbackStubHolds(port int) bool {
+	for _, ip := range []string{"127.0.0.53", "127.0.0.54"} {
+		pc, err := net.ListenPacket("udp", net.JoinHostPort(ip, strconv.Itoa(port)))
+		if err == nil {
+			_ = pc.Close()
+			continue
+		}
+		if strings.Contains(err.Error(), "in use") {
+			return true
+		}
+	}
+	return false
+}
+
+// primaryIPv4 returns the box's primary outbound IPv4 — the source address the
+// kernel would use for a default-route connection. A UDP "dial" sends no packets;
+// it only resolves the local address for that route, so it works even when the
+// probed destination is unreachable or blocked.
+func primaryIPv4() string {
+	c, err := net.Dial("udp", "8.8.8.8:53")
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+	if a, ok := c.LocalAddr().(*net.UDPAddr); ok {
+		if v4 := a.IP.To4(); v4 != nil {
+			return v4.String()
+		}
+	}
+	return ""
+}
+
+// effectiveBindHost resolves the address a zone should actually bind. When the
+// operator left the bind host as the wildcard but a loopback stub resolver
+// (systemd-resolved) holds the port, binding the wildcard would fail; fall back
+// to the primary public IPv4, which does not collide with the loopback listener.
+// This lets the DNS tunnel come up on a stock systemd host without the operator
+// having to set DNSStubListener=no. A non-wildcard host is always honored as-is,
+// and a host with no stub conflict keeps the wildcard so the zone answers on
+// every interface as before.
+func effectiveBindHost(bindHost string, port int) string {
+	if !isWildcardHost(bindHost) {
+		return bindHost
+	}
+	if !loopbackStubHolds(port) {
+		return bindHost
+	}
+	if ip := primaryIPv4(); ip != "" {
+		return ip
+	}
+	return bindHost
+}
+
 // signature fingerprints the rendered config plus the binary path, so either a
 // settings change or a version upgrade restarts the zone and nothing else does.
 func signature(cfg, exe string) string {

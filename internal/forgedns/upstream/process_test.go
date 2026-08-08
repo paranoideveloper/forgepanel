@@ -332,3 +332,24 @@ func TestRepeatedRapidReloadsDoNotConflict(t *testing.T) {
 		}
 	}
 }
+
+func TestIsWildcardHost(t *testing.T) {
+	for _, h := range []string{"", "0.0.0.0", "::", "[::]", "*", "  0.0.0.0  "} {
+		if !isWildcardHost(h) {
+			t.Errorf("isWildcardHost(%q) = false, want true", h)
+		}
+	}
+	for _, h := range []string{"127.0.0.1", "1.2.3.4", "192.168.1.1", "example.com"} {
+		if isWildcardHost(h) {
+			t.Errorf("isWildcardHost(%q) = true, want false", h)
+		}
+	}
+}
+
+func TestEffectiveBindHostHonorsExplicitHost(t *testing.T) {
+	// A non-wildcard host is returned unchanged with no probing or fallback, so an
+	// operator who deliberately pinned a bind address always gets exactly it.
+	if got := effectiveBindHost("203.0.113.7", 53); got != "203.0.113.7" {
+		t.Fatalf("effectiveBindHost(explicit) = %q, want 203.0.113.7", got)
+	}
+}

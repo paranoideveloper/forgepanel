@@ -1,3 +1,33 @@
+# ForgePanel v1.7.5 — Release Notes
+
+## Fixes
+
+- **ForgeDNS binds automatically around `systemd-resolved`.** On a stock systemd
+  host, `systemd-resolved` holds `:53` on loopback, so a zone set to bind the
+  wildcard `0.0.0.0:53` failed to start and answered nothing — the operator had
+  to disable the stub resolver by hand. The panel now detects the loopback stub
+  and binds the server's **public IP** instead (rendered `UDP_HOST`, the bind
+  probe and the reported listen address all agree), so a delegated DNS tunnel
+  comes up on a fresh box with no manual step and the host keeps its own resolver.
+  An explicitly configured bind host is still honored as-is.
+
+- **The panel serves its Let's Encrypt certificate instead of "Not Secure".**
+  autocert issues per key type; when it held, say, an RSA certificate but a modern
+  browser offered ECDSA, it tried to *re-issue* on the handshake — a fresh order
+  that stalled and, on failure, dropped back to the self-signed certificate even
+  though a perfectly valid Let's Encrypt cert was already on disk. The panel now
+  serves the cached certificate directly, so a domain that has issued once is
+  presented as trusted. Certificates within their renewal window still route
+  through autocert so renewal happens.
+
+- **Panel-certificate priming no longer swallows its error.** `PrimePanelCert`
+  discarded the ACME result (`_, _ =`), so a genuinely failing order left the
+  panel self-signed with an empty `renewal_error` and nothing in the log. It now
+  records the outcome (visible in `forgectl cert status` and the UI) and logs a
+  failure to the journal.
+
+---
+
 # ForgePanel v1.7.4 — Release Notes
 
 ## Fix
