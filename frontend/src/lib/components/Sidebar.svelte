@@ -16,6 +16,7 @@
     { id: 'studio', label: 'Config Studio', icon: '⚙️' },
     { id: 'domains', label: 'Domains', icon: '🌍' },
     { id: 'forgedns', label: 'ForgeDNS', icon: '🛰️' },
+    { id: 'edge', label: 'ForgeEdge', icon: '☁️' },
     { id: 'certs', label: 'Certificates & TLS', icon: '🔒' },
     { id: 'system', label: 'System & Security', icon: '🛠️' }
   ];
@@ -40,7 +41,7 @@
     </div>
     <div class="brand-text">
       <h2>ForgePanel</h2>
-      <span class="version-tag">v1.7.8</span>
+      <span class="version-tag">v1.8.0</span>
     </div>
   </div>
 

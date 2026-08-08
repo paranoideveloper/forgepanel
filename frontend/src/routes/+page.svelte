@@ -48,6 +48,7 @@
     studio: () => import('../routes/studio/StudioView.svelte'),
     domains: () => import('$lib/views/DomainsView.svelte'),
     forgedns: () => import('$lib/views/ForgeDNSView.svelte'),
+    edge: () => import('$lib/views/ForgeEdgeView.svelte'),
     certs: () => import('$lib/views/CertificatesView.svelte'),
     system: () => import('$lib/views/SystemHealthView.svelte')
   };

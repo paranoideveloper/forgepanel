@@ -340,6 +340,22 @@ func (s *Server) registerEdgeRoutes(rg gin.IRouter) {
 	g.POST("/deploy", s.handleEdgeDeploy)
 	g.DELETE("/deploy/:name", s.handleEdgeDeleteWorker)
 	g.GET("/update-check", s.handleEdgeUpdateCheck)
+	g.GET("/token-url", s.handleEdgeTokenURL)
+	g.GET("/bundle", s.handleEdgeBundleInfo)
+}
+
+// handleEdgeTokenURL returns a Cloudflare token-creation URL pre-filled with the
+// exact scopes a ForgeEdge deploy needs, so the UI's "Connect Cloudflare" step
+// is one click instead of a scope-hunting exercise.
+func (s *Server) handleEdgeTokenURL(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"url": edge.TokenURL()})
+}
+
+// handleEdgeBundleInfo reports whether the panel binary carries the ForgeEdge
+// worker bundle, so the UI can offer one-click deploy (or tell the operator to
+// supply a bundle when it does not).
+func (s *Server) handleEdgeBundleInfo(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"embedded": edge.HasBundle(), "bytes": len(edge.Bundle())})
 }
 
 // constantTimeEqualString compares two bearer tokens without leaking their

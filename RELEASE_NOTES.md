@@ -1,3 +1,28 @@
+# ForgePanel v1.8.0 — Release Notes
+
+## Feature: ForgeEdge in the panel — one-click Cloudflare edge
+
+ForgePanel already had a full ForgeEdge subsystem (a Cloudflare Worker that
+terminates **VLESS + Trojan over WebSocket** at the edge, serves DoH, and serves
+the **same canonical subscription your VPS does** — so a user's single link works
+even where your server IPs are throttled). It had no way to use it from the UI.
+
+- **New ForgeEdge panel section.** Paste a Cloudflare API token (a button opens
+  the token-creation page pre-filled with the exact scopes) + your account ID,
+  and **deploy with one click** — then manage deployments, push the current feed,
+  open the worker's panel, and delete. The token is used per-request and never
+  stored on the panel.
+- **The worker bundle is embedded in the panel binary.** Deploy no longer
+  requires a checked-out Worker source or a JS toolchain; `POST /admin/edge/deploy`
+  defaults to the compiled-in bundle (regenerated with `make edge-bundle`). New
+  endpoints: `GET /admin/edge/token-url` and `/admin/edge/bundle`.
+
+Verified end-to-end: a deploy from the panel ships the embedded worker to
+Cloudflare (KV namespace created, live on workers.dev, panel reachable) and
+delete tears it down; the Worker's own test suite passes 316/316.
+
+---
+
 # ForgePanel v1.7.8 — Release Notes
 
 ## Fix
