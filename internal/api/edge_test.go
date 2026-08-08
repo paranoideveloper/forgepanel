@@ -719,19 +719,27 @@ func TestEdgeDeploy_WithoutCredentialsFailsClearly(t *testing.T) {
 	}
 }
 
-func TestEdgeDeploy_WithoutBundleFailsClearly(t *testing.T) {
+// A deploy that omits the bundle now defaults to the worker compiled into the
+// panel binary (internal/edge embed), so a one-click deploy needs no external
+// build. It must succeed and upload the script, not fail with "missing bundle".
+func TestEdgeDeploy_WithoutBundleUsesEmbedded(t *testing.T) {
+	if !edge.HasBundle() {
+		t.Skip("no embedded ForgeEdge bundle in this build (run `make edge-bundle`)")
+	}
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
+	scripts := map[string]bool{}
+	cf := cfAPIMock(t, scripts)
+	body := fmt.Sprintf(`{"name":"forgeedge-emb","api_token":"t","account_id":"acct-1","api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/admin/edge/deploy",
-		strings.NewReader(`{"name":"x","api_token":"t","account_id":"a"}`))
+	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 for a missing bundle, got %d %s", w.Code, w.Body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a deploy with no bundle must default to the embedded bundle and succeed, got %d %s", w.Code, w.Body)
 	}
-	if !strings.Contains(w.Body.String(), "bun run build") {
-		t.Errorf("the error must say how to produce a bundle: %s", w.Body)
+	if !scripts["forgeedge-emb"] {
+		t.Fatalf("the worker script was not uploaded: %s", w.Body)
 	}
 }
 
