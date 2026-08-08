@@ -179,9 +179,18 @@ func applyXrayClients(in jobj, n *model.Node, clients []ClientCred) {
 			arr = append(arr, jobj{"id": cl.UUID, "email": cl.Email, "alterId": 0})
 		case model.ProtoTrojan:
 			arr = append(arr, jobj{"password": cl.Password, "email": cl.Email})
+		case model.ProtoShadowsocks:
+			// Only SS-2022 (2022-blake3-*) carries a per-user identity header, so
+			// only it can authenticate distinct users. A non-2022 method is one
+			// shared key for everyone — keep the rendered template untouched.
+			if _, is2022 := model.KeySizeForMethod(n.Method); !is2022 {
+				return
+			}
+			// The inbound keeps the SERVER PSK (settings.password); each client
+			// gets its own derived user PSK keyed by email for per-user stats. A
+			// client authenticates with "serverPSK:userPSK".
+			arr = append(arr, jobj{"password": model.DeriveSSUserPSK(cl.Email, n.Method), "email": cl.Email})
 		default:
-			// Shadowsocks is single-key (shared) in this build; per-user SS needs
-			// SS-2022 multi-PSK support, tracked separately. Keep the template.
 			return
 		}
 	}
@@ -233,6 +242,17 @@ func applySingboxUsers(in jobj, n *model.Node, clients []ClientCred) {
 				pw = n.ShadowTLS.Password
 			}
 			arr = append(arr, jobj{"name": name, "password": pw})
+		case model.ProtoShadowsocks:
+			// Only SS-2022 has a per-user identity header; a non-2022 method is a
+			// single shared key, so leave the rendered inbound untouched.
+			if _, is2022 := model.KeySizeForMethod(n.Method); !is2022 {
+				return
+			}
+			// Inbound-level password stays the SERVER PSK; each user carries its
+			// own derived PSK. sing-box requires the same "serverPSK:userPSK" from
+			// the client. Seed the derivation on cl.Email so it matches xray and
+			// the subscription exactly.
+			arr = append(arr, jobj{"name": name, "password": model.DeriveSSUserPSK(cl.Email, n.Method)})
 		default:
 			return
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/firewall"
+	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -316,6 +317,16 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 	}
 	s.substituteAddr(n, hostOnly(c.Request.Host))
 	s.applyExportDefaults(n)
+	// For a multi-user SS-2022 inbound the engine requires "serverPSK:userPSK"
+	// from every client, including this inbound's OWN credential (the engine
+	// materialises a user for it seeded on "inbound-<id>"). Stamp that same
+	// combined password here so the config link the panel shows authenticates.
+	if n.Protocol == model.ProtoShadowsocks {
+		if _, is2022 := model.KeySizeForMethod(n.Method); is2022 {
+			seed := "inbound-" + strconv.FormatUint(uint64(id), 10)
+			n.Password = model.SS2022Combined(n.Password, model.DeriveSSUserPSK(seed, n.Method), n.Method)
+		}
+	}
 	if n.Protocol == model.ProtoWireGuard {
 		conf, err := export.WireGuardConf(n, n.Address)
 		if err != nil {
@@ -603,15 +614,17 @@ func stampIdentity(n *model.Node, u *store.User) {
 			n.Password = u.Password
 		}
 	case model.ProtoShadowsocks:
-		// Shadowsocks authenticates against the inbound's shared key, which the
-		// engine holds verbatim (there is no per-user client expansion for SS).
-		// Overwriting it with the user's password breaks the config outright: a
-		// 2022-blake3 method needs an exact-length standard-base64 PSK, but a
-		// user password is arbitrary base64url — xray refuses it at parse time
-		// ("decode key: illegal base64 data") and even a legacy method would
-		// hand the client a key the single-key server does not hold. So keep the
-		// inbound's own credential; per-user SS identity needs server-side
-		// multi-PSK support, tracked separately.
+		// SS-2022 carries a per-user identity header, so each user authenticates
+		// with the SERVER PSK (the inbound's own key) joined to a per-user PSK
+		// derived from their email. The engine materialises the IDENTICAL user
+		// PSK for the same email, so the served inbound and this link agree. A
+		// non-2022 method has no per-user identity — it stays the shared key
+		// (overwriting it with the user's arbitrary password would hand them a
+		// key the single-key server does not hold).
+		if _, is2022 := model.KeySizeForMethod(n.Method); is2022 && u.ID != 0 {
+			userPSK := model.DeriveSSUserPSK(job.UserEmail(u.ID), n.Method)
+			n.Password = model.SS2022Combined(n.Password, userPSK, n.Method)
+		}
 	case model.ProtoSOCKS, model.ProtoHTTP:
 		if u.Username != "" {
 			n.Username = u.Username

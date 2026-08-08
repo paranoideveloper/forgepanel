@@ -1,3 +1,37 @@
+# ForgePanel v1.9.0 — Release Notes
+
+## Feature: true per-user Shadowsocks (SS-2022 multi-PSK)
+
+Shadowsocks was the last protocol still handing every user one shared key — so
+you could not attribute traffic, apply per-user quota, or revoke one user without
+rotating everyone. SS-2022 (`2022-blake3-*`) carries a per-user identity header
+(EIH), and ForgePanel now uses it:
+
+- Each user on an SS-2022 inbound gets their own PSK, derived deterministically
+  from their identity, materialized into the served inbound (xray `clients[]`,
+  sing-box `users[]`) keyed by email for per-user stats and quota.
+- Their subscription hands out `serverPSK:userPSK`, so the link authenticates as
+  that user and no one else. Revoking or limiting one user no longer touches the
+  others.
+- A non-2022 method (aes-256-gcm, chacha20, …) has no identity header and stays a
+  single shared key — unchanged.
+
+Verified end-to-end against the real cores (xray v26.3.27 and sing-box 1.13.15):
+a single SS-2022 inbound with two users authenticates each with their own PSK,
+tunnels real traffic, and rejects a wrong PSK — cross-core (xray client ↔
+sing-box server) too. The full-matrix connectivity test now exercises the
+per-user path.
+
+## Hardening: over-quota enforcement lifecycle
+
+Added regression coverage for the two halves of quota that actually cut a user
+off and let them back in: a limited/disabled/expired user is excluded from the
+built engine config (the core refuses their traffic on the next reload), and a
+periodic quota reset reactivates a limited user — but never resurrects one past
+their expiry. No behavior change; the path was already correct.
+
+---
+
 # ForgePanel v1.8.3 — Release Notes
 
 ## Polish: the Worker's own panel WARP section is now honest and usable

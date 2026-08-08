@@ -120,6 +120,16 @@ func probeInbound(t *testing.T, dir, xrayBin, sbBin string, srv *model.Node, ori
 	socks := freePort2(t)
 	client := srv.Clone()
 	client.Address = "127.0.0.1"
+	// SS-2022 is multi-user (EIH): the server materializes a per-user PSK for the
+	// "matrix-test" client (see specsFor), so a bare server PSK no longer
+	// authenticates. The client must present "serverPSK:userPSK" — exactly what
+	// stampIdentity puts in a real user's subscription. Non-2022 SS is untouched.
+	if srv.Protocol == model.ProtoShadowsocks {
+		if _, is2022 := model.KeySizeForMethod(srv.Method); is2022 {
+			client.Password = model.SS2022Combined(srv.Password,
+				model.DeriveSSUserPSK("matrix-test", srv.Method), srv.Method)
+		}
+	}
 	client.Security.AllowInsecure = true // sing-box client: insecure=true
 	if pin != "" {                       // xray26 client: pin the self-signed cert
 		client.Security.PinSHA256 = []string{pin}

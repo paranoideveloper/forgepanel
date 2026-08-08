@@ -267,3 +267,50 @@ func TestSocksHTTPPerUserAccounts(t *testing.T) {
 		t.Fatal("socks: no-username clients must not add accounts")
 	}
 }
+
+// TestShadowsocks2022PerUserPSK: an SS-2022 inbound must materialise one derived
+// PSK per user (keyed by email for stats) while keeping the server PSK at the
+// inbound level, so each user authenticates with "serverPSK:userPSK". A non-2022
+// method has no per-user identity and must be left as the single shared key.
+func TestShadowsocks2022PerUserPSK(t *testing.T) {
+	const method = model.SS2022AES128
+	clients := []ClientCred{{Email: "u1"}, {Email: "u2"}}
+
+	// xray: settings.clients, one per user, distinct passwords, server PSK kept.
+	xin := jobj{"settings": jobj{"method": method, "password": "SERVERPSK"}}
+	applyXrayClients(xin, &model.Node{Protocol: model.ProtoShadowsocks, Method: method}, clients)
+	xc, _ := xin["settings"].(jobj)["clients"].([]any)
+	if len(xc) != 2 {
+		t.Fatalf("xray: want 2 SS-2022 clients, got %d", len(xc))
+	}
+	if xin["settings"].(jobj)["password"] != "SERVERPSK" {
+		t.Fatal("xray: the inbound server PSK must be preserved")
+	}
+	p0 := xc[0].(jobj)["password"].(string)
+	p1 := xc[1].(jobj)["password"].(string)
+	if p0 == p1 {
+		t.Fatal("xray: two users got the SAME PSK — not per-user")
+	}
+	// The materialised PSK must equal what the subscription derives for that email.
+	if p0 != model.DeriveSSUserPSK("u1", method) {
+		t.Fatal("xray: user PSK does not match the deterministic derivation the sub uses")
+	}
+
+	// sing-box: users[], same guarantees.
+	sin := jobj{"password": "SERVERPSK"}
+	applySingboxUsers(sin, &model.Node{Protocol: model.ProtoShadowsocks, Method: method}, clients)
+	su, _ := sin["users"].([]any)
+	if len(su) != 2 {
+		t.Fatalf("sing-box: want 2 SS-2022 users, got %d", len(su))
+	}
+	if su[0].(jobj)["password"].(string) != model.DeriveSSUserPSK("u1", method) {
+		t.Fatal("sing-box: user PSK does not match the derivation")
+	}
+
+	// Non-2022 SS: no per-user expansion, the shared key is untouched.
+	nin := jobj{"settings": jobj{"method": model.SSAES256GCM, "password": "SHARED"}}
+	applyXrayClients(nin, &model.Node{Protocol: model.ProtoShadowsocks, Method: model.SSAES256GCM}, clients)
+	if _, has := nin["settings"].(jobj)["clients"]; has {
+		t.Fatal("non-2022 SS must NOT get a per-user clients array")
+	}
+}
