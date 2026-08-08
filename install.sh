@@ -1023,7 +1023,22 @@ step_install() {
   "$CTL_PATH" version | grep -Fq " ${VERSION} " || rollback_install
   systemctl enable "$SERVICE" || rollback_install
   systemctl restart "$SERVICE" || rollback_install
-  "$CTL_PATH" healthcheck "$PANEL_PORT" || rollback_install
+  # A first boot opens the SQLite DB, runs migrations, initialises the engines and
+  # (with a domain) starts ACME before it binds the panel port, so a single probe
+  # right after restart can race the listener and see "connection refused". Poll
+  # for up to ~40s and only roll back if it never comes up — but if the service
+  # itself has already failed, stop early and surface why.
+  local hc_ok=0 hc_i
+  for hc_i in $(seq 1 40); do
+    if "$CTL_PATH" healthcheck "$PANEL_PORT" >/dev/null 2>&1; then hc_ok=1; break; fi
+    if ! systemctl is-active --quiet "$SERVICE"; then
+      err "The ${SERVICE} service failed to start. Recent log:"
+      journalctl -u "$SERVICE" -n 20 --no-pager 2>/dev/null | sed 's/^/    /' >&2 || true
+      rollback_install
+    fi
+    sleep 1
+  done
+  [[ "$hc_ok" == "1" ]] || { err "Panel did not answer its health check within 40s. Recent log:"; journalctl -u "$SERVICE" -n 20 --no-pager 2>/dev/null | sed 's/^/    /' >&2 || true; rollback_install; }
 
   local data_marker=""
   [[ "$data_created" == "1" ]] && data_marker=x

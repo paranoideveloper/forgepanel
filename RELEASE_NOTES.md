@@ -1,3 +1,18 @@
+# ForgePanel v1.7.3 — Release Notes
+
+## Fix
+
+- **Installer no longer rolls back on a slow first boot.** `install.sh` probed the
+  health endpoint **once**, immediately after `systemctl restart`. Because the unit
+  is `Type=simple`, restart returns before the panel has opened its SQLite DB, run
+  migrations, initialised the engines and (with a domain) started ACME — so the
+  probe raced the listener, saw `connection refused`, and the installer restored
+  the previous state. It now **polls the health check for up to 40 s**, and if the
+  service has actually failed it stops early and prints the recent `journalctl`
+  log instead of a bare rollback.
+
+---
+
 # ForgePanel v1.7.2 — Release Notes
 
 ## Honest status (no more false "broken")
