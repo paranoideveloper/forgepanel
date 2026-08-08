@@ -13,6 +13,11 @@ project_name: forgepanel
 before:
   hooks:
     - go mod download
+    # install.sh and its checksum are published as release assets (see
+    # release.extra_files) because the documented one-command install fetches
+    # them by name; generate the checksum next to the script so `sha256sum -c`
+    # works from the download directory.
+    - sh -c 'sha256sum install.sh > install.sh.sha256'
 
 builds:
   - id: forgepanel
@@ -144,6 +149,11 @@ release:
     owner: paranoideveloper
     name: forgepanel
   draft: false
+  # The one-command installer and its checksum ride along as release assets so
+  # `curl .../install.sh` in the README/INSTALL actually resolves.
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.sh.sha256
   prerelease: auto
   footer: |
     ## Install
