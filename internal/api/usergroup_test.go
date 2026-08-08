@@ -414,6 +414,57 @@ func TestEngineSpecIncludesDirectAssignments(t *testing.T) {
 	}
 }
 
+// TestOverQuotaUserExcludedFromEngine is the enforcement half of quota: the
+// scheduler flipping a user to StatusLimited is worthless if the engine still
+// materializes their credential — they would keep transferring until some later
+// reload. A limited, disabled or expired user must be absent from the built
+// specs so the core refuses their traffic on the very next reload.
+func TestOverQuotaUserExcludedFromEngine(t *testing.T) {
+	f := newUGFixture(t)
+	body := fmt.Sprintf(`{"inbound_ids":[%d]}`, f.inFree)
+	f.do(t, http.MethodPut, fmt.Sprintf("/api/admin/users/%d/inbounds", f.user.ID),
+		f.ownerTok, body)
+
+	present := func() bool {
+		for _, sp := range f.s.enabledInboundSpecs() {
+			for _, cl := range sp.Clients {
+				if cl.Email == job.UserEmail(f.user.ID) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Active: the credential is materialized (control).
+	if !present() {
+		t.Fatal("an active assigned user should be a client on the inbound")
+	}
+
+	// Each non-serving status must remove the credential entirely.
+	for _, st := range []store.UserStatus{store.StatusLimited, store.StatusDisabled, store.StatusExpired} {
+		u, err := f.s.db.UserByID(f.user.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.Status = st
+		if err := f.s.db.SaveUser(u); err != nil {
+			t.Fatal(err)
+		}
+		if present() {
+			t.Fatalf("a %s user is still materialized into the engine config — the core would keep serving their traffic", st)
+		}
+	}
+
+	// Restoring to active brings the credential back, so a top-up/renewal works.
+	u, _ := f.s.db.UserByID(f.user.ID)
+	u.Status = store.StatusActive
+	_ = f.s.db.SaveUser(u)
+	if !present() {
+		t.Fatal("reactivating the user did not restore their engine credential")
+	}
+}
+
 // --- §5/§6 group editing --------------------------------------------------
 
 func TestGroupCanBeEditedAfterCreation(t *testing.T) {

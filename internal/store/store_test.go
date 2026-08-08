@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -194,4 +195,50 @@ func TestStore_AdminAndSettings(t *testing.T) {
 	}
 
 	s.Audit(&AuditLog{AdminID: a.ID, Action: "test", Actor: "admin"})
+}
+
+// TestResetUserUsageCASReactivatesLimited: a periodic reset (monthly renewal)
+// must both zero the usage AND lift a StatusLimited user back to active, or a
+// user who once hit their cap would stay cut off forever after their quota
+// renews. An account past its expiry stays limited — a renewed quota does not
+// resurrect an expired account.
+func TestResetUserUsageCASReactivatesLimited(t *testing.T) {
+	s := testStore(t)
+	now := time.Now()
+
+	// A limited, not-yet-expired user.
+	limited := &User{Username: "limited", SubToken: "lt", Status: StatusLimited,
+		DataLimit: 1000, UsedTraffic: 1500}
+	if err := s.CreateUser(limited); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := s.ResetUserUsageCAS(limited.ID, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applied {
+		t.Fatal("reset was not applied on a fresh period")
+	}
+	got, _ := s.UserByID(limited.ID)
+	if got.UsedTraffic != 0 {
+		t.Fatalf("usage not reset: %d", got.UsedTraffic)
+	}
+	if got.Status != StatusActive {
+		t.Fatalf("a limited user was not reactivated on reset: status=%s", got.Status)
+	}
+
+	// A limited AND expired user: reset zeroes usage but must NOT reactivate.
+	past := now.Add(-time.Hour)
+	expired := &User{Username: "expired", SubToken: "ex", Status: StatusLimited,
+		DataLimit: 1000, UsedTraffic: 1500, ExpireAt: &past}
+	if err := s.CreateUser(expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResetUserUsageCAS(expired.ID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := s.UserByID(expired.ID)
+	if got2.Status != StatusLimited {
+		t.Fatalf("an expired user must stay limited after a quota reset, got status=%s", got2.Status)
+	}
 }
