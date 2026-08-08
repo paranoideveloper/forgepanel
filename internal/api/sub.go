@@ -135,6 +135,20 @@ func (s *Server) handleSub(c *gin.Context) {
 	// Resolve the format before doing any work, so an unsupported explicit
 	// request fails cleanly rather than rendering something else.
 	explicit := strings.Trim(c.Param("format"), "/")
+
+	// A human opening the bare subscription URL in a browser gets a friendly
+	// landing page (per-client import buttons + copy links) instead of a wall of
+	// base64. Proxy clients are never affected: this needs a browser User-Agent,
+	// an explicit text/html Accept, and no known client token. ?raw=1 opts out.
+	if explicit == "" && c.Query("raw") == "" &&
+		isBrowserSubRequest(c.GetHeader("User-Agent"), c.GetHeader("Accept")) {
+		token := c.Param("token")
+		base := hostSubBase(c)
+		c.Header("Subscription-Userinfo", s.subscriptionUserinfo(token))
+		c.Data(200, "text/html; charset=utf-8", subLandingPage(base, s.subscriptionUserinfo(token)))
+		return
+	}
+
 	requested := explicit
 	if requested == "" {
 		// Explicit path/query always wins; sniffing is only the fallback.

@@ -1,3 +1,17 @@
+# ForgePanel v1.6.2 — Release Notes
+
+## New
+
+- **Subscription landing page.** Opening a subscription URL in a **web browser**
+  now shows a friendly page — a usage/expiry summary and, per client family
+  (Clash/Mihomo, sing-box, Hiddify, v2rayNG/NekoBox, Xray, Base64), a one-click
+  **Import** deep-link plus a **Copy link** button — instead of a wall of base64.
+  Proxy clients are never affected: the page is served only to a real browser
+  (browser User-Agent + `text/html` Accept + no known client token), and `?raw=1`
+  always returns the plain subscription.
+
+---
+
 # ForgePanel v1.6.1 — Release Notes
 
 Rounds out the subscription-tuning features and makes them controllable from the

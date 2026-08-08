@@ -3,6 +3,16 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.6.2 — Subscription landing page (parity batch 3)
+
+Browser-facing `/sub/:token` landing page (`internal/api/subpage.go`): usage/expiry
+summary + per-client Import deep-links (clash://, sing-box://, hiddify://) + Copy
+buttons for Clash/sing-box/Hiddify/v2rayNG/Xray/Base64. Gated by
+`isBrowserSubRequest` (browser UA + text/html Accept + no client token); `?raw=1`
+opts out. Verified: Go tests (browser gets HTML, clients don't, raw opts out) +
+screenshot. Remaining parity: node-naming templates, WARP, Farsi i18n, chain
+proxy, clean-IP surfacing, Telegram control.
+
 ## v1.6.1 — Xray fragment + subscription-settings UI (parity batch 2)
 
 - **Xray TLS Fragment** (routing.Fragment): dialerProxy→freedom fragment outbound
