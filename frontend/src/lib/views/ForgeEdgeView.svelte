@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch, getAuthToken } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
 
   interface Deployment {
@@ -32,6 +32,7 @@
   let proxyIP = $state('');
   let deploying = $state(false);
   let lastResult = $state<DeployResult['deployment'] | null>(null);
+  let warpingId = $state<number | null>(null);
 
   async function load() {
     loading = true;
@@ -92,6 +93,47 @@
     }
   }
 
+  // One-click free WARP + Amnezia: registers WARP on the deployed worker (via
+  // its push token — no worker password needed) and re-pushes the feed so the
+  // subscription immediately serves the WireGuard + AmneziaWG nodes.
+  async function registerWarp(d: Deployment) {
+    warpingId = d.id;
+    try {
+      const res = await apiFetch<{ count: number }>(`/admin/edge/deployments/${d.id}/warp`, { method: 'POST' });
+      showToast(`Registered ${res.count} WARP account(s) on ${d.name} — WireGuard + Amnezia are now in the subscription`, 'success');
+      await load();
+    } catch (e: any) {
+      showToast(e?.message || 'WARP registration failed', 'error');
+    } finally {
+      warpingId = null;
+    }
+  }
+
+  // The .conf is a text attachment, not JSON — fetch it raw with the auth header
+  // and save it, so it can be imported straight into the Amnezia / WG app.
+  async function downloadConf(d: Deployment, pro: boolean) {
+    try {
+      const r = await fetch(`/api/admin/edge/deployments/${d.id}/warp.conf${pro ? '?pro=1' : ''}`, {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+      });
+      if (!r.ok) {
+        let m = `HTTP ${r.status}`;
+        try { m = (await r.json()).error || m; } catch (_) {}
+        throw new Error(m);
+      }
+      const text = await r.text();
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = pro ? `${d.name}-warp-amnezia.conf` : `${d.name}-warp.conf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      showToast(e?.message || 'Could not fetch the .conf (register WARP first)', 'error');
+    }
+  }
+
   async function destroy(d: Deployment) {
     const tok = apiToken.trim();
     if (!tok) { showToast('Paste the Cloudflare API token above to delete a worker', 'error'); return; }
@@ -112,7 +154,7 @@
   <div class="head">
     <div>
       <h1>☁️ ForgeEdge</h1>
-      <p class="sub">Run a Cloudflare Worker that terminates <b>VLESS &amp; Trojan over WebSocket</b> at the edge and serves the <b>same subscription your VPS does</b> — so a user's single link works even where your server IPs are throttled. No wrangler, no build: the panel ships the worker for you.</p>
+      <p class="sub">Run a Cloudflare Worker that terminates <b>VLESS &amp; Trojan over WebSocket</b> at the edge and serves the <b>same subscription your VPS does</b> — so a user's single link works even where your server IPs are throttled. One click adds free <b>Cloudflare WARP</b> + <b>AmneziaWG</b> (DPI-obfuscated WireGuard) to that subscription. No wrangler, no build: the panel ships the worker for you.</p>
     </div>
     {#if embedded}<span class="pill ok">worker bundled ✓</span>{:else}<span class="pill warn">no bundle</span>{/if}
   </div>
@@ -164,6 +206,11 @@
               </div>
             </div>
             <div class="dep-actions">
+              <button class="btn sm warp" onclick={() => registerWarp(d)} disabled={warpingId === d.id} title="Register free Cloudflare WARP and add WireGuard + AmneziaWG (DPI-obfuscated) to this edge's subscription">
+                {warpingId === d.id ? 'Registering…' : '⚡ WARP + Amnezia'}
+              </button>
+              <button class="btn sm" onclick={() => downloadConf(d, true)} title="Download the AmneziaWG .conf for the Amnezia app">Amnezia .conf</button>
+              <button class="btn sm" onclick={() => downloadConf(d, false)} title="Download the plain WireGuard WARP .conf">WG .conf</button>
               <button class="btn sm" onclick={() => pushFeed(d)}>Push feed</button>
               <a class="btn sm" href={panelUrl(d)} target="_blank" rel="noopener">Open panel</a>
               <button class="btn sm danger" onclick={() => destroy(d)}>Delete</button>
@@ -201,6 +248,9 @@
   .btn.xs { padding: 4px 9px; font-size: 11px; }
   .btn.danger { color: #ff6b6b; border-color: rgba(255,107,107,.3); }
   .btn.danger:hover { background: rgba(255,107,107,.15); }
+  .btn.warp { color: #27d17c; border-color: rgba(39,209,124,.35); }
+  .btn.warp:hover { background: rgba(39,209,124,.15); }
+  .btn.warp:disabled { opacity: .6; cursor: default; }
   .note { color: rgba(255,255,255,.35); font-size: 11px; margin: 8px 0 0; }
   .result { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
   .ok-row { color: #27d17c; font-size: 13px; margin-bottom: 8px; }

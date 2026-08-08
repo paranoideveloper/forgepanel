@@ -205,6 +205,78 @@ func (s *Server) handleEdgeStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, st)
 }
 
+// handleEdgeWarpRegister registers WARP accounts on a deployed Worker (via its
+// push token, no admin password) and immediately pushes the feed so the Worker's
+// subscription starts serving the WireGuard + AmneziaWG nodes. This is the
+// one-click "free WARP + Amnezia" the panel offers per deployment.
+func (s *Server) handleEdgeWarpRegister(c *gin.Context) {
+	d, err := s.db.EdgeDeploymentByID(parseID(c))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		return
+	}
+	if d.PushToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       "no push token is stored for this edge, so the panel cannot drive it",
+			"remediation": "re-deploy from the panel (new deploys store the token), or open the Worker's own panel and register WARP there.",
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	// Register on THIS host: a Worker cannot reach Cloudflare's WARP API (CF→CF),
+	// but the panel VPS can. Then push the accounts into the Worker's KV.
+	registered, err := edge.RegisterWarpAccounts(ctx, nil)
+	if err != nil {
+		edgeFail(c, err)
+		return
+	}
+	wc := edge.NewWorkerClient(d.Origin, d.SecurePath)
+	wc.Bearer = d.PushToken
+	accounts, err := wc.StoreWarp(ctx, registered)
+	if err != nil {
+		edgeFail(c, err)
+		return
+	}
+	// Push the feed so the subscription reflects the new WARP nodes right away.
+	var push EdgePushResult
+	if doc, derr := s.EdgeFeed(); derr == nil {
+		push = s.pushFeedTo(d, doc)
+	}
+	s.audit(c, "edge.warp.register", d.Name)
+	c.JSON(http.StatusOK, gin.H{"accounts": accounts, "count": len(accounts), "pushed": push.OK})
+}
+
+// handleEdgeWarpConf streams the WARP wg-quick .conf for import into the Amnezia
+// app or any WireGuard client. ?pro=1 returns the AmneziaWG (junk-packet
+// obfuscated) variant; otherwise the plain WireGuard tunnel.
+func (s *Server) handleEdgeWarpConf(c *gin.Context) {
+	d, err := s.db.EdgeDeploymentByID(parseID(c))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		return
+	}
+	if d.PushToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no push token is stored for this edge, so the panel cannot fetch its .conf"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	wc := edge.NewWorkerClient(d.Origin, d.SecurePath)
+	wc.Bearer = d.PushToken
+	plain, pro, err := wc.WarpConf(ctx)
+	if err != nil {
+		edgeFail(c, err)
+		return
+	}
+	conf, name := plain, "warp.conf"
+	if c.Query("pro") == "1" || c.Query("pro") == "true" {
+		conf, name = pro, "warp-amnezia.conf"
+	}
+	c.Header("Content-Disposition", "attachment; filename=\""+name+"\"")
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(conf))
+}
+
 // handleEdgeDeploy starts a deploy from the panel.
 //
 // A live Cloudflare deploy needs a credential. The panel holds none by design —
@@ -274,7 +346,7 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		return
 	}
 	d := &store.EdgeDeployment{Name: out.Name, Target: out.Target, Origin: out.Origin,
-		SecurePath: out.SecurePath, AccountID: cl.AccountID}
+		SecurePath: out.SecurePath, PushToken: out.FeedPushToken, AccountID: cl.AccountID}
 	if err := s.db.CreateEdgeDeployment(d); err != nil {
 		// The Worker is live even though the row failed; say so rather than
 		// reporting a failure that would send the operator hunting for nothing.
@@ -333,6 +405,8 @@ func (s *Server) registerEdgeRoutes(rg gin.IRouter) {
 	g.POST("/deployments", s.handleRegisterEdgeDeployment)
 	g.DELETE("/deployments/:id", s.handleDeleteEdgeDeployment)
 	g.POST("/deployments/:id/push", s.handleEdgePush)
+	g.POST("/deployments/:id/warp", s.handleEdgeWarpRegister)
+	g.GET("/deployments/:id/warp.conf", s.handleEdgeWarpConf)
 	g.GET("/deployments/:id/status", s.handleEdgeStatus)
 	g.POST("/push", s.handleEdgePush)
 	g.GET("/feed", s.handleEdgePreviewFeed)

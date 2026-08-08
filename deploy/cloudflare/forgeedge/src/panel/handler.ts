@@ -8,7 +8,7 @@
 import type { Env } from '../env';
 import type { EdgeConfig, EdgeSecrets } from '../config/schema';
 import { KV_KEYS } from '../config/schema';
-import { HttpStatus, respond, safeError } from '../common/http';
+import { HttpStatus, respond, safeError, timingSafeEqual } from '../common/http';
 import {
   checkPassword, clearSessionCookie, isAuthenticated, issueSession, sessionCookieHeader,
 } from '../auth';
@@ -20,7 +20,8 @@ import { loadCleanIPs, refreshCleanIPs, isValidCleanEntry } from '../cleanip/lis
 import { probeCleanIP } from '../cleanip/probe';
 import { validateConfig } from '../config/validate';
 import { scanWarpEndpoints } from '../warp/scanner';
-import { fetchWarpAccounts, type WarpAccount } from '../warp/account';
+import type { WarpAccount } from '../warp/account';
+import { wireguardConf } from '../warp/config';
 import { checkForUpdate, status as deployStatus, type CfCredentials } from '../deploy/cloudflare';
 import { sanitizeFeed, type CanonicalFeed, emptyFeed } from '../edge/feed';
 import { VERSION } from '../version';
@@ -75,8 +76,15 @@ export async function handlePanelAPI(
     return respond(true, HttpStatus.OK, 'Signed out.', null, { 'Set-Cookie': clearSessionCookie() });
   }
 
-  // --- everything below requires a session --------------------------------
-  if (!(await isAuthenticated(request, secrets))) {
+  // --- everything below requires a session OR the machine push token ------
+  // A browser authenticates with the session cookie the password issued. The
+  // ForgePanel VPS has no browser and no admin password, so it authenticates
+  // with the feed push token it already holds — enough to drive machine-safe
+  // actions (register WARP, read config, download a WARP .conf) but it never
+  // sees the admin password.
+  const bearer = (request.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const machineAuthed = bearer !== '' && timingSafeEqual(bearer, secrets.feedPushToken);
+  if (!machineAuthed && !(await isAuthenticated(request, secrets))) {
     return respond(false, HttpStatus.UNAUTHORIZED, 'Unauthorized.');
   }
 
@@ -161,15 +169,45 @@ export async function handlePanelAPI(
 
     case 'warp/accounts': {
       if (request.method !== 'POST') return respond(false, HttpStatus.METHOD_NOT_ALLOWED, 'POST only');
-      try {
-        const accounts = await fetchWarpAccounts();
-        await putJSON(env, KV_KEYS.warp, accounts);
-        return respond(true, HttpStatus.OK, 'Registered 2 WARP accounts.',
-          accounts.map((a: WarpAccount) => ({ publicKey: a.publicKey, warpIPv6: a.warpIPv6 })));
-      } catch (e) {
-        return respond(false, HttpStatus.BAD_GATEWAY,
-          `WARP registration failed: ${safeError(e)}. No placeholder account was stored.`);
+
+      // Import-only: the panel registers WARP from the VPS (which CAN reach
+      // Cloudflare's WARP API) and POSTs the accounts here to store. A Worker
+      // cannot register them itself — a fetch() to api.cloudflareclient.com is a
+      // Cloudflare-owned host and the edge refuses that subrequest (error 1104),
+      // the same CF→CF block that stops a Worker connecting to a Cloudflare IP.
+      // So there is no self-registration path here; the accounts must be pushed.
+      const raw = await request.text().catch(() => '');
+      let imported: { accounts?: WarpAccount[] } | null = null;
+      try { imported = raw ? JSON.parse(raw) : null; } catch { imported = null; }
+      const accounts = (imported?.accounts ?? []).filter(
+        (a) => a && a.privateKey && a.publicKey && a.warpIPv6 && a.reserved,
+      );
+      if (accounts.length === 0) {
+        return respond(false, HttpStatus.BAD_REQUEST,
+          'POST {"accounts":[…]} of WARP accounts registered by the ForgePanel. ' +
+          'A Worker cannot register WARP itself (Cloudflare blocks the edge→WARP-API request), ' +
+          'so registration runs on the panel host and the accounts are pushed here.');
       }
+      await putJSON(env, KV_KEYS.warp, accounts);
+      return respond(true, HttpStatus.OK, `Stored ${accounts.length} WARP account(s).`,
+        accounts.map((a: WarpAccount) => ({ publicKey: a.publicKey, warpIPv6: a.warpIPv6 })));
+    }
+
+    case 'warp/conf': {
+      // The raw wg-quick .conf for the Amnezia app / any WireGuard client:
+      // `plain` is a standard WireGuard tunnel, `pro` adds AmneziaWG's
+      // junk-packet obfuscation. Built from the registered account, so WARP
+      // must have been registered first.
+      const accounts = (await getJSON<WarpAccount[]>(env, KV_KEYS.warp)) ?? [];
+      if (accounts.length === 0) {
+        return respond(false, HttpStatus.NOT_FOUND,
+          'No WARP accounts are registered yet — register WARP first, then download the .conf.');
+      }
+      const ep = ctx.cfg.warp.endpoints[0] || 'engage.cloudflareclient.com:2408';
+      return respond(true, HttpStatus.OK, undefined, {
+        plain: wireguardConf(accounts[0], ep, ctx.cfg.warp, false),
+        pro: wireguardConf(accounts[0], ep, ctx.cfg.warp, true),
+      });
     }
 
     case 'update-check': {

@@ -66,6 +66,10 @@ type WorkerClient struct {
 	HTTP       *http.Client
 	// Session is the cookie value obtained from Login; set by Login.
 	Session string
+	// Bearer is the machine credential (the Worker's feed push token). When set,
+	// it authenticates the panel API without a browser session — the panel uses
+	// this for machine-safe actions (register WARP, read config, WARP .conf).
+	Bearer string
 }
 
 // NewWorkerClient builds a client for <origin>/<securePath>/….
@@ -116,6 +120,9 @@ func (w *WorkerClient) call(ctx context.Context, method, url string, body any, o
 	}
 	if w.Session != "" {
 		req.Header.Set("Cookie", w.Session)
+	}
+	if w.Bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+w.Bearer)
 	}
 	resp, err := w.httpClient().Do(req)
 	if err != nil {
@@ -236,6 +243,47 @@ func (w *WorkerClient) RotatePath(ctx context.Context, password string) (string,
 		return "", decodeError("edge-rotate-path", err)
 	}
 	return res.SecurePath, nil
+}
+
+// WarpAccountSummary is one registered WARP account, as the Worker reports it.
+type WarpAccountSummary struct {
+	PublicKey string `json:"publicKey"`
+	WarpIPv6  string `json:"warpIPv6"`
+}
+
+// StoreWarp uploads WARP accounts (registered on the panel host, since a Worker
+// cannot reach Cloudflare's WARP API itself) into the Worker's KV, so the
+// subscription starts serving the WireGuard and AmneziaWG nodes. Machine-
+// authenticated: set w.Bearer to the push token first.
+func (w *WorkerClient) StoreWarp(ctx context.Context, accounts []WarpAccount) ([]WarpAccountSummary, error) {
+	env, err := w.call(ctx, http.MethodPost, w.URL("api", "warp", "accounts"),
+		map[string]any{"accounts": accounts}, "edge-warp-store")
+	if err != nil {
+		return nil, err
+	}
+	var out []WarpAccountSummary
+	if err := json.Unmarshal(env.Body, &out); err != nil {
+		return nil, decodeError("edge-warp-store", err)
+	}
+	return out, nil
+}
+
+// WarpConf downloads the wg-quick .conf for the registered WARP account: `plain`
+// is a standard WireGuard tunnel, `pro` carries AmneziaWG's junk-packet
+// obfuscation. Machine-authenticated via w.Bearer.
+func (w *WorkerClient) WarpConf(ctx context.Context) (plain, pro string, err error) {
+	env, err := w.call(ctx, http.MethodGet, w.URL("api", "warp", "conf"), nil, "edge-warp-conf")
+	if err != nil {
+		return "", "", err
+	}
+	var out struct {
+		Plain string `json:"plain"`
+		Pro   string `json:"pro"`
+	}
+	if err := json.Unmarshal(env.Body, &out); err != nil {
+		return "", "", decodeError("edge-warp-conf", err)
+	}
+	return out.Plain, out.Pro, nil
 }
 
 // PushResult is what the edge reports back after accepting a feed.

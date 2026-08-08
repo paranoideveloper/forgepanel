@@ -1,3 +1,35 @@
+# ForgePanel v1.8.2 — Release Notes
+
+## Feature: free WARP + AmneziaWG from the ForgeEdge panel (one click)
+
+The ForgeEdge tab now provisions **free Cloudflare WARP** and **AmneziaWG**
+(DPI-obfuscated WireGuard) straight into a deployed edge's subscription — the
+BPB/Nova headline feature, driven entirely from ForgePanel:
+
+- **⚡ WARP + Amnezia** per deployment registers a WARP account pair and the
+  edge's subscription immediately starts serving the WireGuard + AmneziaWG nodes
+  (the feed is re-pushed automatically).
+- **Amnezia .conf / WG .conf** download buttons hand you the wg-quick config for
+  import straight into the Amnezia app or any WireGuard client.
+
+### Why registration runs on the panel, not the Worker
+A Cloudflare Worker cannot register WARP itself: a `fetch()` to
+`api.cloudflareclient.com` (a Cloudflare-owned host) is refused by the edge
+(error 1104) — the same CF→CF block that stops a Worker connecting to a
+Cloudflare IP. Verified against the live edge. So ForgePanel registers WARP on
+the VPS (which reaches the WARP API fine) and pushes the accounts into the
+Worker's KV. To make that machine-to-machine call possible without the Worker's
+admin password, the deploy now injects a `FEED_PUSH_TOKEN` binding the panel
+knows up front — which also fixes feed-push for freshly deployed edges.
+
+Verified end-to-end against a live Cloudflare Worker: the panel registers two
+real WARP accounts, pushes them to the edge, the Amnezia .conf carries the junk
+params with `S1=S2=0` (handshake-safe for WARP's non-Amnezia server), and the
+edge's Clash subscription serves `amnezia-wg-option` alongside WireGuard and
+VLESS. 323 worker tests + the Go edge/api suites pass.
+
+---
+
 # ForgePanel v1.8.1 — Release Notes
 
 ## Fix: WARP "Pro" (AmneziaWG) configs now actually connect and reach Clash

@@ -443,6 +443,26 @@ func newMockEdge(t *testing.T, token, path string) *mockEdge {
 
 func (m *mockEdge) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Machine-authenticated panel API: WARP register + .conf download. Both are
+	// authorised by the push token in the Authorization header, exactly as the
+	// real Worker accepts it (src/panel/handler.ts machine auth).
+	if r.URL.Path == "/"+m.path+"/api/warp/accounts" || r.URL.Path == "/"+m.path+"/api/warp/conf" {
+		if strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != m.token {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"status":401,"message":"Unauthorized.","body":null}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/accounts") {
+			_, _ = w.Write([]byte(`{"success":true,"status":200,"message":"Registered 2 WARP accounts.",` +
+				`"body":[{"publicKey":"pk1","warpIPv6":"2606:4700::1/128"},{"publicKey":"pk2","warpIPv6":"2606:4700::2/128"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"status":200,"message":null,` +
+			`"body":{"plain":"[Interface]\nPrivateKey = k\n","pro":"[Interface]\nPrivateKey = k\nJc = 5\nS1 = 0\nS2 = 0\n"}}`))
+		return
+	}
+
 	if r.URL.Path != "/"+m.path+"/feed" {
 		// Everything off the secure path is the decoy handler: HTML, not JSON.
 		w.Header().Set("Content-Type", "text/html")
@@ -882,6 +902,81 @@ func TestEdgePushSoon_Debounces(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("the debounced push never landed")
+}
+
+func TestEdgeWarpRegisterAndConf(t *testing.T) {
+	f := newEdgeFixture(t)
+	r := edgeRouter(f.s)
+	const path = "warproutepath23456789abcd"
+	m := newMockEdge(t, "push-tok", path)
+
+	// Mock Cloudflare's WARP registration API so the panel registers against a
+	// fake instead of the live endpoint. Two accounts are minted (WoW pair).
+	warp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(`{"config":{"client_id":"AAAA","interface":{"addresses":{"v4":"172.16.0.2","v6":"2606:4700:110::1"}},"peers":[{"public_key":"PEERPUBKEY="}]}}`))
+	}))
+	defer warp.Close()
+	oldWarp := edge.WarpRegBase
+	edge.WarpRegBase = warp.URL
+	oldPause := edge.WarpRegPause
+	edge.WarpRegPause = 0
+	defer func() { edge.WarpRegBase = oldWarp; edge.WarpRegPause = oldPause }()
+	created := registerEdge(t, r, fmt.Sprintf(
+		`{"name":"wd","origin":%q,"secure_path":%q,"push_token":"push-tok"}`, m.srv.URL, path))
+	id := int(created["id"].(float64))
+
+	// Register WARP → the panel calls the Worker with the push token, gets the
+	// accounts back, and re-pushes the feed so the sub reflects them.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("POST", fmt.Sprintf("/api/admin/edge/deployments/%d/warp", id), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("warp register: %d %s", w.Code, w.Body)
+	}
+	var reg struct {
+		Count  int  `json:"count"`
+		Pushed bool `json:"pushed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &reg); err != nil {
+		t.Fatal(err)
+	}
+	if reg.Count != 2 {
+		t.Fatalf("expected 2 WARP accounts, got %d (%s)", reg.Count, w.Body)
+	}
+	if !reg.Pushed {
+		t.Fatal("registering WARP should have re-pushed the feed so the sub serves the new nodes")
+	}
+	// The re-push must actually have reached the Worker.
+	m.mu.Lock()
+	got := m.received != nil
+	m.mu.Unlock()
+	if !got {
+		t.Fatal("the feed was not pushed to the edge after WARP registration")
+	}
+
+	// Download the Amnezia .conf (?pro=1) — a text attachment carrying the junk
+	// params, not JSON.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/api/admin/edge/deployments/%d/warp.conf?pro=1", id), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("warp.conf: %d %s", w.Code, w.Body)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "warp-amnezia.conf") {
+		t.Fatalf("expected an amnezia .conf attachment, got Content-Disposition %q", cd)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "[Interface]") || !strings.Contains(body, "Jc = 5") || !strings.Contains(body, "S1 = 0") {
+		t.Fatalf("the amnezia .conf is missing its junk params: %q", body)
+	}
+
+	// A deployment with no push token cannot be driven — the panel says so
+	// plainly rather than pretending.
+	nt := registerEdge(t, r, fmt.Sprintf(
+		`{"name":"notoken","origin":%q,"secure_path":%q}`, m.srv.URL, path))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("POST", fmt.Sprintf("/api/admin/edge/deployments/%d/warp", int(nt["id"].(float64))), nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a tokenless deployment, got %d %s", w.Code, w.Body)
+	}
 }
 
 func TestEdgePushSoon_NoopWithoutDB(t *testing.T) {

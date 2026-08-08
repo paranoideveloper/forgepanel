@@ -16,7 +16,12 @@ type DeploySpec struct {
 	// SecurePath is passed in as a plain-text binding rather than scraped back
 	// out of a Worker log line, so forgectl knows every URL up front.
 	SecurePath string
-	Bundle     []byte
+	// FeedPushToken is injected as a binding so the panel knows the Worker's
+	// machine credential up front — the token that authorises pushing the feed
+	// and the machine-driven WARP actions. Generated when empty. Ignored by a
+	// Worker that already bootstrapped its secrets in KV (an update reuses them).
+	FeedPushToken string
+	Bundle        []byte
 	// Domain attaches a custom hostname; the zone must be in this account.
 	Domain string
 	// Force overwrites a Worker that already exists. Silently overwriting
@@ -35,6 +40,7 @@ type DeployResult struct {
 	Target        string `json:"target"`
 	Origin        string `json:"origin"`
 	SecurePath    string `json:"secure_path"`
+	FeedPushToken string `json:"feed_push_token,omitempty"`
 	PanelURL      string `json:"panel_url"`
 	SubTemplate   string `json:"subscription_template"`
 	DoHURL        string `json:"doh_url"`
@@ -65,6 +71,13 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 			return nil, err
 		}
 		spec.SecurePath = p
+	}
+	if spec.FeedPushToken == "" {
+		t, err := GenerateSecurePath(28)
+		if err != nil {
+			return nil, err
+		}
+		spec.FeedPushToken = t
 	}
 
 	// 2. Refuse to clobber an existing Worker.
@@ -100,6 +113,10 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 		// The Worker validates SECURE_PATH against ^[a-z0-9-]{8,64}$ and adopts
 		// it instead of minting its own.
 		PlainTextBinding("SECURE_PATH", spec.SecurePath),
+		// The machine credential, so the panel can push the feed and drive WARP
+		// without a browser session. Only adopted on first bootstrap; a Worker
+		// whose secrets already live in KV keeps the token it minted.
+		PlainTextBinding("FEED_PUSH_TOKEN", spec.FeedPushToken),
 	}
 	var d1ID string
 	if spec.D1 {
@@ -139,7 +156,8 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 
 	res := &DeployResult{
 		Name: spec.Name, Target: spec.Target, Origin: WorkerOrigin(spec.Name, sub),
-		SecurePath: spec.SecurePath, KVNamespaceID: kvID, D1DatabaseID: d1ID,
+		SecurePath: spec.SecurePath, FeedPushToken: spec.FeedPushToken,
+		KVNamespaceID: kvID, D1DatabaseID: d1ID,
 		Updated: spec.Update,
 	}
 
