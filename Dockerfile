@@ -16,7 +16,24 @@ WORKDIR /src
 # module cache layer.
 COPY go.mod go.sum ./
 RUN go mod download
-RUN apk add --no-cache bash curl libgcc libstdc++ unzip && curl -fsSL https://bun.sh/install | bash
+# Same mirror-resilient apk as the runtime stage (see the note there).
+RUN set -eux; \
+    v="v$(cut -d. -f1,2 /etc/alpine-release)"; \
+    ok=; \
+    for m in \
+      https://dl-cdn.alpinelinux.org/alpine \
+      https://alpine.global.ssl.fastly.net/alpine \
+      https://uk.alpinelinux.org/alpine \
+      https://mirror.leaseweb.com/alpine ; do \
+      printf '%s/%s/main\n%s/%s/community\n' "$m" "$v" "$m" "$v" > /etc/apk/repositories; \
+      n=0; while [ "$n" -lt 3 ]; do \
+        if apk add --no-cache bash curl libgcc libstdc++ unzip; then ok=1; break; fi; \
+        n=$((n+1)); echo "apk via $m failed (try $n) — retrying"; sleep 3; \
+      done; \
+      [ -n "$ok" ] && break; \
+    done; \
+    [ -n "$ok" ] || { echo 'ERROR: every Alpine mirror was unreachable from the build network'; exit 1; }
+RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 COPY . .
 RUN cd frontend && bun install && bun run build
@@ -68,7 +85,27 @@ LABEL org.opencontainers.image.title="ForgePanel" \
 #   all dead in the container. gcompat provides the loader + libc shim; verified by
 #   running the pinned sing-box-1.13.15 binary under it. (Xray ships static and
 #   does not need it, but gcompat is harmless there.)
-RUN apk add --no-cache ca-certificates tzdata libcap gcompat wireguard-tools iptables nftables iproute2
+# apk index fetches fail on flaky, rate-limited or partly-censored build networks
+# ("temporary error (try again later)"). Retry across several mirrors so the build
+# succeeds anywhere with any working egress instead of dying on one bad CDN.
+RUN set -eux; \
+    v="v$(cut -d. -f1,2 /etc/alpine-release)"; \
+    pkgs="ca-certificates tzdata libcap gcompat wireguard-tools iptables nftables iproute2"; \
+    ok=; \
+    for m in \
+      https://dl-cdn.alpinelinux.org/alpine \
+      https://alpine.global.ssl.fastly.net/alpine \
+      https://uk.alpinelinux.org/alpine \
+      https://mirror.leaseweb.com/alpine \
+      https://mirrors.edge.kernel.org/alpine ; do \
+      printf '%s/%s/main\n%s/%s/community\n' "$m" "$v" "$m" "$v" > /etc/apk/repositories; \
+      n=0; while [ "$n" -lt 3 ]; do \
+        if apk add --no-cache $pkgs; then ok=1; break; fi; \
+        n=$((n+1)); echo "apk via $m failed (try $n) — retrying"; sleep 3; \
+      done; \
+      [ -n "$ok" ] && break; \
+    done; \
+    [ -n "$ok" ] || { echo 'ERROR: every Alpine mirror was unreachable from the build network'; exit 1; }
 
 COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
 COPY --from=build /out/forgectl   /usr/local/bin/forgectl

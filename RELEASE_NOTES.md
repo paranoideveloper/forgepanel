@@ -1,3 +1,18 @@
+# ForgePanel v1.6.3 — Release Notes
+
+## Fix
+
+- **Resilient Docker build.** `apk add` in the Dockerfile failed on flaky,
+  rate-limited or partly-censored build networks with `temporary error (try again
+  later)` (the Alpine CDN is dual-stack via Fastly and some VPSes advertise IPv6
+  with no route). Both build stages now **retry across several Alpine mirrors**
+  (dl-cdn, Fastly, uk.alpinelinux.org, leaseweb, kernel.org) before failing, so
+  `docker compose up -d --build` succeeds anywhere with any working egress instead
+  of dying on one bad CDN. If the build network genuinely can't reach any mirror,
+  use the prebuilt static binary or `.deb` from this release — they need no build.
+
+---
+
 # ForgePanel v1.6.2 — Release Notes
 
 ## New
