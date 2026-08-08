@@ -1,3 +1,19 @@
+# ForgePanel v1.7.1 — Release Notes
+
+## Docker without building
+
+- **Prebuilt image on GHCR.** Every release now publishes a multi-arch image at
+  `ghcr.io/paranoideveloper/forgepanel:<tag>` (+ `:latest`), built on GitHub's
+  runners. On a server whose build network can't reach the Alpine mirrors,
+  `docker build` can never succeed — so **pull instead**:
+  `docker run … ghcr.io/paranoideveloper/forgepanel:v1.7.1`.
+- **Compose pulls by default.** `docker-compose.yml` now points at that GHCR
+  image, so `docker compose up -d` pulls a ready-to-run image; pass `--build`
+  only when you deliberately want to compile from source. Docs updated to lead
+  with the pull path. No application changes from v1.7.0.
+
+---
+
 # ForgePanel v1.7.0 — Release Notes
 
 ## New
