@@ -90,13 +90,9 @@ func humanBytes(b int64) string {
 // base is the subscription URL without a format suffix.
 func subLandingPage(base, userinfo string) []byte {
 	used, total, expire := parseUserinfo(userinfo)
-	usage := humanBytes(used) + " used"
+	var usage string
 	if total > 0 {
-		pct := 0
-		if total > 0 {
-			pct = int(used * 100 / total)
-		}
-		usage = fmt.Sprintf("%s of %s (%d%%)", humanBytes(used), humanBytes(total), pct)
+		usage = fmt.Sprintf("%s of %s (%d%%)", humanBytes(used), humanBytes(total), int(used*100/total))
 	} else {
 		usage = humanBytes(used) + " used · unlimited"
 	}
