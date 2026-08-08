@@ -84,7 +84,12 @@ code{background:#0b1220;padding:.1em .35em;border-radius:4px}
 </section>
 
 <section>
-  <h2>WARP endpoints</h2>
+  <h2>WARP + Amnezia</h2>
+  <p class="mut">Free Cloudflare WARP becomes a WireGuard node and an AmneziaWG (DPI-obfuscated) node in every subscription. A Worker <b>cannot register WARP itself</b> — the edge refuses its request to Cloudflare's own WARP API — so registration runs off the edge. <b>ForgePanel does this for you</b> (Deploy → ⚡ WARP + Amnezia). For a standalone Worker, register elsewhere (e.g. <code>wgcf</code>) and paste the accounts below.</p>
+  <label for="warpAccts">WARP accounts JSON <span class="mut">— an array of {privateKey, publicKey, warpIPv6, reserved}</span></label>
+  <textarea id="warpAccts" spellcheck="false" placeholder='[{"privateKey":"…","publicKey":"…","warpIPv6":"2606:4700:…/128","reserved":"…"}]' style="min-height:7rem"></textarea>
+  <div class="actions"><button id="storeWarp">Store accounts</button></div>
+  <h2 style="margin-top:1.4rem">WARP endpoints</h2>
   <p class="mut">A Worker has no UDP socket, so latency can only be measured by your ForgePanel VPS in Backend Mode. Without one you get ranked candidates and no invented numbers.</p>
   <div class="actions"><button id="doScan">Scan</button></div>
   <pre id="warpOut" hidden></pre>
@@ -174,6 +179,21 @@ $('doScan').onclick = async () => {
     const body = await api('/warp/scan', { method: 'POST' });
     $('warpOut').hidden = false;
     $('warpOut').textContent = JSON.stringify(body, null, 2);
+  } catch (e) { toast(e.message, true); }
+};
+$('storeWarp').onclick = async () => {
+  let parsed;
+  try {
+    parsed = JSON.parse($('warpAccts').value);
+  } catch (e) { toast('That is not valid JSON', true); return; }
+  // Accept either a bare array or a { accounts: [...] } envelope.
+  const accounts = Array.isArray(parsed) ? parsed : parsed.accounts;
+  try {
+    const body = await api('/warp/accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accounts }),
+    });
+    toast('Stored ' + (Array.isArray(body) ? body.length : 0) + ' WARP account(s)');
   } catch (e) { toast(e.message, true); }
 };
 $('checkUpdate').onclick = async () => {

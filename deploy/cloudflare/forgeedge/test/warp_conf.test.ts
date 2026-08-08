@@ -10,6 +10,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { handlePanelAPI, type PanelContext } from '../src/panel/handler';
+import { panelHTML } from '../src/panel/ui';
 import { defaultConfig, KV_KEYS, type EdgeSecrets } from '../src/config/schema';
 import { hashPassword } from '../src/config/store';
 import type { WarpAccount } from '../src/warp/account';
@@ -124,5 +125,13 @@ describe('WARP .conf over the machine channel', () => {
 
     const conf = await handlePanelAPI(req('GET', PUSH), ['warp', 'conf'], ctx(kv));
     expect(conf.status).toBe(200);
+  });
+
+  test('the Worker panel offers the paste-accounts flow, not a dead self-register button', () => {
+    const html = panelHTML(PATH, false);
+    expect(html).toContain('storeWarp');
+    expect(html).toContain('cannot register WARP itself');
+    // the old promise of in-Worker registration must be gone
+    expect(html).not.toContain('Register 2 WARP accounts');
   });
 });

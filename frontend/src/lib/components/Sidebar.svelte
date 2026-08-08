@@ -41,7 +41,7 @@
     </div>
     <div class="brand-text">
       <h2>ForgePanel</h2>
-      <span class="version-tag">v1.8.2</span>
+      <span class="version-tag">v1.8.3</span>
     </div>
   </div>
 

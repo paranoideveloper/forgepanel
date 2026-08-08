@@ -1,3 +1,21 @@
+# ForgePanel v1.8.3 — Release Notes
+
+## Polish: the Worker's own panel WARP section is now honest and usable
+
+Following v1.8.2 (WARP self-registration is impossible from a Worker — Cloudflare
+refuses the edge→WARP-API request), the Worker's built-in panel still showed a
+"register" button that could only ever fail. It is replaced with:
+
+- a clear note that ForgePanel provisions WARP for you (Deploy → ⚡ WARP + Amnezia), and
+- a **paste-accounts** box so a *standalone* Worker (deployed without ForgePanel)
+  is still usable: register WARP anywhere (e.g. `wgcf`) and paste the accounts
+  JSON to store them — the same import endpoint ForgePanel drives.
+
+No functional change to the ForgePanel flow; this only fixes the standalone
+Worker's own panel. 323 worker tests + Go suites pass.
+
+---
+
 # ForgePanel v1.8.2 — Release Notes
 
 ## Feature: free WARP + AmneziaWG from the ForgeEdge panel (one click)
