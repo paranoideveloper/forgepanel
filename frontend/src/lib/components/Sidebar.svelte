@@ -9,6 +9,7 @@
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'wizard', label: 'Setup Wizard', icon: '✨' },
     { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
     { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
@@ -39,7 +40,7 @@
     </div>
     <div class="brand-text">
       <h2>ForgePanel</h2>
-      <span class="version-tag">v1.6.3</span>
+      <span class="version-tag">v1.7.0</span>
     </div>
   </div>
 

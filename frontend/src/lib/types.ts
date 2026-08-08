@@ -74,9 +74,12 @@ export interface SystemHealth {
 
 export interface HealthDetail {
   subsystems: Array<{
-    name: string;
-    healthy: boolean;
-    detail: string;
+    key: string;
+    label: string;
+    state: string;   // healthy | not_configured | degraded | error
+    summary: string;
+    detail?: string;
+    link?: string;
   }>;
 }
 

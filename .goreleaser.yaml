@@ -88,6 +88,26 @@ nfpms:
       - deb
       - rpm
     bindir: /usr/local/bin
+    # ca-certificates is required for TLS (ACME + fetching the proxy cores). The
+    # network tools are soft dependencies — only some features (AmneziaWG,
+    # port-hopping, ForgeDNS firewalling) need them, and the panel degrades
+    # gracefully without them. Package names differ across deb/rpm, so the soft
+    # deps are set per-format below.
+    dependencies:
+      - ca-certificates
+    overrides:
+      deb:
+        recommends:
+          - wireguard-tools
+          - iptables
+          - nftables
+          - iproute2
+      rpm:
+        recommends:
+          - wireguard-tools
+          - iptables
+          - nftables
+          - iproute
     contents:
       - src: packaging/systemd/forgepanel.service
         dst: /etc/systemd/system/forgepanel.service

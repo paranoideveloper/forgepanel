@@ -1,3 +1,34 @@
+# ForgePanel v1.7.0 — Release Notes
+
+## New
+
+- **Setup Wizard.** A guided, BPB/Nova-style onboarding (sidebar → ✨ Setup
+  Wizard) that walks a new operator through the whole flow in four steps —
+  **domain & automatic TLS → create a VLESS+REALITY inbound → create a user →
+  share** — ending on a QR code, the subscription link, and one-tap client
+  import. It orchestrates the existing endpoints, so there's nothing new to learn.
+  Verified end-to-end (desktop + mobile) against the built binary.
+
+## Fixes
+
+- **Node enrollment 404.** The Node Cluster UI handed out `/api/node/install.sh`
+  but the script was only served at `/node-install.sh` — so the copy-paste
+  one-liner 404'd. That path is now an alias; the enroll command works as shown.
+- **System & Security health matrix was blank.** The Subsystem Health Matrix
+  rendered coloured dots with no labels (it read `name`/`healthy`/`detail` while
+  the API returns `label`/`state`/`summary`). It now shows the real subsystem
+  name, status colour and summary.
+- **Mobile layout.** Wide tables (Inbounds) now scroll inside their card instead
+  of pushing the page sideways; the System page's multi-column grids and the
+  change-password / export rows stack on a phone; the firewall badge tooltip is
+  clearer about host vs. VPS-provider firewalls.
+- **Hands-off packages.** The `.deb`/`.rpm` now declare `ca-certificates` as a
+  dependency (soft-recommend the network tools) and **open the firewall in their
+  post-install** (panel port, 80, 443, 53) — so a package install provisions TLS
+  reachability itself, matching `install.sh`.
+
+---
+
 # ForgePanel v1.6.3 — Release Notes
 
 ## Fix

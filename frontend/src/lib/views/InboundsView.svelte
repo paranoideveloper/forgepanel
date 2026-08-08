@@ -198,6 +198,7 @@
         <button class="sm danger" data-testid="bulk-delete" onclick={() => bulk('delete')}>Delete</button>
       </div>
     {/if}
+    <div class="table-scroll">
     <table data-testid="inbounds-table">
       <thead>
         <tr><th><input type="checkbox" data-testid="select-all" checked={selected.size === rows.length && rows.length > 0} onchange={toggleAll} /></th><th>#</th><th>Remark</th><th>Protocol</th><th>Transport</th><th>Security</th><th>Port</th><th>Status</th><th>Verify</th><th>Actions</th></tr>
@@ -215,7 +216,7 @@
             <td>
               <span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? 'Enabled' : 'Disabled'}</span>
               {#if r.enabled && r.reachable === false}
-                <span class="badge err" data-testid="fw-blocked" title="This port is blocked by the host firewall (ufw). External clients — a phone — cannot reach it even though Verify passes on loopback. Open it: ufw allow {r.port}">🔥 firewall</span>
+                <span class="badge err" data-testid="fw-blocked" title="Port {r.port} is not allowed in the host firewall (ufw), so external clients are dropped even though Verify passes on loopback. A native install running as root opens it automatically; inside Docker or behind a VPS provider firewall the panel cannot, so allow it yourself: ufw allow {r.port} (and in your provider's firewall panel).">🔥 firewall</span>
               {/if}
             </td>
             <td>
@@ -237,6 +238,7 @@
         {/each}
       </tbody>
     </table>
+    </div>
   {/if}
 </div>
 
@@ -267,8 +269,11 @@
   .card h3 { margin: 0 0 16px; font-size: 15px; }
   .primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
   .ghost { background: transparent; color: #FF9A4A; border: 1px solid rgba(255,122,26,0.4); padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 11px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+  /* On a phone the row is wider than the screen; scroll it inside the card
+     instead of pushing the whole page sideways. */
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
+  table { width: 100%; min-width: 720px; border-collapse: collapse; }
+  th, td { padding: 11px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; white-space: nowrap; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; font-size: 12px; }
   .proto { background: rgba(255,122,26,0.12); color: #FF9A4A; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
   .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }

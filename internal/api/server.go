@@ -543,6 +543,9 @@ func (s *Server) routes() {
 		r.POST("/api/node/register", s.handleNodeRegister)
 		r.POST("/api/node/heartbeat", s.handleNodeHeartbeat)
 		r.GET("/node-install.sh", s.handleNodeInstallScript)
+		// Alias: the Node Cluster UI hands out /api/node/install.sh, so serve the
+		// enrollment script there too (the bare /node-install.sh stays as well).
+		r.GET("/api/node/install.sh", s.handleNodeInstallScript)
 	}
 
 	// The full admin panel at root + the randomized admin path; the Config Studio

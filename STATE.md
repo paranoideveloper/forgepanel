@@ -3,6 +3,25 @@
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
 
+## v1.7.0 — Setup Wizard + UX fixes (parity batch 4)
+
+- **SetupWizardView** (sidebar ✨): 4-step guided onboarding (domain/TLS →
+  reality-quickstart inbound → create user + auto-assign all inbounds → share
+  QR/link). Registered in +page.svelte viewLoaders. e2e wizard.spec.ts (desktop+
+  mobile) verified end-to-end incl. the emitted sub carrying vless://+reality.
+- **Node 404 fix**: added `/api/node/install.sh` alias (UI hands that path out;
+  script was only at `/node-install.sh`).
+- **Health matrix fix**: SystemHealthView read name/healthy/detail; API returns
+  label/state/summary — fixed rendering + HealthDetail type + test mock.
+- **Mobile**: InboundsView table in `.table-scroll` (min-width 720, overflow-x);
+  SystemHealthView media query stacks grids/rows; firewall badge tooltip clarified.
+- **Package hardening**: nfpms `dependencies: [ca-certificates]` + per-format
+  recommends; postinstall.sh opens ufw/firewalld for panel/80/443/53.
+Gotchas: e2e default port 24700 is taken on the France box — run FP_E2E_PORT=34700;
+`pkill -f forgepanel-test` kills the running shell, use `pkill -x forgepanel-test`.
+Also v1.6.3 shipped the resilient Docker build (apk mirror fallback) — but the
+user's server can't reach ANY Alpine mirror, so the .deb is their path.
+
 ## v1.6.2 — Subscription landing page (parity batch 3)
 
 Browser-facing `/sub/:token` landing page (`internal/api/subpage.go`): usage/expiry

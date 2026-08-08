@@ -180,10 +180,10 @@
     <div class="subsystem-grid">
       {#each healthDetail.subsystems as s}
         <div class="subsystem-card">
-          <span class="dot {s.healthy ? 'ok' : 'err'}"></span>
+          <span class="dot {s.state === 'healthy' ? 'ok' : s.state === 'not_configured' ? 'warn' : 'err'}"></span>
           <div class="subsystem-info">
-            <strong>{s.name}</strong>
-            <span class="detail">{s.detail}</span>
+            <strong>{s.label || s.key}</strong>
+            <span class="detail">{s.detail || s.summary}</span>
           </div>
         </div>
       {/each}
@@ -234,8 +234,9 @@
   .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
   .subsystem-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .subsystem-card { display: flex; align-items: center; gap: 12px; background: #0F1420; padding: 12px; border-radius: 8px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
   .dot.ok { background: #27D17C; }
+  .dot.warn { background: #FFB020; }
   .dot.err { background: #FF4D4D; }
   .subsystem-info { display: flex; flex-direction: column; }
   .detail { font-size: 12px; color: rgba(255,255,255,0.5); }
@@ -254,4 +255,16 @@
   .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
   .badge.warn { background: rgba(255,180,0,0.15); color: #FFB400; }
   .badge.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
+  .subsystem-info strong { word-break: break-word; }
+  .subsystem-info .detail { font-size: 12px; color: rgba(255,255,255,0.55); word-break: break-word; }
+
+  /* Mobile: stack multi-column grids and rows so nothing runs off-screen. */
+  @media (max-width: 768px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .form-row { flex-direction: column; align-items: stretch; }
+    .form-row input, .form-row button { width: 100%; }
+    .subsystem-grid { grid-template-columns: 1fr; }
+    .doctor-grid { grid-template-columns: 1fr; }
+    .view-header { flex-wrap: wrap; gap: 10px; }
+  }
 </style>

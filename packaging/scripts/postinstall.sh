@@ -25,6 +25,21 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
+# Open the ports the panel binds (panel UI, 80/443 for automatic TLS, 53 for
+# ForgeDNS) on a managed host firewall, so the panel and Let's Encrypt work
+# without a manual step. Best-effort; a missing/inactive firewall is a no-op and
+# never fails the install.
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "status: active"; then
+  for p in 2053 80 443 53; do ufw allow "${p}/tcp" >/dev/null 2>&1 || true; done
+  ufw allow 53/udp >/dev/null 2>&1 || true
+  ufw allow 443/udp >/dev/null 2>&1 || true
+elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  for p in 2053 80 443 53; do firewall-cmd --permanent --add-port="${p}/tcp" >/dev/null 2>&1 || true; done
+  firewall-cmd --permanent --add-port=53/udp >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=443/udp >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+
 cat <<'EOF'
 
 ForgePanel installed.

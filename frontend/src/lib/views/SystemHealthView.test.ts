@@ -14,8 +14,8 @@ describe('SystemHealthView Component', () => {
           ok: true,
           json: async () => ({
             subsystems: [
-              { name: 'Database', healthy: true, detail: 'SQLite operational' },
-              { name: 'Xray Core', healthy: false, detail: 'Core process stopped' }
+              { key: 'database', label: 'Database', state: 'healthy', summary: 'SQLite operational', detail: 'SQLite operational' },
+              { key: 'xray', label: 'Xray Core', state: 'error', summary: 'Core process stopped', detail: 'Core process stopped' }
             ]
           })
         } as Response;
