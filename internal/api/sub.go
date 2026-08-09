@@ -71,6 +71,43 @@ func (s *Server) subFrontMode() model.FrontMode {
 	return model.ParseFrontMode(s.db.GetSetting("sub_front_mode"))
 }
 
+// subExpandSNI fans a REALITY inbound out into one config per borrowed SNI.
+// Default ON — it is the whole point of listing several SNIs on an inbound.
+func (s *Server) subExpandSNI() bool {
+	if s.db == nil {
+		return true
+	}
+	return s.db.GetSetting("sub_expand_sni") != "0"
+}
+
+// subFrontCleanIP fans a CDN-frontable inbound out across the clean-IP list.
+// Default OFF — it only helps once the operator has a clean-IP list set.
+func (s *Server) subFrontCleanIP() bool {
+	if s.db == nil {
+		return false
+	}
+	return s.db.GetSetting("sub_front_cleanip") == "1"
+}
+
+// subCleanIPs is the operator's comma/space/newline-separated list of clean
+// Cloudflare edge IPs (or hostnames) used for CDN IP fan-out.
+func (s *Server) subCleanIPs() []string {
+	if s.db == nil {
+		return nil
+	}
+	raw := s.db.GetSetting("sub_clean_ips")
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, f := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == ' ' || r == '\t' || r == '\r' }) {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // patternSettingString maps a mode back to its stored form.
 func patternSettingString(m patternMode) string {
 	switch m {

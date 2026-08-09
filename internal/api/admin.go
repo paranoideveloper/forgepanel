@@ -574,6 +574,9 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 	tmpl := s.subNameTemplate()
 	frontDomain := s.subFrontDomain()
 	frontMode := s.subFrontMode()
+	expandSNI := s.subExpandSNI()
+	frontCleanIP := s.subFrontCleanIP()
+	cleanIPs := s.subCleanIPs()
 	date := time.Now().UTC().Format("2006-01-02")
 	var out []*model.Node
 	for idx, inID := range inboundIDs {
@@ -609,7 +612,10 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 				n.Remark = name
 			}
 		}
-		out = append(out, n)
+		// Fan the inbound out into every camouflage variation it advertises: one
+		// config per borrowed REALITY SNI, and (when a clean-IP list is set) one
+		// per clean Cloudflare edge IP for CDN-frontable transports.
+		out = append(out, expandNodeVariations(n, cleanIPs, expandSNI, frontCleanIP)...)
 	}
 	return out
 }
