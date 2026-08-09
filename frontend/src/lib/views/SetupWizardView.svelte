@@ -102,9 +102,54 @@
     try { await navigator.clipboard.writeText(text); showToast('Copied', 'success'); }
     catch (_) { showToast('Copy failed', 'error'); }
   }
+
+  // One-click Preset Wizard: build the WHOLE multi-protocol server (every config
+  // family, keys/ports/firewall/DNS wired) from a domain + a Cloudflare token.
+  let pwDomain = $state('');
+  let pwToken = $state('');
+  let pwAccount = $state('');
+  let pwRunning = $state(false);
+  let pwResult = $state<any>(null);
+
+  async function runPresetWizard() {
+    pwRunning = true;
+    pwResult = null;
+    try {
+      const r = await apiFetch<any>('/admin/wizard/preset', {
+        method: 'POST',
+        body: JSON.stringify({ domain: pwDomain.trim(), cf_token: pwToken.trim(), cf_account_id: pwAccount.trim() })
+      });
+      pwResult = r;
+      showToast(`Built ${r.count} inbounds`, 'success');
+    } catch (e: any) {
+      showToast(e.message || 'Preset wizard failed', 'error');
+    } finally {
+      pwRunning = false;
+    }
+  }
 </script>
 
 <div class="view-header"><h2>Setup Wizard</h2></div>
+
+<div class="card preset">
+  <h3>🧙 One-click full server (Preset Wizard)</h3>
+  <p class="hint">Build the whole multi-protocol server in a single step — REALITY-Vision, REALITY-XHTTP &amp; Brutal (direct, SNI-rotating), VLESS-WS / VLESS-XHTTP / VMess-WS over TLS behind Cloudflare, and Shadowsocks-2022. Keys, ports, firewall and the Cloudflare DNS record are all wired for you. Then just create a user below and share.</p>
+  <div class="row">
+    <input placeholder="domain for the CDN configs (e.g. anonymous.observer)" bind:value={pwDomain} data-testid="pw-domain" />
+    <input placeholder="Cloudflare API token (optional — auto-creates DNS)" bind:value={pwToken} data-testid="pw-token" />
+    <button class="primary" onclick={runPresetWizard} disabled={pwRunning} data-testid="pw-run">{pwRunning ? 'Building…' : '⚡ Build full server'}</button>
+  </div>
+  <p class="tiny">Token needs <strong>Zone · DNS · Edit</strong> for the domain. Without it the wizard still builds everything and tells you the single A-record to add. REALITY needs no domain at all.</p>
+  {#if pwResult}
+    <div class="pw-result">
+      <p class="ok-line">✅ Created {pwResult.count} inbounds · REALITY key <code>{pwResult.reality?.public_key}</code></p>
+      <ul class="pw-list">
+        {#each pwResult.created as c}<li>{c.remark} · port {c.port}{c.cdn ? ' · behind Cloudflare' : ' · direct'}</li>{/each}
+      </ul>
+      {#if pwResult.warnings?.length}{#each pwResult.warnings as w}<p class="warn-line">⚠️ {w}</p>{/each}{/if}
+    </div>
+  {/if}
+</div>
 
 <div class="stepper">
   {#each steps as label, i}
@@ -186,6 +231,10 @@
   .ghost { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
   .ghost.sm { padding: 6px 12px; font-size: 12px; }
   .nav { display: flex; justify-content: space-between; margin-top: 18px; gap: 10px; }
+  .preset { margin-bottom: 18px; border-color: rgba(255,122,26,0.35); }
+  .pw-result { margin-top: 14px; }
+  .pw-list { margin: 8px 0 0; padding-left: 18px; color: rgba(255,255,255,0.75); font-size: 13px; line-height: 1.7; }
+  .pw-list li { word-break: break-word; }
   .ok-line { color: #27D17C; font-size: 14px; margin-top: 14px; }
   .warn-line { color: #FFC24B; font-size: 13px; margin-top: 14px; }
   .share { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
