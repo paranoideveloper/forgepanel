@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.16.0 — external subscription merge
+
+### Added
+- **External subscription merge** — list other subscription URLs (your own fleet
+  subs, a community feed) in `externalSubs` and every config in them is merged
+  into this one, so a family member imports a single URL and gets everything.
+  Fetched configs are parsed into the same canonical nodes as the rest of the
+  pipeline (vless/vmess/trojan/ss/socks/http incl. reality + transports), so they
+  render in every format and ride the best-ping groups under their own "External"
+  group. Unparseable lines are skipped; caps at 200/sub and 600 total. Refreshed
+  on the cron and on demand (`POST api/external/refresh`); serving never blocks
+  on a slow upstream. Verified live: 200 configs from a fleet sub merged into the
+  subscription.
+
 ## v1.15.0 — end-user landing/import page
 
 ### Added
