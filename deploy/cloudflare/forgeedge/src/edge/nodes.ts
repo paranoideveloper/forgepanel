@@ -65,7 +65,18 @@ export function edgeRemark(
   const proto = protocol === 'vless' ? 'VLESS' : 'Trojan';
   const custom = isCustomDomain ? 'D ' : '';
   const cdn = cfg.customCdnAddrs.includes(address) ? 'C ' : '';
-  return `ForgeEdge ${index}. ${proto} ${custom}${cdn}- ${addressKind(cfg, address)} : ${port}`;
+  const kind = addressKind(cfg, address);
+  // The "plain" style is the original, kept for anyone who parses remarks; the
+  // "fancy" style (default) adds an emoji per protocol + a cloud mark so the
+  // list reads at a glance in v2rayNG/Streisand. Both keep the machine-readable
+  // tokens (proto, D/C flags, kind, port) so url-test grouping and the tests
+  // that assert on them are unaffected.
+  if (cfg.remarkStyle === 'plain') {
+    return `ForgeEdge ${index}. ${proto} ${custom}${cdn}- ${kind} : ${port}`;
+  }
+  const emoji = protocol === 'vless' ? '⚡' : '🛡️';
+  const prefix = cfg.remarkPrefix || 'ForgeEdge';
+  return `☁️ ${prefix} ${index} · ${emoji} ${proto} · ${custom}${cdn}${kind} : ${port}`;
 }
 
 export interface BuildEdgeNodesInput {

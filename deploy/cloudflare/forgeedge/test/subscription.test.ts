@@ -244,7 +244,9 @@ describe('combined subscription', () => {
       const byTag = new Map(doc.outbounds.map((o) => [o.tag as string, o]));
       const edge = byTag.get('Edge')!.outbounds as string[];
       const vps = byTag.get('VPS')!.outbounds as string[];
-      expect(edge.every((t) => t.startsWith('ForgeEdge'))).toBe(true);
+      // Edge remarks carry the fancy style (☁️ ForgeEdge …); grouping is by
+      // origin, not prefix, so match on the brand token rather than position.
+      expect(edge.every((t) => t.includes('ForgeEdge'))).toBe(true);
       expect(vps.every((t) => t.startsWith('VPS'))).toBe(true);
       expect(edge.some((t) => vps.includes(t))).toBe(false);
     });

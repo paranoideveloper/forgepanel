@@ -150,6 +150,10 @@ export interface EdgeConfig {
 
   // --- subscription --------------------------------------------------------
   subTitle: string;
+  /** Remark styling for the edge's own nodes: 'fancy' (emoji, default) or 'plain'. */
+  remarkStyle: 'fancy' | 'plain';
+  /** Brand shown in each remark (default 'ForgeEdge'). */
+  remarkPrefix: string;
   bestPingInterval: number;
   /** Pull the canonical node feed from the ForgePanel VPS on a schedule. */
   feedPullURL: string;
@@ -245,7 +249,10 @@ export function defaultConfig(): EdgeConfig {
     customDomain: '',
     httpPorts: [...CF_HTTP_PORTS],
     httpsPorts: [...CF_HTTPS_PORTS],
-    ports: [443],
+    // Spread across every Cloudflare TLS port, not just 443. When an Iranian ISP
+    // throttles or blocks 443, the client's best-ping group still has 2053/2087/
+    // 8443/etc. to fall back to. The list is de-duped and port-filtered downstream.
+    ports: [...CF_HTTPS_PORTS],
     enableIPv6: false,
     enableTFO: false,
     fingerprint: 'chrome',
@@ -278,6 +285,8 @@ export function defaultConfig(): EdgeConfig {
     warp: { ...DEFAULT_WARP },
 
     subTitle: 'ForgeEdge',
+    remarkStyle: 'fancy',
+    remarkPrefix: 'ForgeEdge',
     bestPingInterval: 30,
     feedPullURL: '',
     feedPullToken: '',
