@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.12.0 — Fancy config wizard
+
+### Added
+- **Fancy config wizard** on Users & Subscriptions: set a camouflage domain,
+  pick a styled theme, and every config in the subscription is renamed with the
+  theme and fronted behind that domain — the look Iranian channels ship
+  (aparat / nobat / taskulu / snapp / baman / akharin, emoji + Persian + bold).
+  - 18-theme catalogue across VMess-WS / XHTTP-Reality / Vision-Reality / SS-2022.
+  - Two fronting models, chosen per theme: **SNI** (keep the real dial address,
+    present the domain as TLS SNI + Host header — works on any server and on
+    REALITY) and **CDN** (set only the Host header for a Host-routing domestic
+    CDN, the plaintext-WS pattern). Applied in `subscriptionNodes` before naming.
+  - New settings `sub_front_domain` / `sub_front_mode`; the GET settings endpoint
+    exposes the theme catalogue and POST applies a theme in one step.
+  - Verified at three layers: model unit tests, an exporter test that renders a
+    fronted node to a real `vless://` link, and an api test proving the settings
+    flow end-to-end into the rendered subscription.
+
 ## v1.11.0 — ForgeEdge relay fix + Iran survivability
 
 ### Fixed (the ForgeEdge Worker never actually tunnelled)
