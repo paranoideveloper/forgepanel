@@ -825,6 +825,16 @@ write_unit() {
     printf '# Mutable panel address, domain, HTTPS and ACME settings live in panel.json.\n'
     printf '# This file intentionally contains only immutable bootstrap state.\n'
     printf 'FORGEPANEL_DATA=%s\n' "$DATA_DIR"
+    printf '\n'
+    printf '# --- Telegram bot (optional) — manage the panel from chat ---------------\n'
+    printf '# 1. Create a bot: message @BotFather, send /newbot, copy the token.\n'
+    printf '# 2. Get your numeric chat id: message @userinfobot, it replies with your Id.\n'
+    printf '# 3. Uncomment the two lines below (admins = comma-separated ids), then run:\n'
+    printf '#      systemctl restart forgepanel\n'
+    printf '#    Any user can then DM the bot /sub <token>; admins get /adduser, /deluser,\n'
+    printf '#    /enable, /disable, /reset, /limit, /extend, /stats, /user (see /help).\n'
+    printf '# FORGEPANEL_TELEGRAM_TOKEN=123456789:AA-your-bot-token\n'
+    printf '# FORGEPANEL_TELEGRAM_ADMINS=11111111,22222222\n'
   } > "$env_tmp"
   chmod 0600 "$env_tmp"
   mv -f "$env_tmp" "$ENV_FILE"

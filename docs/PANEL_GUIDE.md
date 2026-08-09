@@ -200,6 +200,34 @@ docs under `deploy/cloudflare/forgeedge/docs/`.
 
 ---
 
+## 7.5 Telegram bot — run the panel from chat
+
+The panel has a built-in Telegram bot (nothing to install separately). Once
+enabled, any subscriber can fetch their link from a DM, and admins manage users
+without opening the web panel — and **every change reloads the running cores
+immediately**, exactly like an edit from the UI.
+
+**Enable it (≈1 minute):**
+
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token.
+2. Message [@userinfobot](https://t.me/userinfobot) → note your numeric `Id`.
+3. Put both in `/etc/forgepanel/forgepanel.env` (the installer leaves them there,
+   commented, ready to uncomment) and restart:
+   ```sh
+   FORGEPANEL_TELEGRAM_TOKEN=123456789:AA-your-bot-token
+   FORGEPANEL_TELEGRAM_ADMINS=11111111,22222222
+   ```
+   ```sh
+   sudo systemctl restart forgepanel
+   ```
+
+**Commands** — everyone: `/sub <token>`, `/help`. Admins also get: `/stats`,
+`/user <name>`, `/adduser <name>` (returns the new sub token), `/deluser <name>`,
+`/enable <name>` · `/disable <name>`, `/reset <name>` (zero traffic, lifts an
+over-quota cap), `/limit <name> <GB>` (0 = unlimited), `/extend <name> <days>`.
+Only the chat IDs in `FORGEPANEL_TELEGRAM_ADMINS` can run the admin commands;
+everyone else is limited to `/sub` and `/help`.
+
 ## 8. ForgeDNS
 
 A DNS toolkit for anti-censorship: manage DNS providers (Cloudflare, ArvanCloud,

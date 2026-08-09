@@ -27,9 +27,29 @@ setting on restart or upgrade.
 
 ## Telegram bot
 
-Set `FORGEPANEL_TELEGRAM_TOKEN` and `FORGEPANEL_TELEGRAM_ADMINS` (then restart) to
-manage the panel from Telegram. Any user can run `/sub <token>` to get their
-subscription link and `/help`. Admins (the chat IDs above) additionally get:
+Run the whole panel from a Telegram chat. **Setup (three steps, ~1 minute):**
+
+1. **Create the bot.** In Telegram, message [@BotFather](https://t.me/BotFather),
+   send `/newbot`, follow the prompts, and copy the token it gives you
+   (looks like `123456789:AA…`).
+2. **Get your chat id.** Message [@userinfobot](https://t.me/userinfobot); it
+   replies with your numeric `Id`. That id is an admin.
+3. **Enable it.** Add the two lines to `/etc/forgepanel/forgepanel.env` (the
+   installer leaves them commented there ready to fill in), then restart:
+
+   ```sh
+   # /etc/forgepanel/forgepanel.env
+   FORGEPANEL_TELEGRAM_TOKEN=123456789:AA-your-bot-token
+   FORGEPANEL_TELEGRAM_ADMINS=11111111,22222222   # comma-separated admin chat ids
+   ```
+   ```sh
+   sudo systemctl restart forgepanel
+   ```
+
+The bot starts automatically on boot whenever a token is set (there is nothing to
+install separately — it is built into the panel binary). Any user can run
+`/sub <token>` to get their subscription link and `/help`. Admins (the chat IDs
+above) additionally get:
 
 | Command | Action |
 |---|---|
