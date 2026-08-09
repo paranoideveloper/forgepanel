@@ -49,7 +49,8 @@
 
   // subscription defaults (routing preset + TLS fragment) applied to every
   // generated sing-box/Xray/Clash config.
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; }
+  interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; }
   let subSettings = $state<SubSettings | null>(null);
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
@@ -63,11 +64,28 @@
     try {
       await apiFetch('/admin/settings/subscription', {
         method: 'POST',
-        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '', pattern: subSettings.pattern ?? 'off' })
+        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '', pattern: subSettings.pattern ?? 'off', front_domain: subSettings.front_domain ?? '', front_mode: subSettings.front_mode ?? 'none' })
       });
       showToast('Subscription defaults saved', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to save', 'error');
+    }
+  }
+
+  // Fancy wizard: apply a styled theme (sets the name template + fronting model
+  // server-side in one step) together with the operator's camouflage domain.
+  async function applyFancyTheme(theme: FancyTheme) {
+    if (!subSettings) return;
+    try {
+      const res = await apiFetch<{ name_template?: string; front_domain?: string; front_mode?: string }>('/admin/settings/subscription', {
+        method: 'POST',
+        body: JSON.stringify({ fancy_theme: theme.id, front_domain: subSettings.front_domain ?? '' })
+      });
+      subSettings.name_template = res.name_template ?? theme.template;
+      subSettings.front_mode = res.front_mode ?? theme.front;
+      showToast(`Applied theme “${theme.label}” (${theme.front === 'none' ? 'no fronting' : theme.front.toUpperCase()})`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to apply theme', 'error');
     }
   }
 
@@ -273,6 +291,35 @@
     </div>
     <p class="hint">Tokens: {#each (subSettings.name_tokens ?? []) as tk}<code style="margin-right:4px">{tk}</code>{/each} — e.g. <code>{'{FLAG} {NAME} · {NET}'}</code> → <b>🇩🇪 Berlin · ws</b>. Set a country per inbound for the flag.</p>
   </div>
+
+  <div class="card" data-testid="fancy-wizard">
+    <h3>✨ Fancy config wizard</h3>
+    <p class="hint">Set a camouflage domain, pick a styled theme, and every config in the subscription is renamed and fronted behind that domain — the same look Iranian channels ship. Applies to all subscriptions; clear the theme to go back to plain names.</p>
+    <div class="row">
+      <label class="field" style="flex:1;min-width:240px">
+        <span>Camouflage domain <span class="hint" style="font-weight:400">— e.g. aparat.com, taskulu.com</span></span>
+        <input bind:value={subSettings.front_domain} placeholder="aparat.com" data-testid="front-domain" />
+      </label>
+      <label class="field">
+        <span>Fronting model</span>
+        <select bind:value={subSettings.front_mode} data-testid="front-mode" title="How the domain is applied to each config">
+          {#each (subSettings.front_modes ?? ['none','sni','cdn']) as m}<option value={m}>{m === 'none' ? 'None (raw)' : m === 'sni' ? 'SNI + Host camouflage' : 'CDN domain-fronting'}</option>{/each}
+        </select>
+      </label>
+      <button class="primary" data-testid="save-front" onclick={saveSubSettings}>Save domain</button>
+    </div>
+    <p class="hint"><b>SNI + Host</b>: keep the real server address but present the domain as TLS SNI + Host header (works on any server / REALITY). <b>CDN</b>: set only the Host header and route through a Host-aware CDN (plaintext-WS behind a domestic CDN). Picking a theme sets the recommended model automatically.</p>
+    {#if subSettings.fancy_themes && subSettings.fancy_themes.length}
+      <div class="theme-grid">
+        {#each subSettings.fancy_themes as th}
+          <button type="button" class="theme-card" class:active={subSettings.name_template === th.template} data-testid={'theme-' + th.id} onclick={() => applyFancyTheme(th)} title={`${th.label} · ${th.front} · suits ${th.proto}`}>
+            <span class="theme-sample">{th.sample}</span>
+            <span class="theme-meta">{th.label} · <b>{th.front === 'none' ? 'raw' : th.front.toUpperCase()}</b></span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
 {/if}
 
 <div class="card">
@@ -425,4 +472,11 @@
   .uri-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
+  .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+  .theme-card { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; background: #0F1420; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; padding: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+  .theme-card:hover { border-color: rgba(39,209,124,0.5); background: #121a26; }
+  .theme-card.active { border-color: #27D17C; background: rgba(39,209,124,0.10); }
+  .theme-sample { font-size: 14px; color: #fff; word-break: break-word; }
+  .theme-meta { font-size: 11px; color: rgba(255,255,255,0.55); }
+  .theme-meta b { color: #27D17C; font-weight: 600; }
 </style>

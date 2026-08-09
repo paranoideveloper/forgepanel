@@ -572,6 +572,8 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 		return []*model.Node{}
 	}
 	tmpl := s.subNameTemplate()
+	frontDomain := s.subFrontDomain()
+	frontMode := s.subFrontMode()
 	date := time.Now().UTC().Format("2006-01-02")
 	var out []*model.Node
 	for idx, inID := range inboundIDs {
@@ -591,6 +593,10 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 		}
 		s.substituteAddr(n, hostFromCtx)
 		s.applyExportDefaults(n)
+		// Fancy wizard: front every node behind the operator's camouflage domain
+		// (SNI/Host or CDN) before the name is stamped, so {HOST} in a template
+		// reflects the fronting domain the client will actually present.
+		model.ApplyFront(n, frontDomain, frontMode)
 		// Apply the operator's naming template last, when every field it can
 		// interpolate (address, port, protocol, transport) is final. Empty
 		// template ⇒ leave the node's own remark untouched (opt-in).

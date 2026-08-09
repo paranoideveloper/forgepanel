@@ -54,6 +54,23 @@ func (s *Server) subPatternDefault() patternMode {
 	return parsePatternMode(s.db.GetSetting("sub_pattern_default"), patternOff)
 }
 
+// subFrontDomain is the fancy wizard's fronting/camouflage domain applied to
+// every node in the subscription. Empty means no fronting.
+func (s *Server) subFrontDomain() string {
+	if s.db == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.db.GetSetting("sub_front_domain"))
+}
+
+// subFrontMode is how subFrontDomain is applied (none | sni | cdn).
+func (s *Server) subFrontMode() model.FrontMode {
+	if s.db == nil {
+		return model.FrontNone
+	}
+	return model.ParseFrontMode(s.db.GetSetting("sub_front_mode"))
+}
+
 // patternSettingString maps a mode back to its stored form.
 func patternSettingString(m patternMode) string {
 	switch m {
@@ -77,6 +94,12 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 		"name_tokens":    []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
 		"pattern":        patternSettingString(s.subPatternDefault()),
 		"pattern_modes":  []string{"off", "only", "both"},
+		// Fancy-config wizard: the fronting domain + model + the styled theme
+		// catalogue the UI offers.
+		"front_domain": s.subFrontDomain(),
+		"front_mode":   string(s.subFrontMode()),
+		"front_modes":  []string{"none", "sni", "cdn"},
+		"fancy_themes": model.FancyThemes(),
 	})
 }
 
@@ -87,6 +110,12 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		Fragment      *bool   `json:"fragment"`
 		NameTemplate  *string `json:"name_template"`
 		Pattern       *string `json:"pattern"`
+		FrontDomain   *string `json:"front_domain"`
+		FrontMode     *string `json:"front_mode"`
+		// FancyTheme applies a styled preset: it sets name_template to the
+		// theme's template and front_mode to the theme's fronting model in one
+		// step, so the wizard is a single click plus a domain.
+		FancyTheme *string `json:"fancy_theme"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid payload"})
@@ -112,8 +141,31 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	if req.Pattern != nil {
 		_ = s.db.SetSetting("sub_pattern_default", patternSettingString(parsePatternMode(*req.Pattern, patternOff)))
 	}
+	// Applying a theme wins over a raw name_template/front_mode in the same
+	// request, since it is the higher-level intent.
+	if req.FancyTheme != nil {
+		id := strings.TrimSpace(*req.FancyTheme)
+		if id == "" {
+			// An explicit empty theme clears fancy naming back to plain remarks.
+			_ = s.db.SetSetting("sub_name_template", "")
+			_ = s.db.SetSetting("sub_front_mode", string(model.FrontNone))
+		} else if th, ok := model.FancyThemeByID(id); ok {
+			_ = s.db.SetSetting("sub_name_template", th.Template)
+			_ = s.db.SetSetting("sub_front_mode", string(th.Front))
+		} else {
+			c.JSON(400, gin.H{"error": "unknown fancy theme: " + id})
+			return
+		}
+	}
+	if req.FrontDomain != nil {
+		_ = s.db.SetSetting("sub_front_domain", strings.TrimSpace(*req.FrontDomain))
+	}
+	if req.FrontMode != nil {
+		_ = s.db.SetSetting("sub_front_mode", string(model.ParseFrontMode(*req.FrontMode)))
+	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
-	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault()})
+	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault(),
+		"name_template": s.subNameTemplate(), "front_domain": s.subFrontDomain(), "front_mode": string(s.subFrontMode())})
 }
 
 // subFormats are the subscription formats this endpoint can render, listed for
