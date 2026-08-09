@@ -49,7 +49,7 @@
 
   // subscription defaults (routing preset + TLS fragment) applied to every
   // generated sing-box/Xray/Clash config.
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; }
   let subSettings = $state<SubSettings | null>(null);
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
@@ -63,7 +63,7 @@
     try {
       await apiFetch('/admin/settings/subscription', {
         method: 'POST',
-        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment })
+        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '' })
       });
       showToast('Subscription defaults saved', 'success');
     } catch (err: any) {
@@ -258,6 +258,13 @@
       </label>
       <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>Save</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field" style="flex:1;min-width:280px">
+        <span>Config name template <span class="hint" style="font-weight:400">— blank = keep each inbound's own name</span></span>
+        <input bind:value={subSettings.name_template} placeholder="{'{FLAG} {NAME}'}" data-testid="name-template" />
+      </label>
+    </div>
+    <p class="hint">Tokens: {#each (subSettings.name_tokens ?? []) as tk}<code style="margin-right:4px">{tk}</code>{/each} — e.g. <code>{'{FLAG} {NAME} · {NET}'}</code> → <b>🇩🇪 Berlin · ws</b>. Set a country per inbound for the flag.</p>
   </div>
 {/if}
 

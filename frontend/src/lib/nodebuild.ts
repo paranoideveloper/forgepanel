@@ -97,6 +97,9 @@ export function buildNode(
   // common fields
   if (values['remark'] !== undefined && values['remark'] !== '') node.remark = values['remark'];
   if (values['address'] !== undefined && values['address'] !== '') node.address = values['address'];
+  // ISO alpha-2 country, upper-cased, feeds {FLAG}/{COUNTRY} in the sub template.
+  if (values['country'] !== undefined && String(values['country']).trim() !== '')
+    node.country = String(values['country']).trim().toUpperCase();
   const port = coerce('number', values['port']);
   if (port !== undefined) node.port = port;
 

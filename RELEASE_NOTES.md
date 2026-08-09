@@ -1,3 +1,31 @@
+# ForgePanel v1.9.3 — Release Notes
+
+## Feature: node-naming templates ({FLAG} {NAME} {COUNTRY} …)
+
+Every config in a subscription can now be named from a template instead of just
+the inbound's remark — the flag-and-name style clients show in their server list.
+
+- A **Config name template** field (Users → Subscription defaults) with tokens:
+  `{FLAG} {COUNTRY} {NAME} {PROTOCOL} {NET} {TLS} {PORT} {HOST} {USER} {NUM} {DATE}`.
+  e.g. `{FLAG} {NAME} · {NET}` → **🇩🇪 Berlin · ws**.
+- A **Country** field per inbound (ISO 2-letter, e.g. `DE`) drives `{FLAG}` and
+  `{COUNTRY}` — the flag is built from the code with no geoip database or network
+  lookup (Regional Indicator emoji), so it is instant and offline.
+- **Opt-in and safe**: a blank template leaves every node's own remark exactly as
+  before; unknown tokens are left verbatim so a typo is visible, and an empty
+  flag never leaves a stray gap.
+
+The template is applied when the subscription is built, after every field it can
+interpolate (address, port, protocol, transport) is final, so the names are
+always accurate. The flag rides in the link's `#fragment` percent-encoded — the
+standard form every client decodes back to the emoji.
+
+Verified: `{FLAG} {NAME} · {PROTOCOL}` on a `DE` inbound renders **🇩🇪 Berlin ·
+vless** in the served subscription; model + end-to-end tests cover the flag
+mapping, token expansion, and the opt-in default.
+
+---
+
 # ForgePanel v1.9.2 — Release Notes
 
 ## Feature: QR codes on the subscription landing page

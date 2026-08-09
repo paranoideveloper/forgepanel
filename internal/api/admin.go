@@ -571,8 +571,10 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 	if err != nil {
 		return []*model.Node{}
 	}
+	tmpl := s.subNameTemplate()
+	date := time.Now().UTC().Format("2006-01-02")
 	var out []*model.Node
-	for _, inID := range inboundIDs {
+	for idx, inID := range inboundIDs {
 		in, err := s.db.InboundByID(inID)
 		if err != nil || !in.Enabled {
 			continue
@@ -589,6 +591,18 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 		}
 		s.substituteAddr(n, hostFromCtx)
 		s.applyExportDefaults(n)
+		// Apply the operator's naming template last, when every field it can
+		// interpolate (address, port, protocol, transport) is final. Empty
+		// template ⇒ leave the node's own remark untouched (opt-in).
+		if tmpl != "" {
+			base := in.Remark
+			if base == "" {
+				base = n.Remark
+			}
+			if name := model.ExpandNameTemplate(tmpl, model.NameFieldsFromNode(n, base, u.Username, idx+1, date)); name != "" {
+				n.Remark = name
+			}
+		}
 		out = append(out, n)
 	}
 	return out

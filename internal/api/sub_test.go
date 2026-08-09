@@ -615,3 +615,43 @@ func findXray() string {
 	}
 	return ""
 }
+
+// TestSubscriptionNameTemplate: a set naming template rewrites every node's
+// remark with the interpolated values (flag from the inbound's country, name,
+// protocol …); an unset template leaves the node's own remark untouched.
+func TestSubscriptionNameTemplate(t *testing.T) {
+	s := dbServerT(t)
+	n := &model.Node{Protocol: model.ProtoVLESS, Address: "203.0.113.9", Port: 443,
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Remark: "Berlin", Country: "DE"}
+	in, err := s.db.CreateInbound(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &store.Group{Name: "g", InboundIDs: []uint{in.ID}}
+	if err := s.db.CreateGroup(g); err != nil {
+		t.Fatal(err)
+	}
+	u := &store.User{Username: "bob", GroupID: g.ID, SubToken: "toktoktoktok",
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Status: store.StatusActive}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+
+	// No template ⇒ the inbound's own remark is preserved.
+	nodes := s.subscriptionNodes(u.SubToken, "vpn.example.com")
+	if len(nodes) != 1 || nodes[0].Remark != "Berlin" {
+		t.Fatalf("without a template, remark should be untouched: %+v", nodes)
+	}
+
+	// With a template ⇒ interpolated, flag included.
+	if err := s.db.SetSetting("sub_name_template", "{FLAG} {NAME} · {PROTOCOL}"); err != nil {
+		t.Fatal(err)
+	}
+	nodes = s.subscriptionNodes(u.SubToken, "vpn.example.com")
+	if len(nodes) != 1 {
+		t.Fatalf("want 1 node, got %d", len(nodes))
+	}
+	if want := "🇩🇪 Berlin · vless"; nodes[0].Remark != want {
+		t.Fatalf("templated remark = %q, want %q", nodes[0].Remark, want)
+	}
+}

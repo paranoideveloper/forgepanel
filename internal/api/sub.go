@@ -35,6 +35,16 @@ func (s *Server) subFragmentDefault() bool {
 	return s.db != nil && s.db.GetSetting("sub_fragment_default") == "1"
 }
 
+// subNameTemplate is the operator's node-naming template, e.g. "{FLAG} {NAME}".
+// Empty (the default) means "leave each node's own remark untouched", so the
+// feature is strictly opt-in and changes nothing until a template is set.
+func (s *Server) subNameTemplate() string {
+	if s.db == nil {
+		return ""
+	}
+	return s.db.GetSetting("sub_name_template")
+}
+
 // handleGetSubSettings returns the operator's subscription defaults (routing
 // preset + fragment) and the selectable presets for the UI.
 func (s *Server) handleGetSubSettings(c *gin.Context) {
@@ -42,6 +52,8 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 		"routing_preset": s.subRoutingPreset(),
 		"fragment":       s.subFragmentDefault(),
 		"presets":        []string{"iran", "full", "block", "off"},
+		"name_template":  s.subNameTemplate(),
+		"name_tokens":    []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
 	})
 }
 
@@ -50,6 +62,7 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	var req struct {
 		RoutingPreset *string `json:"routing_preset"`
 		Fragment      *bool   `json:"fragment"`
+		NameTemplate  *string `json:"name_template"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid payload"})
@@ -68,6 +81,9 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 			v = "1"
 		}
 		_ = s.db.SetSetting("sub_fragment_default", v)
+	}
+	if req.NameTemplate != nil {
+		_ = s.db.SetSetting("sub_name_template", strings.TrimSpace(*req.NameTemplate))
 	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
 	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault()})

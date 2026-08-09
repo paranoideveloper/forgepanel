@@ -443,6 +443,10 @@ type Node struct {
 	Protocol Protocol `json:"protocol"`
 	Address  string   `json:"address"`
 	Port     int      `json:"port"`
+	// Country is an optional ISO-3166 alpha-2 code (e.g. "DE") the operator sets
+	// per inbound. It feeds {FLAG}/{COUNTRY} in the subscription naming template.
+	// It is descriptive metadata only — Normalize never touches it.
+	Country string `json:"country,omitempty"`
 
 	// Domain is the single source of truth an operator sets once; it CASCADES to
 	// the SNI, the transport Host / gRPC authority, the exported client address

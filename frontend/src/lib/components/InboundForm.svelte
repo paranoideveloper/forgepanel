@@ -15,7 +15,7 @@
   let proto = $state(initialProto);
   let transport = $state('tcp');
   let security = $state('reality');
-  let values = $state<Record<string, any>>({ remark: '', port: 443, address: '' });
+  let values = $state<Record<string, any>>({ remark: '', port: 443, address: '', country: '' });
   let saving = $state(false);
   let loadError = $state('');
 
@@ -50,6 +50,7 @@
     values['remark'] = node.remark ?? '';
     values['port'] = node.port ?? 443;
     values['address'] = node.address ?? '';
+    values['country'] = node.country ?? '';
     for (const sec of fieldsFor(schema, proto, transport, security)) {
       for (const f of sec.fields) {
         const v = getPath(node, f.key);
@@ -210,6 +211,10 @@
         <div class="fg">
           <label for="address">Address (optional)</label>
           <input id="address" bind:value={values['address']} oninput={schedulePreview} placeholder="auto = panel host" />
+        </div>
+        <div class="fg">
+          <label for="country">Country</label>
+          <input id="country" data-testid="field-country" bind:value={values['country']} oninput={schedulePreview} maxlength="2" placeholder="e.g. DE" title="ISO 2-letter code — the flag/name for the subscription template" style="text-transform:uppercase" />
         </div>
       </div>
 
