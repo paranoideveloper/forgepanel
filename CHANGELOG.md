@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.14.0 — CF-CIDR clean-IP randomizer + proxyIP relay
+
+### Added
+- **CF-CIDR clean-IP randomizer** — each clean-IP refresh now mints fresh random
+  Cloudflare edge IPs (default 10, `cleanIPRandomCount`) from the ranges that
+  actually serve HTTP (104.16/13, 104.24/14, 162.159/16, 172.64/13,
+  188.114.96/20). Cloudflare is anycast, so any live edge IP fronts the Worker —
+  a blocklist of yesterday's seed hostnames does nothing against a literal picked
+  at random today. ~30-50% of picks are live; the client's best-ping group keeps
+  the winners. Verified: a minted literal fronts workers.dev and tunnels
+  end-to-end.
+- **proxyIP SNI-relay docs** (`docs/PROXYIP_RELAY.md`) — the reliable way to reach
+  Cloudflare-hosted destinations the edge can't `connect()` to directly: run a
+  gost `sni://:PORT` relay and set `proxyIPMode: 'proxyip'`. Verified live
+  (`cloudflare.com` 200 in ~0.5s through the edge, vs. a hang without it) — the
+  dependable alternative to the flaky public NAT64.
+
 ## v1.13.1 — NAT64 retry uses the best prefix
 
 ### Fixed
