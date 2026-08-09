@@ -17,7 +17,7 @@ import {
   getJSON, putJSON,
 } from '../config/store';
 import { loadCleanIPs, refreshCleanIPs, isValidCleanEntry } from '../cleanip/list';
-import { refreshExternalSubs } from '../edge/external';
+import { refreshExternalSubs, loadExternalNodes } from '../edge/external';
 import { probeCleanIP } from '../cleanip/probe';
 import { validateConfig } from '../config/validate';
 import { scanWarpEndpoints } from '../warp/scanner';
@@ -93,20 +93,30 @@ export async function handlePanelAPI(
     case 'status': {
       const clean = await loadCleanIPs(env);
       const feed = (await getJSON<CanonicalFeed>(env, KV_KEYS.feed)) ?? emptyFeed();
+      const external = await loadExternalNodes(env);
       const creds = credentials(env);
+      const base = `${ctx.origin}/${secrets.securePath}`;
       return respond(true, HttpStatus.OK, undefined, {
         version: VERSION,
         host: ctx.host,
-        panel: `${ctx.origin}/${secrets.securePath}/panel`,
-        dohEndpoint: `${ctx.origin}/${secrets.securePath}/dns-query`,
-        subscriptionTemplate: `${ctx.origin}/${secrets.securePath}/sub/<sub_token>`,
-        feedPushEndpoint: `${ctx.origin}/${secrets.securePath}/api/feed`,
+        panel: `${base}/panel`,
+        dohEndpoint: `${base}/dns-query`,
+        subscriptionTemplate: `${base}/sub/<sub_token>`,
+        // The share-page and its tokenless (shared) form, plus the DPI-fallback
+        // configs — the links an operator actually hands out.
+        landingShared: `${base}/import/`,
+        landingTemplate: `${base}/import/<sub_token>`,
+        subShared: `${base}/sub/`,
+        serverless: `${base}/sub/?serverless=cf`,
+        smartFragment: `${base}/sub/?smartfrag=1`,
+        feedPushEndpoint: `${base}/api/feed`,
         feedPushToken: secrets.feedPushToken,
         securePathRotatedAt: secrets.rotatedAt,
         backendMode: ctx.cfg.backend.enabled ? ctx.cfg.backend.url : 'off',
         users: feed.users.length,
         feedGeneratedAt: feed.generated_at,
         cleanIPs: { count: clean.entries.length, updatedAt: clean.updatedAt },
+        externalSubs: { count: external.length, sources: ctx.cfg.externalSubs.length },
         deployment: creds
           ? await deployStatus(creds, env.CF_PAGES === '1' ? 'pages' : 'workers', ctx.host.split('.')[0])
           : null,

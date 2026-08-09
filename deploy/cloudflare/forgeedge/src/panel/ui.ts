@@ -63,6 +63,23 @@ code{background:#0b1220;padding:.1em .35em;border-radius:4px}
 </section>
 
 <section>
+  <h2>Share with family</h2>
+  <p class="mut">Send the import page — they open it and tap their app. Append a per-user token to the path for a personal link; the bare form is the shared subscription.</p>
+  <label>Import page (open on phone → one-tap + QR)</label>
+  <div class="actions"><input id="shareLanding" readonly onclick="this.select()" style="flex:1"><button class="ghost" data-copy="shareLanding">Copy</button></div>
+  <label style="margin-top:.6rem">Subscription URL</label>
+  <div class="actions"><input id="shareSub" readonly onclick="this.select()" style="flex:1"><button class="ghost" data-copy="shareSub">Copy</button></div>
+  <p class="mut" style="margin-top:.6rem">DPI fallbacks (when every proxy IP is blocked): <a id="shareServerless" target="_blank">serverless</a> · <a id="shareSmart" target="_blank">smart-fragment</a></p>
+</section>
+
+<section>
+  <h2>External subscriptions</h2>
+  <p class="mut">Merge other subscription URLs (your own fleet subs) into this one — edit <code>externalSubs</code> in the config below, then refresh. <span id="extCount">—</span></p>
+  <div class="actions"><button class="ghost" id="doRefreshExt">Refresh external subs</button></div>
+  <pre id="extOut" hidden></pre>
+</section>
+
+<section>
   <h2>Configuration</h2>
   <p class="mut">The full config as JSON. Everything lives in KV — there are no environment variables to edit in the dashboard.</p>
   <textarea id="cfg" spellcheck="false" style="min-height:22rem"></textarea>
@@ -126,6 +143,12 @@ async function api(path, opts) {
 async function loadAll() {
   const st = await api('/status');
   $('endpoints').textContent = JSON.stringify(st, null, 2);
+  if (st.landingShared) $('shareLanding').value = st.landingShared;
+  if (st.subShared) $('shareSub').value = st.subShared;
+  if (st.serverless) $('shareServerless').href = st.serverless;
+  if (st.smartFragment) $('shareSmart').href = st.smartFragment;
+  if (st.externalSubs) $('extCount').textContent =
+    st.externalSubs.count + ' configs merged from ' + st.externalSubs.sources + ' source(s).';
   const cfg = await api('/config');
   $('cfg').value = JSON.stringify(cfg, null, 2);
   $('deployOut').textContent = JSON.stringify(st.deployment || { note: 'no Cloudflare credential bound; self-management disabled' }, null, 2);
@@ -174,6 +197,22 @@ $('doRefreshClean').onclick = async () => {
     $('cleanOut').textContent = JSON.stringify(body, null, 2);
   } catch (e) { toast(e.message, true); }
 };
+$('doRefreshExt').onclick = async () => {
+  try {
+    const body = await api('/external/refresh', { method: 'POST' });
+    $('extOut').hidden = false;
+    $('extOut').textContent = JSON.stringify(body, null, 2);
+    if (body && typeof body.count === 'number') $('extCount').textContent = body.count + ' configs merged from ' + (body.sources ? body.sources.length : 0) + ' source(s).';
+    toast('External subs refreshed');
+  } catch (e) { toast(e.message, true); }
+};
+for (const b of document.querySelectorAll('[data-copy]')) {
+  b.addEventListener('click', async () => {
+    const el = $(b.getAttribute('data-copy')); el.select();
+    try { await navigator.clipboard.writeText(el.value); } catch (e) { document.execCommand('copy'); }
+    const t = b.textContent; b.textContent = 'Copied'; setTimeout(() => b.textContent = t, 1200);
+  });
+}
 $('doScan').onclick = async () => {
   try {
     const body = await api('/warp/scan', { method: 'POST' });
