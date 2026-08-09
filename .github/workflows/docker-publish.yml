@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Git tag to build and publish (e.g. v1.7.0)'
+        description: 'Git tag to build and publish (e.g. v1.9.6)'
         required: true
 
 permissions:

@@ -22,6 +22,28 @@ setting on restart or upgrade.
 | `FORGEPANEL_API_PORT` | `2054` | REST API listener port |
 | `FORGEPANEL_DNS_PORT` | `53` | ForgeDNS authoritative listener port |
 | `FORGEPANEL_ADMIN_USER` | `admin` | initial administrator username |
+| `FORGEPANEL_TELEGRAM_TOKEN` | — | Telegram bot token (from @BotFather); enables the bot |
+| `FORGEPANEL_TELEGRAM_ADMINS` | — | comma-separated Telegram chat IDs allowed to run admin commands |
+
+## Telegram bot
+
+Set `FORGEPANEL_TELEGRAM_TOKEN` and `FORGEPANEL_TELEGRAM_ADMINS` (then restart) to
+manage the panel from Telegram. Any user can run `/sub <token>` to get their
+subscription link and `/help`. Admins (the chat IDs above) additionally get:
+
+| Command | Action |
+|---|---|
+| `/stats` | inbound / user / group counts |
+| `/user <name>` | status + traffic |
+| `/adduser <name>` | create a user (returns its sub token) |
+| `/deluser <name>` | delete a user |
+| `/enable <name>` · `/disable <name>` | cut a user off / restore |
+| `/reset <name>` | zero traffic (lifts an over-quota cap) |
+| `/limit <name> <GB>` | set the data cap (0 = unlimited) |
+| `/extend <name> <days>` | extend expiry |
+
+Every mutation reloads the running cores immediately, so a disabled or deleted
+user stops being served at once — the same behaviour as an edit from the web panel.
 
 Secrets (master key and compatibility metadata) are generated on first boot in
 `<data>/secrets.json` and never leave the machine. The master key derives the

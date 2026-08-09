@@ -41,6 +41,25 @@ Base: `https://<panel>`. Admin endpoints require `Authorization: Bearer <access>
 | POST | `/api/admin/forgedns/zones/:id/toggle` | enable/disable a zone |
 | GET | `/api/admin/forgedns/zones/:id/{sessions,client}` | live sessions / client config |
 | GET | `/api/admin/forgedns/status` | listener state + served zones |
+| GET/POST | `/api/admin/settings/subscription` | subscription defaults: routing preset, TLS fragment, and the node-naming template (`{FLAG} {NAME} {COUNTRY} {PROTOCOL} {NET} {TLS} {PORT} {HOST} {USER} {NUM} {DATE}`) |
+| GET | `/api/admin/geoip?host=<addr>` | resolve a host (or the panel's own IP) to `{country_code, flag}` for the inbound Country field |
+
+### ForgeEdge (Cloudflare Worker)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/admin/edge/bundle` | whether the worker bundle is embedded (`{embedded, bytes}`) |
+| GET | `/api/admin/edge/token-url` | a Cloudflare API-token page pre-filled with the exact scopes |
+| POST | `/api/admin/edge/deploy` | one-click deploy the embedded worker (`{api_token, account_id, name?}`) |
+| DELETE | `/api/admin/edge/deploy/:name` | delete a worker (`?api_token=&account_id=`) |
+| GET/POST | `/api/admin/edge/deployments[/:id]` | list / register / manage edge deployments |
+| POST | `/api/admin/edge/deployments/:id/push` | push the current feed to an edge |
+| POST | `/api/admin/edge/deployments/:id/warp` | register free WARP + AmneziaWG into the edge |
+| GET | `/api/admin/edge/deployments/:id/warp.conf[?pro=1]` | download the WARP / Amnezia `.conf` |
+
+The Telegram bot (enable with `FORGEPANEL_TELEGRAM_TOKEN` + `FORGEPANEL_TELEGRAM_ADMINS`)
+offers the same user management from chat: `/adduser`, `/deluser`, `/enable`,
+`/disable`, `/reset`, `/limit <GB>`, `/extend <days>` (admin), and `/sub <token>`
+for any user. See [CONFIGURATION.md](CONFIGURATION.md#telegram-bot).
 
 ## Node agent (token-auth)
 | Method | Path | Purpose |
@@ -57,6 +76,12 @@ An explicit suffix always wins over User-Agent sniffing. Aliases: `singbox`/`sb`
 for `sing-box`, `clash-meta` for `clash`, `base64`/`v2rayng` for `v2ray`,
 `raw`/`uri` for `links`. An explicit request for anything else is a `404` naming
 the supported formats, rather than silently returning a different one.
+
+Opening `/sub/:token` in a **web browser** (browser User-Agent + `text/html`
+Accept, no proxy-client token) returns a friendly **landing page**: a usage /
+expiry summary and, per client (v2rayNG, Hiddify, Streisand, Clash, sing-box), a
+scannable **QR** plus a one-tap **Import** deep-link. Proxy clients are never
+affected; `?raw=1` forces the raw config body.
 
 Every subscription response carries `Vary: User-Agent` and
 `Cache-Control: no-store`: the body varies on a request header while the URL

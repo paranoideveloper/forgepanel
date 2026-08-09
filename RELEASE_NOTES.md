@@ -1,3 +1,26 @@
+# ForgePanel v1.9.7 — Release Notes
+
+## Docs & repo hygiene (release fully in sync with main)
+
+- **Fixed the install-command version.** The copy-paste install snippets in the
+  README and `docs/INSTALL.md` were pinned to an old `v1.8.0` (each release only
+  rewrote the *previous* version, so they never advanced). They now track the
+  current release.
+- **Documented everything from the 1.9 line.** `docs/API.md` gains the ForgeEdge
+  (`/api/admin/edge/*`), geoip (`/api/admin/geoip`) and subscription-settings
+  endpoints, and describes the browser subscription landing page. `docs/CONFIGURATION.md`
+  gains a **Telegram bot** section (env vars + every admin command). The README
+  feature list now reflects per-user Shadowsocks, online/last-seen, the QR sub
+  page, naming templates + geoip, ForgeEdge WARP/AmneziaWG, and Telegram management.
+- **Re-synced the tracked `install.sh.sha256`** with the current `install.sh`
+  (it had drifted after a shellcheck fix; the released asset was always
+  regenerated correctly, so downloads were never affected).
+
+No code or binary behaviour change — this release only brings the docs, the
+install instructions and the tag in line with `main`.
+
+---
+
 # ForgePanel v1.9.6 — Release Notes
 
 ## Maintenance: green CI + docs, release in sync with main
