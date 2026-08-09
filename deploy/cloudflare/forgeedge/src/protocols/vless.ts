@@ -12,7 +12,7 @@
 import { getGlobalConfig } from '../config/runtime';
 import { parseVlessHeader, vlessResponseHeader } from './framing';
 import { handleTCPOutbound } from './outbound';
-import { readableFromWebSocket, safeCloseSocket, safeCloseWebSocket, WS_OPEN, concatBytes } from './ws';
+import { readableFromWebSocket, safeCloseSocket, WS_OPEN, concatBytes } from './ws';
 import type { OutboundOptions } from './outbound';
 
 export interface VlessHandlerOptions {
@@ -84,9 +84,14 @@ export function vlessOverWS(request: Request, opts: VlessHandlerOptions): Respon
   });
 
   readable.pipeTo(sink).catch((e) => {
-    log('pipeTo error', String(e));
-    safeCloseSocket(remote.value);
-    safeCloseWebSocket(server);
+    // The client→remote direction ending is NOT a reason to tear down the
+    // WebSocket: the remote→ws pump may still be flushing the response, and
+    // force-closing the socket here truncates it (curl sees "empty reply",
+    // browsers see ERR_CONTENT_LENGTH_MISMATCH). This mirrors the proven
+    // edgetunnel flow, which lets the client close the WebSocket once it has
+    // read the response; the remote socket is reclaimed by the sink's close()
+    // handler or the pump's own error path.
+    log('client->remote pipe ended', String(e));
   });
 
   return new Response(null, { status: 101, webSocket: client });

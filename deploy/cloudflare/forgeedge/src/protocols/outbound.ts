@@ -38,6 +38,11 @@ export async function handleTCPOutbound(
   const connectAndWrite = async (addr: string, p: number): Promise<Socket> => {
     const sock = connect({ hostname: addr, port: p });
     remote.value = sock;
+    // When the client disconnects, `sock.closed` rejects with "Network
+    // connection lost". That is the normal end of a proxied connection, not an
+    // error; swallow it so it does not surface as an unhandled exception in the
+    // Worker's error metrics. The retry path attaches its own handler too.
+    sock.closed.catch(() => {});
     log(`connected to ${addr}:${p}`);
     const writer = sock.writable.getWriter();
     await writer.write(firstPayload);
@@ -66,7 +71,16 @@ export async function handleTCPOutbound(
 
   try {
     const sock = await connectAndWrite(address, port);
-    await pumpToWebSocket(sock, ws, responseHeader, retry, log);
+    // Do NOT await the remote→ws relay here. This function is awaited from inside
+    // the ws→remote sink.write() of the FIRST client chunk; awaiting the full
+    // relay (which only resolves when the remote closes) blocks every subsequent
+    // client→remote chunk, so any multi-round-trip protocol — a TLS handshake to
+    // the destination, i.e. nearly all real traffic — deadlocks and the client
+    // sees "unexpected eof". Run it in the background; the open WebSocket keeps
+    // the isolate alive. remote.value is already set, so later chunks flow
+    // straight to the socket.
+    void pumpToWebSocket(sock, ws, responseHeader, retry, log)
+      .catch((e) => log('relay error', String(e)));
   } catch (e) {
     log('connection failed', String(e));
     ws.close(1011, 'connection failed');
