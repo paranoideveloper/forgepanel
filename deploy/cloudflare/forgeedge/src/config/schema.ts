@@ -264,9 +264,18 @@ export function defaultConfig(): EdgeConfig {
     customCdnHost: '',
     customCdnSni: '',
 
+    // proxyIP/NAT64 is the escape hatch for the CF→CF refusal — a Worker's
+    // connect() to a Cloudflare IP is refused, so Cloudflare-hosted destinations
+    // are otherwise unreachable through the edge. It stays OFF by default on
+    // purpose: measured live, the public NAT64 gateways below answer only ~25%
+    // of the time and hang ~19s (a socket timeout) the rest, which is worse for
+    // the user than a fast failure. Turn it on when you have a RELIABLE gateway
+    // or, better, point `proxyIPs` at an SNI-routing relay you run on your own
+    // fleet (`proxyIPMode: 'proxyip'`). When NAT64 IS enabled the retry uses the
+    // FIRST prefix, so the list is ordered best-first.
     proxyIPMode: 'off',
     proxyIPs: [],
-    nat64Prefixes: ['[2602:fc59:b0:64::]', '[2602:fc59:11:64::]', '[2a02:898:146:64::]'],
+    nat64Prefixes: ['[2602:fc59:11:64::]', '[2602:fc59:b0:64::]', '[2a02:898:146:64::]'],
     backend: { enabled: false, url: '', token: '', fallbackToEdge: true },
     chainProxy: '',
 

@@ -47,7 +47,10 @@ export async function retryTarget(
   }
 
   if (opts.proxyIPMode === 'nat64') {
-    const prefix = pick(opts.nat64Prefixes);
+    // Prefer the FIRST prefix rather than a random one: public NAT64 gateways
+    // vary wildly in health, so the operator orders the list best-first and a
+    // random pick would land on a dead gateway most of the time (a ~19s hang).
+    const prefix = opts.nat64Prefixes[0];
     if (!prefix) return null;
     let v4 = address;
     if (!isIPv4(address)) {

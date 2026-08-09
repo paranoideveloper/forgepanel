@@ -80,6 +80,15 @@ describe('outbound retry strategy', () => {
   test('mode "nat64" with no prefixes yields null', async () => {
     expect(await retryTarget('1.2.3.4', 443, { ...base, proxyIPMode: 'nat64', nat64Prefixes: [] })).toBeNull();
   });
+
+  test('mode "nat64" uses the FIRST prefix, not a random one (best-first ordering)', async () => {
+    const prefixes = ['[2602:fc59:11:64::]', '[2602:fc59:b0:64::]', '[2a02:898:146:64::]'];
+    // Deterministic across repeats: always the first prefix's mapping.
+    for (let i = 0; i < 5; i++) {
+      const t = await retryTarget('1.2.3.4', 443, { ...base, proxyIPMode: 'nat64', nat64Prefixes: prefixes });
+      expect(t).toEqual({ address: '[2602:fc59:11:64::0102:0304]', port: 443 });
+    }
+  });
 });
 
 describe('WARP endpoint scanner', () => {
