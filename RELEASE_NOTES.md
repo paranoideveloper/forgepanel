@@ -1,3 +1,28 @@
+# ForgePanel v1.9.2 — Release Notes
+
+## Feature: QR codes on the subscription landing page
+
+Opening your subscription link in a browser already showed a friendly page with
+per-client import buttons. It now shows a **scannable QR code on every client
+card** — the natural way to import on a phone: open your VPN app, choose “add
+subscription / scan QR”, and point the camera at the code for your app.
+
+- One QR per client (v2rayNG/NekoBox, Hiddify, Streisand, Clash/Mihomo,
+  sing-box, Xray JSON), each encoding that app's exact subscription link, so a
+  scan imports the right format.
+- Added **Streisand** one-tap import; kept Hiddify / Clash / sing-box deep-links.
+- A short **Persian** help line for family who prefer Farsi.
+
+The QR is a self-contained inline SVG rendered server-side — crisp at any size,
+no client-side library, no external requests. Verified end-to-end: the QR the
+server emits **decodes back to the exact subscription URL** (checked with a real
+QR decoder), and every client card carries one.
+
+Proxy clients are unaffected — the page is served only to a real browser (browser
+User-Agent + `text/html` Accept + no proxy-client token); `?raw=1` opts out.
+
+---
+
 # ForgePanel v1.9.1 — Release Notes
 
 ## Feature: online / last-seen status per user

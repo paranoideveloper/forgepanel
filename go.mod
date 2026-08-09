@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/miekg/dns v1.1.62
 	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 	golang.org/x/term v0.44.0

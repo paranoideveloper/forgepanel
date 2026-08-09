@@ -62,6 +62,32 @@ func TestRawQueryOptsOutOfLandingPage(t *testing.T) {
 	}
 }
 
+// TestSubLandingPageQRAndClients: every client card carries a scannable QR (the
+// mobile import path), and the deep-links for the apps the family uses are
+// present, including a Persian help line.
+func TestSubLandingPageQRAndClients(t *testing.T) {
+	html := string(subLandingPage("https://vpn.example.com/sub/abc123", "upload=0; download=536870912; total=10737418240; expire=1767225600"))
+	for _, want := range []string{
+		"of 10.0 GB",                              // usage summary (512 MB of 10 GB)
+		"<svg",                                     // QR codes present
+		"streisand://import/",                      // Streisand deep-link (added)
+		"hiddify://import/",                        // Hiddify deep-link
+		`lang="fa"`,                                // Persian help line
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("landing page missing %q", want)
+		}
+	}
+	// One QR per client card (6 cards).
+	if n := strings.Count(html, "<svg"); n < 6 {
+		t.Fatalf("expected a QR per client card (>=6 svgs), got %d", n)
+	}
+	// A QR must carry real modules, not be an empty frame.
+	if svg := qrSVG("https://vpn.example.com/sub/abc123"); !strings.Contains(svg, `<path fill="#000"`) || len(svg) < 200 {
+		t.Fatalf("qrSVG produced no modules: %q", svg)
+	}
+}
+
 func TestParseUserinfoAndHumanBytes(t *testing.T) {
 	used, total, expire := parseUserinfo("upload=0; download=1048576; total=2097152; expire=1000")
 	if used != 1048576 || total != 2097152 || expire != 1000 {

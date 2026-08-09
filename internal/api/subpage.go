@@ -9,7 +9,33 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	qrcode "github.com/skip2/go-qrcode"
 )
+
+// qrSVG renders content as a self-contained, scalable SVG QR code (black modules
+// on white, quiet zone included). SVG keeps the page tiny and crisp at any size
+// with no client-side library — the phone's VPN app scans it to import. Returns
+// "" on failure so a card simply shows no QR rather than breaking the page.
+func qrSVG(content string) string {
+	q, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		return ""
+	}
+	bm := q.Bitmap()
+	n := len(bm)
+	var b strings.Builder
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" shape-rendering="crispEdges" width="150" height="150">`, n, n)
+	b.WriteString(`<rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="`)
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			if bm[y][x] {
+				fmt.Fprintf(&b, "M%d %dh1v1h-1z", x, y)
+			}
+		}
+	}
+	b.WriteString(`"/></svg>`)
+	return b.String()
+}
 
 // hostSubBase builds the absolute subscription URL (no format suffix) from the
 // incoming request, so the landing page's links point back at this exact host and
@@ -107,14 +133,16 @@ func subLandingPage(base, userinfo string) []byte {
 	singbox := base + "/sing-box"
 	xray := base + "/xray"
 
-	// (title, subtitle, import-deep-link-or-empty, copy-url)
+	// (title, subtitle, import-deep-link-or-empty, copy-url). The QR always
+	// encodes the copy URL — the raw subscription link a client's "scan QR to
+	// add" imports — so scanning gives that app the right format.
 	cards := []struct{ name, sub, deep, copy string }{
-		{"Clash / Mihomo", "Clash Meta, FlClash, Stash", "clash://install-config?url=" + enc(clash) + "&name=ForgePanel", clash},
-		{"sing-box", "sing-box, SFA, SFI", "sing-box://import-remote-profile?url=" + enc(singbox), singbox},
+		{"v2rayNG / NekoBox", "v2rayNG, NekoBox, v2rayN, V2Box", "", v2ray},
 		{"Hiddify", "Hiddify Next", "hiddify://import/" + enc(v2ray), v2ray},
-		{"v2rayNG / NekoBox", "v2rayNG, NekoBox, v2rayN", "", v2ray},
+		{"Streisand", "Streisand (iOS/macOS)", "streisand://import/" + enc(v2ray), v2ray},
+		{"Clash / Mihomo", "Clash Meta, FlClash, Stash", "clash://install-config?url=" + enc(clash) + "&name=ForgePanel", clash},
+		{"sing-box", "sing-box, SFA, SFI, Karing", "sing-box://import-remote-profile?url=" + enc(singbox), singbox},
 		{"Xray JSON", "clients that import a raw Xray config", "", xray},
-		{"Base64 (universal)", "Shadowrocket, Streisand, any V2Ray app", "", v2ray},
 	}
 
 	var b strings.Builder
@@ -130,10 +158,12 @@ h1{font-size:20px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
 .usage{background:#141A24;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px 18px;margin:18px 0}
 .usage .row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
-.card{background:#141A24;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px}
+.card{background:#141A24;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;display:flex;flex-direction:column;align-items:center;text-align:center}
 .card h3{margin:0 0 2px;font-size:15px}
 .card p{margin:0 0 12px;font-size:12px;color:rgba(255,255,255,.5)}
-.btns{display:flex;gap:8px;flex-wrap:wrap}
+.qr{background:#fff;border-radius:10px;padding:8px;line-height:0;margin:0 0 12px}
+.qr svg{display:block;width:150px;height:150px}
+.btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 a.btn,button.btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:700;font-size:13px;padding:9px 12px;border-radius:9px;text-decoration:none;display:inline-block}
 .btn.primary{background:#FF7A1A;color:#1a1204}
 .btn.ghost{background:#1A2230;color:#fff;border:1px solid rgba(255,255,255,.1)}
@@ -144,7 +174,12 @@ code{background:#0F1420;padding:2px 6px;border-radius:6px;font-size:12px}
 	b.WriteString(`<div class="usage"><div class="row"><span>` + html.EscapeString(usage) + `</span><span class="muted">` + html.EscapeString(expiry) + `</span></div></div>`)
 	b.WriteString(`<div class="grid">`)
 	for _, c := range cards {
-		b.WriteString(`<div class="card"><h3>` + html.EscapeString(c.name) + `</h3><p>` + html.EscapeString(c.sub) + `</p><div class="btns">`)
+		b.WriteString(`<div class="card"><h3>` + html.EscapeString(c.name) + `</h3><p>` + html.EscapeString(c.sub) + `</p>`)
+		// The QR encodes the raw sub link — scan it inside the app's "add by QR".
+		if svg := qrSVG(c.copy); svg != "" {
+			b.WriteString(`<div class="qr" title="Scan in your VPN app to import">` + svg + `</div>`)
+		}
+		b.WriteString(`<div class="btns">`)
 		if c.deep != "" {
 			b.WriteString(`<a class="btn primary" href="` + html.EscapeString(c.deep) + `">Import</a>`)
 		}
@@ -152,7 +187,8 @@ code{background:#0F1420;padding:2px 6px;border-radius:6px;font-size:12px}
 		b.WriteString(`</div></div>`)
 	}
 	b.WriteString(`</div>`)
-	b.WriteString(`<p class="tip">Import opens your VPN app directly. If it doesn't, tap <b>Copy link</b> and paste it into your client's “add subscription”. Your link is private — do not share it.</p>`)
+	b.WriteString(`<p class="tip">On your phone: open your VPN app, choose “add subscription / import from QR”, and scan the code for your app. On a computer: tap <b>Import</b> to open the app, or <b>Copy link</b> and paste it in. Your link is private — do not share it.</p>`)
+	b.WriteString(`<p class="tip" dir="rtl" lang="fa">در گوشی: برنامهٔ وی‌پی‌ان را باز کنید، گزینهٔ افزودن اشتراک یا اسکن QR را بزنید و کد مربوط به برنامهٔ خود را اسکن کنید. این لینک خصوصی است؛ آن را با کسی به اشتراک نگذارید.</p>`)
 	b.WriteString(`<script>
 document.querySelectorAll('button[data-copy]').forEach(function(el){
   el.addEventListener('click',function(){
