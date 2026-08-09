@@ -26,7 +26,10 @@ export interface WarpAccount {
 export interface WarpKeyPair { publicKey: string; privateKey: string }
 
 export async function generateWarpKeys(): Promise<WarpKeyPair> {
-  const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']) as CryptoKeyPair;
+  // generateKey's typed overloads return CryptoKey | CryptoKeyPair; X25519 is an
+  // asymmetric algorithm so it is always a pair at runtime. Cast through unknown
+  // (what TS asks for) rather than the direct, rejected CryptoKeyPair assertion.
+  const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']) as unknown as CryptoKeyPair;
   const rawPub = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey) as ArrayBuffer);
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey) as ArrayBuffer);
   // PKCS#8 wraps the 32-byte scalar at the very end of the DER structure.

@@ -26,9 +26,9 @@ type PanelData interface {
 	SubURLForToken(token string) (string, bool)
 
 	// Management (admin commands).
-	SetUserStatus(name, status string) error       // "active" | "disabled"
-	ResetUserTraffic(name string) error             // zero usage, un-limit
-	SetUserLimitGB(name string, gb float64) error   // 0 = unlimited
+	SetUserStatus(name, status string) error      // "active" | "disabled"
+	ResetUserTraffic(name string) error           // zero usage, un-limit
+	SetUserLimitGB(name string, gb float64) error // 0 = unlimited
 	ExtendUserDays(name string, days int) (expiry string, err error)
 	CreateUser(name string) (subToken string, err error)
 	DeleteUser(name string) error

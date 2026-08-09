@@ -188,7 +188,6 @@ code{background:#0F1420;padding:2px 6px;border-radius:6px;font-size:12px}
 	}
 	b.WriteString(`</div>`)
 	b.WriteString(`<p class="tip">On your phone: open your VPN app, choose “add subscription / import from QR”, and scan the code for your app. On a computer: tap <b>Import</b> to open the app, or <b>Copy link</b> and paste it in. Your link is private — do not share it.</p>`)
-	b.WriteString(`<p class="tip" dir="rtl" lang="fa">در گوشی: برنامهٔ وی‌پی‌ان را باز کنید، گزینهٔ افزودن اشتراک یا اسکن QR را بزنید و کد مربوط به برنامهٔ خود را اسکن کنید. این لینک خصوصی است؛ آن را با کسی به اشتراک نگذارید.</p>`)
 	b.WriteString(`<script>
 document.querySelectorAll('button[data-copy]').forEach(function(el){
   el.addEventListener('click',function(){

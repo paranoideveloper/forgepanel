@@ -64,15 +64,14 @@ func TestRawQueryOptsOutOfLandingPage(t *testing.T) {
 
 // TestSubLandingPageQRAndClients: every client card carries a scannable QR (the
 // mobile import path), and the deep-links for the apps the family uses are
-// present, including a Persian help line.
+// present.
 func TestSubLandingPageQRAndClients(t *testing.T) {
 	html := string(subLandingPage("https://vpn.example.com/sub/abc123", "upload=0; download=536870912; total=10737418240; expire=1767225600"))
 	for _, want := range []string{
-		"of 10.0 GB",                              // usage summary (512 MB of 10 GB)
-		"<svg",                                     // QR codes present
-		"streisand://import/",                      // Streisand deep-link (added)
-		"hiddify://import/",                        // Hiddify deep-link
-		`lang="fa"`,                                // Persian help line
+		"of 10.0 GB",          // usage summary (512 MB of 10 GB)
+		"<svg",                // QR codes present
+		"streisand://import/", // Streisand deep-link (added)
+		"hiddify://import/",   // Hiddify deep-link
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("landing page missing %q", want)

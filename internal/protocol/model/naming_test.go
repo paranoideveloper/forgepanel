@@ -5,7 +5,7 @@ import "testing"
 func TestCountryFlag(t *testing.T) {
 	cases := map[string]string{
 		"DE": "🇩🇪", "de": "🇩🇪", "US": "🇺🇸", "IR": "🇮🇷", "NL": "🇳🇱",
-		"":  "", "D": "", "DEU": "", "D1": "", "12": "",
+		"": "", "D": "", "DEU": "", "D1": "", "12": "",
 	}
 	for in, want := range cases {
 		if got := CountryFlag(in); got != want {
