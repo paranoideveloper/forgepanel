@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.13.1 — NAT64 retry uses the best prefix
+
+### Fixed
+- The NAT64 escape hatch (for reaching Cloudflare-hosted destinations the edge
+  can't `connect()` to directly) now uses the **first** configured prefix
+  deterministically instead of a random one, and the default prefix list is
+  ordered best-first. A random pick landed on a dead public gateway ~2/3 of the
+  time and hung ~19s. NAT64 stays **off by default** on purpose — measured live,
+  even the reachable public gateway answers only ~25% of the time, which is
+  worse than a fast failure; enable it only with a reliable gateway or an
+  SNI-routing relay on your own fleet (`proxyIPMode: 'proxyip'`).
+
 ## v1.13.0 — edgetunnel serverless + smart-fragment configs
 
 ### Added (Xray-only DPI-evasion, for Iran)
