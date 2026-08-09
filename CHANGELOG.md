@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.19.0 — config fan-out: the full camouflage range
+
+### Added
+- **The subscription now fans each inbound into its whole camouflage range**,
+  instead of one config per inbound — the breadth the sample configs show:
+  - a **REALITY** inbound with several borrowed SNIs → **one config per SNI**
+    (default on, `sub_expand_sni`);
+  - a **CDN-frontable TLS** inbound → **one config per clean Cloudflare edge IP**
+    (`sub_front_cleanip` + `sub_clean_ips`).
+  The Preset Wizard seeds an Iran-reachable clean-IP list and turns both on, so a
+  freshly-built server's subscription grew **8 → 38 → 56 configs**. Verified live:
+  a REALITY config on each rotated SNI, and a CDN config fronted on
+  `188.114.96.3`, all tunnelled. A single-SNI / no-clean-IP inbound still yields
+  exactly one config.
+
 ## v1.18.0 — Preset Wizard: one call builds a whole working server
 
 ### Added
