@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.17.0 — worker panel: Share-with-family + external-subs controls
+
+### Added
+- The Worker's own panel now surfaces the shipped features so they're managed
+  without editing raw JSON: a **"Share with family"** section (import-page URL +
+  subscription URL with copy buttons, plus quick links to the serverless /
+  smart-fragment DPI fallbacks), and an **"External subscriptions"** section with
+  a one-click refresh and a live merged-config count. The `status` endpoint now
+  returns the share links and the external-subs count.
+
 ## v1.16.0 — external subscription merge
 
 ### Added
