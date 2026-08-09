@@ -1,3 +1,25 @@
+# ForgePanel v1.9.6 — Release Notes
+
+## Maintenance: green CI + docs, release in sync with main
+
+A sync release so the tagged build and binaries match `main`:
+
+- **CI is fully green again.** Fixed the ForgeEdge worker `tsc --noEmit` type-check
+  (a `CryptoKey | CryptoKeyPair` cast in the WARP key generator) and the Code
+  Hygiene job (a `shellcheck` unused-variable + `A && B || true` in `install.sh`,
+  a `staticcheck` ST1018 on an invisible character, and `gofmt`). No functional
+  change — the WARP fix is TS-only (erased at build) and the installer behaves
+  identically.
+- **README refreshed** to list everything shipped in the 1.9 line: per-user
+  Shadowsocks (SS-2022), online/last-seen presence, the QR subscription landing
+  page, node-naming templates + country auto-detect, the ForgeEdge one-click
+  Cloudflare edge with free WARP + AmneziaWG, and Telegram user management.
+
+Nothing to change on an existing install beyond the normal
+`sudo bash install.sh --update`.
+
+---
+
 # ForgePanel v1.9.5 — Release Notes
 
 ## Feature: manage users from Telegram
