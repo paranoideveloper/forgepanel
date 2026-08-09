@@ -17,6 +17,7 @@ import {
   getJSON, putJSON,
 } from '../config/store';
 import { loadCleanIPs, refreshCleanIPs, isValidCleanEntry } from '../cleanip/list';
+import { refreshExternalSubs } from '../edge/external';
 import { probeCleanIP } from '../cleanip/probe';
 import { validateConfig } from '../config/validate';
 import { scanWarpEndpoints } from '../warp/scanner';
@@ -155,6 +156,12 @@ export async function handlePanelAPI(
       if (request.method !== 'POST') return respond(false, HttpStatus.METHOD_NOT_ALLOWED, 'POST only');
       const store = await refreshCleanIPs(env, ctx.cfg.cleanIPSources, ctx.cfg.cleanIPRandomCount);
       return respond(true, HttpStatus.OK, undefined, store);
+    }
+
+    case 'external/refresh': {
+      if (request.method !== 'POST') return respond(false, HttpStatus.METHOD_NOT_ALLOWED, 'POST only');
+      const store = await refreshExternalSubs(env, ctx.cfg.externalSubs);
+      return respond(true, HttpStatus.OK, undefined, { updatedAt: store.updatedAt, count: store.nodes.length, sources: store.sources });
     }
 
     case 'warp/scan': {

@@ -21,6 +21,7 @@ import type { Env } from './env';
 import { route } from './router';
 import { loadConfig } from './config/store';
 import { refreshCleanIPs } from './cleanip/list';
+import { refreshExternalSubs } from './edge/external';
 import { checkForUpdate } from './deploy/cloudflare';
 import { pullFeed } from './panel/handler';
 import { putJSON } from './config/store';
@@ -51,6 +52,11 @@ export default {
       if (cfg.cleanIPRefresh) {
         const store = await refreshCleanIPs(env, cfg.cleanIPSources, cfg.cleanIPRandomCount);
         console.log(`[forgeedge] clean IPs refreshed: ${store.entries.length} entries`);
+      }
+
+      if (cfg.externalSubs.length) {
+        const store = await refreshExternalSubs(env, cfg.externalSubs);
+        console.log(`[forgeedge] external subs merged: ${store.nodes.length} nodes from ${store.sources.length} sources`);
       }
 
       if (cfg.feedPullURL) {

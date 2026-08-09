@@ -47,7 +47,7 @@ export function detectFormat(ua: string): SubFormat {
 }
 
 /** Where a node came from — drives the failover groups. */
-export type NodeOrigin = 'edge' | 'vps' | 'forgedns';
+export type NodeOrigin = 'edge' | 'vps' | 'forgedns' | 'external';
 
 export interface OriginTaggedNode {
   node: Node;
@@ -76,6 +76,7 @@ const GROUP_ALL = 'Best Ping';
 const GROUP_EDGE = 'Edge';
 const GROUP_VPS = 'VPS';
 const GROUP_DNS = 'ForgeDNS';
+const GROUP_EXT = 'External';
 const SELECTOR = 'proxy';
 const DIRECT = 'direct';
 
@@ -101,6 +102,7 @@ function tagAllocator(reserved: string[]): (want: string, fallback: string) => s
 function groupFor(origin: NodeOrigin): string {
   if (origin === 'edge') return GROUP_EDGE;
   if (origin === 'forgedns') return GROUP_DNS;
+  if (origin === 'external') return GROUP_EXT;
   return GROUP_VPS;
 }
 
@@ -126,7 +128,7 @@ export function renderJSON(input: SubscriptionInput): string {
 
 export function renderSingbox(input: SubscriptionInput): string {
   const { cfg } = input;
-  const alloc = tagAllocator([SELECTOR, DIRECT, GROUP_ALL, GROUP_EDGE, GROUP_VPS, GROUP_DNS]);
+  const alloc = tagAllocator([SELECTOR, DIRECT, GROUP_ALL, GROUP_EDGE, GROUP_VPS, GROUP_DNS, GROUP_EXT]);
   const outbounds: JObj[] = [];
   const byGroup = new Map<string, string[]>();
   const allTags: string[] = [];
@@ -269,7 +271,7 @@ export function renderClash(input: SubscriptionInput): string {
   const { cfg } = input;
   const seen = new Map<string, number>();
   // Reserve the group names so a node remark can never shadow a proxy-group.
-  for (const g of ['PROXY', GROUP_ALL, GROUP_EDGE, GROUP_VPS, GROUP_DNS]) seen.set(g, 1);
+  for (const g of ['PROXY', GROUP_ALL, GROUP_EDGE, GROUP_VPS, GROUP_DNS, GROUP_EXT]) seen.set(g, 1);
 
   const proxies: YValue[] = [];
   const allNames: YValue[] = [];

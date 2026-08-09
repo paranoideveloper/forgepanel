@@ -16,6 +16,7 @@ export const KV_KEYS = {
   feed: 'forgeedge:feed',
   warp: 'forgeedge:warp',
   cleanIPs: 'forgeedge:cleanips',
+  external: 'forgeedge:external',
   updateCheck: 'forgeedge:update',
 } as const;
 
@@ -121,6 +122,8 @@ export interface EdgeConfig {
   cleanIPRefresh: boolean;
   /** How many fresh random Cloudflare edge IPs to mint each refresh (0 = none). */
   cleanIPRandomCount: number;
+  /** Other subscription URLs whose configs are merged into this one (aggregator). */
+  externalSubs: string[];
   customCdnAddrs: string[];
   customCdnHost: string;
   customCdnSni: string;
@@ -265,6 +268,7 @@ export function defaultConfig(): EdgeConfig {
     // ~30% of random CF-range IPs are live HTTP edges; mint 10 so a handful land
     // and the client's best-ping group can pick them (the dead ones are skipped).
     cleanIPRandomCount: 10,
+    externalSubs: [],
     customCdnAddrs: [],
     customCdnHost: '',
     customCdnSni: '',

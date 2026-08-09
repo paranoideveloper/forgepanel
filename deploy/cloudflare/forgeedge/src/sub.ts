@@ -34,6 +34,7 @@ import {
 } from './export/subscription';
 import { buildServerlessXray, serverlessVariant } from './export/serverless';
 import { buildSmartFragmentXray } from './export/smartfrag';
+import { loadExternalNodes } from './edge/external';
 import type { Node } from './model/node';
 
 export interface SubContext {
@@ -76,6 +77,10 @@ export async function assembleNodes(ctx: SubContext, user: FeedUser | null): Pro
 
   const feed = (await getJSON<CanonicalFeed>(env, KV_KEYS.feed)) ?? emptyFeed();
   if (feed.shared_nodes?.length) out.push(...classify(feed.shared_nodes, 'vps'));
+
+  // Configs aggregated from other subscription URLs, cached by the cron.
+  const external = await loadExternalNodes(env);
+  if (external.length) out.push(...classify(external, 'external'));
 
   if (cfg.chainProxy) {
     try {
