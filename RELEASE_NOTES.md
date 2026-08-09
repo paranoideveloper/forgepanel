@@ -1,3 +1,27 @@
+# ForgePanel v1.9.4 — Release Notes
+
+## Feature: country auto-detect (one-click flag for naming templates)
+
+The inbound form's Country field now has a **Detect** button: it geolocates the
+inbound's address (or the panel's own IP when the address is blank) and fills in
+the ISO code, so `{FLAG}`/`{COUNTRY}` in the naming template need no manual entry.
+
+- Uses public, key-less geoip services (ipwho.is, ipapi.co, ip-api.com) tried in
+  order with fallback — **no database bundled, no license, no binary bloat**.
+- Runs on the panel host (not the browser), so it works regardless of CORS and
+  uses the server's own network.
+- A host that resolves to a **private/LAN address** (panel behind NAT) is never
+  sent to a provider — it geolocates the panel's real egress IP instead.
+- Graceful: if every provider is unreachable (a locked-down network), the button
+  says so and the operator just types the 2-letter code — nothing breaks.
+
+Verified: live lookups return the right country (8.8.8.8 → US, 1.1.1.1 → AU),
+provider fallback works, a non-alpha-2 answer is rejected, a private IP is not
+leaked, and the `/admin/geoip` endpoint returns the code + flag. New endpoint
+`GET /admin/geoip?host=<addr>`.
+
+---
+
 # ForgePanel v1.9.3 — Release Notes
 
 ## Feature: node-naming templates ({FLAG} {NAME} {COUNTRY} …)

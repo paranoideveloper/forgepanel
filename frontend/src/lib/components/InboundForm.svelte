@@ -134,6 +134,26 @@
     }
   }
 
+  let detecting = $state(false);
+  // Auto-fill the country from the address (or the panel's own IP when blank),
+  // so {FLAG}/{COUNTRY} in the naming template need no manual code. On failure
+  // (a locked-down network) the operator just types the 2-letter code.
+  async function detectCountry() {
+    detecting = true;
+    try {
+      const host = String(values['address'] || '').trim();
+      const q = host ? `?host=${encodeURIComponent(host)}` : '';
+      const r = await apiFetch<{ country_code: string; flag: string }>(`/admin/geoip${q}`);
+      values['country'] = r.country_code;
+      schedulePreview();
+      showToast(`Detected ${r.flag} ${r.country_code}`, 'success');
+    } catch (e: any) {
+      showToast(e.message || 'Could not detect country — enter it manually', 'error');
+    } finally {
+      detecting = false;
+    }
+  }
+
   async function save() {
     if (!schema) return;
     saving = true;
@@ -214,7 +234,10 @@
         </div>
         <div class="fg">
           <label for="country">Country</label>
-          <input id="country" data-testid="field-country" bind:value={values['country']} oninput={schedulePreview} maxlength="2" placeholder="e.g. DE" title="ISO 2-letter code — the flag/name for the subscription template" style="text-transform:uppercase" />
+          <div style="display:flex;gap:6px">
+            <input id="country" data-testid="field-country" bind:value={values['country']} oninput={schedulePreview} maxlength="2" placeholder="e.g. DE" title="ISO 2-letter code — the flag/name for the subscription template" style="text-transform:uppercase;flex:1" />
+            <button type="button" class="detect" onclick={detectCountry} disabled={detecting} title="Auto-detect from the address (geoip)">{detecting ? '…' : 'Detect'}</button>
+          </div>
         </div>
       </div>
 
@@ -296,6 +319,9 @@
   .with-gen input { flex: 1; }
   .gen { background: #1A2230; color: #FF9A4A; border: 1px solid rgba(255,122,26,0.4); border-radius: 8px; padding: 0 12px; cursor: pointer; font-size: 12px; white-space: nowrap; }
   .help { font-size: 11px; color: rgba(255,255,255,0.4); }
+  .detect { background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 0 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .detect:hover { background: rgba(255,255,255,0.12); }
+  .detect:disabled { opacity: 0.6; cursor: default; }
   .save { margin-top: 18px; width: 100%; background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 14px; }
   .save:disabled { opacity: 0.6; cursor: default; }
   .preview-col { background: #0B0F16; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px; position: sticky; top: 12px; }

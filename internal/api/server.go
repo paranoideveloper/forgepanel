@@ -518,6 +518,7 @@ func (s *Server) routes() {
 			admin.POST("/change-password", s.handleChangePassword)
 			admin.GET("/settings/subscription", s.handleGetSubSettings)
 			admin.POST("/settings/subscription", s.handleSetSubSettings)
+			admin.GET("/geoip", s.handleGeoIP)
 			admin.GET("/panel-address", s.handlePanelAddress)
 			admin.POST("/panel-address", s.handlePanelAddressUpdate)
 			admin.GET("/panel-address/dns-check", s.handlePanelDNSCheck)
