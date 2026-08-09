@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.19.1 — Telegram bot setup made discoverable
+
+### Fixed / docs
+- The built-in **Telegram bot** (manage the panel from chat — `/sub`, and for
+  admins `/adduser` `/deluser` `/enable` `/disable` `/reset` `/limit` `/extend`
+  `/stats` `/user`, with every change reloading the running cores) was fully
+  implemented and started at boot, but nothing told operators how to turn it on.
+  Now the installer seeds `/etc/forgepanel/forgepanel.env` with a commented,
+  ready-to-fill Telegram block, and CONFIGURATION.md + the operator guide give the
+  exact 3-step setup (@BotFather token → @userinfobot chat id → env vars +
+  restart). Verified live that the documented steps bring the bot up (the panel
+  connects to api.telegram.org and polls). No behaviour change to the bot itself.
+
 ## v1.19.0 — config fan-out: the full camouflage range
 
 ### Added
