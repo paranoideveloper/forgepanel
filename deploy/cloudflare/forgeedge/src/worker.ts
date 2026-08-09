@@ -49,7 +49,7 @@ export default {
       const cfg = await loadConfig(env);
 
       if (cfg.cleanIPRefresh) {
-        const store = await refreshCleanIPs(env, cfg.cleanIPSources);
+        const store = await refreshCleanIPs(env, cfg.cleanIPSources, cfg.cleanIPRandomCount);
         console.log(`[forgeedge] clean IPs refreshed: ${store.entries.length} entries`);
       }
 

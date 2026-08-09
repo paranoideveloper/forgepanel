@@ -153,7 +153,7 @@ export async function handlePanelAPI(
 
     case 'clean-ip/refresh': {
       if (request.method !== 'POST') return respond(false, HttpStatus.METHOD_NOT_ALLOWED, 'POST only');
-      const store = await refreshCleanIPs(env, ctx.cfg.cleanIPSources);
+      const store = await refreshCleanIPs(env, ctx.cfg.cleanIPSources, ctx.cfg.cleanIPRandomCount);
       return respond(true, HttpStatus.OK, undefined, store);
     }
 

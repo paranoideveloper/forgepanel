@@ -119,6 +119,8 @@ export interface EdgeConfig {
   /** Remote lists merged into cleanIPs by the scheduled refresh. */
   cleanIPSources: string[];
   cleanIPRefresh: boolean;
+  /** How many fresh random Cloudflare edge IPs to mint each refresh (0 = none). */
+  cleanIPRandomCount: number;
   customCdnAddrs: string[];
   customCdnHost: string;
   customCdnSni: string;
@@ -260,6 +262,9 @@ export function defaultConfig(): EdgeConfig {
     cleanIPs: [],
     cleanIPSources: [],
     cleanIPRefresh: true,
+    // ~30% of random CF-range IPs are live HTTP edges; mint 10 so a handful land
+    // and the client's best-ping group can pick them (the dead ones are skipped).
+    cleanIPRandomCount: 10,
     customCdnAddrs: [],
     customCdnHost: '',
     customCdnSni: '',

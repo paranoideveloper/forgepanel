@@ -19,6 +19,7 @@ import { isDomain, isIPv4, isIPv6, parseHostPort } from '../common/net';
 import type { Env } from '../env';
 import { KV_KEYS } from '../config/schema';
 import { getJSON, putJSON } from '../config/store';
+import { randomCloudflareIPs } from './cfcidr';
 
 /**
  * Built-in seeds. These are Cloudflare-fronted hostnames whose A records rotate
@@ -73,9 +74,15 @@ export async function loadCleanIPs(env: Env): Promise<CleanIPStore> {
  * Refresh from the configured sources. Merges (never replaces) with the built-in
  * seeds so a dead source URL cannot empty the list out from under live users.
  */
-export async function refreshCleanIPs(env: Env, sources: string[]): Promise<CleanIPStore> {
+export async function refreshCleanIPs(env: Env, sources: string[], randomCount = 0): Promise<CleanIPStore> {
   const merged = new Set<string>(BUILTIN_CLEAN_HOSTS);
   const used: string[] = [];
+
+  // Fresh random Cloudflare literals every refresh: a blocklist of the seed
+  // hostnames does nothing against IPs picked at random from CF's ranges today.
+  if (randomCount > 0) {
+    for (const ip of randomCloudflareIPs(randomCount)) merged.add(ip);
+  }
 
   for (const url of sources) {
     try {
