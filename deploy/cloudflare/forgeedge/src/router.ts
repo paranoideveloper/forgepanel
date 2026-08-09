@@ -27,6 +27,7 @@ import { handleDoH } from './dns/doh';
 import { handleSubscription } from './sub';
 import { handlePanelAPI, handleFeedPush } from './panel/handler';
 import { panelHTML } from './panel/ui';
+import { landingHTML } from './panel/landing';
 import { handleTelegram } from './telegram/bot';
 import { getJSON } from './config/store';
 import { KV_KEYS } from './config/schema';
@@ -113,6 +114,20 @@ export async function route(request: Request, env: Env): Promise<Response> {
 
     case 'sub':
       return handleSubscription(request, rest, { env, cfg, secrets, host: url.hostname });
+
+    case 'import': {
+      // End-user onboarding page: /<securePath>/import/<sub_token>. Built from the
+      // subscriber's own token — one-tap import + a QR, no admin secret exposed.
+      const subToken = rest[0] ?? '';
+      return new Response(landingHTML(url.hostname, secrets.securePath, subToken, cfg.subTitle), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Referrer-Policy': 'no-referrer',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
 
     case 'dns-query':
       return handleDoH(request, cfg.dohUpstream);
