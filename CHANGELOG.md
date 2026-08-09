@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.15.0 — end-user landing/import page
+
+### Added
+- **End-user landing page** at `/<securePath>/import/<sub_token>` — one-tap import
+  into v2rayNG, Streisand, Hiddify, sing-box, Clash Meta, Mihomo Party and
+  Shadowrocket, plus direct per-format links and a **self-contained SVG QR** of
+  the subscription URL (Project Nayuki's encoder, vendored MIT). Built from the
+  subscriber's own token, so it exposes no admin secret. Onboarding a family
+  member becomes "open link, tap your app". The QR is verified correct by
+  rasterizing the emitted SVG and decoding it back to the exact sub URL.
+
 ## v1.14.0 — CF-CIDR clean-IP randomizer + proxyIP relay
 
 ### Added
