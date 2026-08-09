@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.11.0 — ForgeEdge relay fix + Iran survivability
+
+### Fixed (the ForgeEdge Worker never actually tunnelled)
+- **The edge Worker accepted connections but relayed nothing** — every emitted
+  config showed "n/a"/no-TLS and clients got `unexpected eof while reading`.
+  Three bugs in the ws↔remote relay (`deploy/cloudflare/forgeedge/src/protocols/`):
+  1. **Deadlock** — the client→remote pump was `await`ed inside the first
+     chunk's `sink.write()`, but it awaited the *entire* remote→ws relay
+     (resolves only when the remote closes), so no further client bytes could
+     flow and every multi-round-trip TLS handshake to the destination stalled.
+     The remote→ws pump now runs in the background, matching the proven
+     edgetunnel flow; the open WebSocket keeps the isolate alive.
+  2. **Response truncation** — the client→remote pipe's `catch` force-closed the
+     WebSocket, dropping the buffered response. It now lets the client close the
+     socket after it has read the response.
+  3. **Benign unhandled exception** — the `connect()` socket's `.closed` promise
+     rejects with "Network connection lost" on normal client disconnect; a no-op
+     catch keeps it out of the Worker's error metrics.
+  Verified end-to-end through a live Worker (xray client → curl --socks5):
+  google 204, AWS checkip 200, ip-api, microsoft 201 KB, wikipedia 2.7 MB — all
+  tunnelled, exit AS13335. Unit tests never caught it (no workerd sockets).
+
+### Added (edgetunnel-inspired, for Iran)
+- **Fancy emoji remarks** on the edge's own nodes ("☁️ ForgeEdge N · ⚡ VLESS ·
+  Domain : 443"), with a `remarkStyle: 'plain'|'fancy'` toggle and a
+  `remarkPrefix` brand override. Machine-readable tokens are preserved.
+- **Multi-port by default** — the edge now advertises across all six Cloudflare
+  TLS ports (443, 8443, 2053, 2083, 2087, 2096) instead of only 443, so a
+  client's best-ping group survives 443 throttling/blocking.
+
 ## v1.4.0 — Round-2 remediation & expansion
 
 ### Fixed (the broken fundamentals)
