@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.13.0 — edgetunnel serverless + smart-fragment configs
+
+### Added (Xray-only DPI-evasion, for Iran)
+- **Serverless / workerless configs** (`/sub/<token>?serverless=cf|google`) — a
+  proxy-LESS Xray config whose `freedom` outbounds fragment the TLS ClientHello
+  on a DIRECT connection, slipping past an SNI-matching DPI box when every proxy
+  IP is blocked but the destination is only filtered (not null-routed). QUIC
+  (udp/443) is blocked so it can't bypass the fragmenter. Verified end-to-end:
+  `xray -test` OK and traffic flows direct-with-fragmentation (exit = the host's
+  own IP, no proxy).
+- **Smart-fragment sweep** (`/sub/<token>?smartfrag=1`) — the worker's own VLESS
+  proxy fanned across 20 fragment lengths in one leastPing group, so the client
+  auto-pins whichever length beats the local DPI box. Verified: `xray -test` OK
+  and tunnelled through the live worker (exit AS13335).
+
 ## v1.12.0 — Fancy config wizard
 
 ### Added
