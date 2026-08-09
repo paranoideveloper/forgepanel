@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.18.0 — Preset Wizard: one call builds a whole working server
+
+### Added
+- **Preset Wizard** (`POST /api/admin/wizard/preset`, and a one-click card in the
+  Setup Wizard). From a domain + an optional Cloudflare token it creates one
+  inbound per config family and wires every one so none need the manual firewall
+  / certificate / DNS steps that usually break a hand-built server:
+  - REALITY-Vision (443), REALITY-XHTTP (8443) and REALITY-Brutal (8444) — direct
+    to the IP, sharing one keypair, borrowing a rotation of real SNIs (Iranian +
+    global); no certificate needed.
+  - VLESS-WS / VLESS-XHTTP / VMess-WS over TLS (2096/2087/2083) fronted behind a
+    proxied Cloudflare sub-domain the wizard creates via the token; the edge
+    terminates TLS so the origin only needs a self-signed cert. **One API token
+    does both the DNS record and the trusted certificate.**
+  - Shadowsocks-2022 (8388), with a correctly-sized std-base64 PSK.
+  Ports never collide; the firewall is opened and xray hot-reloaded. An invalid
+  token is a warning with the exact record to add, not a failure.
+  Verified live end-to-end: REALITY-Vision, Shadowsocks-2022 and the
+  Cloudflare-fronted VLESS-WS all carried traffic (HTTP 204) through the
+  created inbounds.
+- **Complete operator guide** (`docs/PANEL_GUIDE.md`) covering every part of the
+  panel, with the Preset Wizard documented in depth.
+
 ## v1.17.0 — worker panel: Share-with-family + external-subs controls
 
 ### Added
