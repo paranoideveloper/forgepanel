@@ -33,6 +33,7 @@ import {
   type OriginTaggedNode, type SubFormat,
 } from './export/subscription';
 import { buildServerlessXray, serverlessVariant } from './export/serverless';
+import { buildSmartFragmentXray } from './export/smartfrag';
 import type { Node } from './model/node';
 
 export interface SubContext {
@@ -132,6 +133,34 @@ export async function handleSubscription(
       status: HttpStatus.OK,
       headers: subscriptionHeaders(
         `forgeedge-serverless-${v.id}.json`,
+        'application/json; charset=utf-8',
+        b64EncodeUtf8(ctx.cfg.subTitle),
+        userinfoHeader(user),
+      ),
+    });
+  }
+
+  // ?smartfrag=1 → a self-contained Xray config that fans the worker's own VLESS
+  // proxy across every TLS-fragment length in one leastPing group, so the client
+  // pins whichever length beats the local DPI box. Xray-only.
+  if (url.searchParams.has('smartfrag')) {
+    const edge = buildEdgeNodes({
+      cfg: ctx.cfg,
+      identity: {
+        vlessUUID: user?.vless_uuid || ctx.cfg.vlessUUID,
+        trojanPassword: user?.trojan_password || ctx.cfg.trojanPassword,
+        subjectKey: user?.id ?? 'shared',
+      },
+      workerHost: ctx.host,
+      addresses: [ctx.host],
+    }).filter((n) => n.protocol === 'vless' && n.port === 443);
+    if (edge.length === 0) {
+      return new Response('smart fragment needs a VLESS edge node on 443', { status: HttpStatus.NOT_FOUND });
+    }
+    return new Response(buildSmartFragmentXray(ctx.cfg, edge[0], ctx.cfg.subTitle), {
+      status: HttpStatus.OK,
+      headers: subscriptionHeaders(
+        'forgeedge-smartfrag.json',
         'application/json; charset=utf-8',
         b64EncodeUtf8(ctx.cfg.subTitle),
         userinfoHeader(user),
