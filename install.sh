@@ -926,7 +926,7 @@ open_firewall() {
   if command -v iptables >/dev/null 2>&1 && iptables -L INPUT -n 2>/dev/null | head -1 | grep -qiE 'policy (DROP|REJECT)'; then
     for p in "${list_tcp[@]}"; do iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || true; done
     for p in "${udp[@]}"; do iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || true; done
-    command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
+    if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi
     ok "Firewall (iptables): allowed tcp ${list_tcp[*]} and udp ${udp[*]}."
     return 0
   fi
@@ -1031,8 +1031,8 @@ step_install() {
   # right after restart can race the listener and see "connection refused". Poll
   # for up to ~40s and only roll back if it never comes up — but if the service
   # itself has already failed, stop early and surface why.
-  local hc_ok=0 hc_i
-  for hc_i in $(seq 1 40); do
+  local hc_ok=0
+  for _ in $(seq 1 40); do
     if "$CTL_PATH" healthcheck "$PANEL_PORT" >/dev/null 2>&1; then hc_ok=1; break; fi
     if ! systemctl is-active --quiet "$SERVICE"; then
       err "The ${SERVICE} service failed to start. Recent log:"
