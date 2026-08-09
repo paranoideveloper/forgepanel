@@ -126,10 +126,17 @@ export async function handleSubscription(
   // mirrors `internal/api/sub.go`.
   const nodes = user || feed.users.length === 0 ? await assembleNodes(ctx, user) : [];
 
+  // ?patt=1/only → pattern links; ?patt=both → normal + patterned copies.
+  const patt = (url.searchParams.get('patt') ?? '').toLowerCase();
+  const pattern = patt === 'both' || patt === '2' ? 'both'
+    : ['1', 'on', 'true', 'yes', 'only', 'patt'].includes(patt) ? 'only'
+    : 'off';
+
   const rendered = renderSubscription(format, {
     cfg: ctx.cfg,
     nodes,
     title: ctx.cfg.subTitle,
+    pattern,
   });
 
   return new Response(rendered.body, {

@@ -1,3 +1,32 @@
+# ForgePanel v1.10.0 — Release Notes
+
+## Feature: "Pattern" (unsafe-uTLS) subscription variant — normal + patt
+
+Both the **user subscription** and the **ForgeEdge worker subscription** can now
+serve the anti-DPI "patterniha" variant of VLESS/Trojan/VMess links, alongside
+the normal ones.
+
+The pattern adds three params to a TLS link: **`cs`** (a custom cipher-suite
+list), **`fm`** (the two-stage TLS fragment), and **`fp=unsafe`**. The one thing
+that makes hand-rolled configs fail is shipping `fp=unsafe` *without* `cs=` —
+the unsafe fingerprint carries no ciphers of its own, so an empty cipher list
+kills the handshake. ForgePanel always emits `cs` with it, so the variant works.
+
+- **Per-link**: `…/sub/<token>/links?patt=1` (pattern only) or `?patt=both`
+  (normal + a `· Patt` copy of each link). Works on the base64/v2ray format too.
+- **Default**: a **Pattern (unsafe-uTLS)** selector in Users → Subscription
+  defaults (Off / Pattern only / Both), plus `sub_pattern_default`.
+- Applies only to TLS VLESS/Trojan/VMess; other protocols and non-TLS links are
+  untouched. Needs a recent Xray client (v2rayNG ≥ 1.9 / v2rayN / Husi); older
+  clients ignore the extra params.
+
+The edge worker mirrors the exact same params (shared preset), so a user's single
+link behaves identically whether it comes from the VPS or the Cloudflare edge.
+Verified: the generated link carries `fp=unsafe` + the full 13-cipher `cs` + the
+two-stage `fm`, decodes cleanly, and the Go↔TS drift golden still matches.
+
+---
+
 # ForgePanel v1.9.7 — Release Notes
 
 ## Docs & repo hygiene (release fully in sync with main)

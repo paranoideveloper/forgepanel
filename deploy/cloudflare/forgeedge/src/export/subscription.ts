@@ -14,7 +14,7 @@
 
 import type { Node } from '../model/node';
 import type { EdgeConfig } from '../config/schema';
-import { plainLinks } from './uri';
+import { plainLinksMode, type PatternMode } from './uri';
 import { singboxOutbound, SingboxUnsupportedError, type JObj } from './singbox';
 import { xrayOutbound, XrayUnsupportedError } from './xray';
 import { clashProxy, toYAML, uniqueClashName, ClashUnsupportedError, type YValue } from './clash';
@@ -66,6 +66,8 @@ export interface SubscriptionInput {
   nodes: OriginTaggedNode[];
   /** Shown in Profile-Title and as the config remark. */
   title: string;
+  /** unsafe-uTLS pattern variant for link/v2ray formats. */
+  pattern?: PatternMode;
 }
 
 const URLTEST_URL = 'https://www.gstatic.com/generate_204';
@@ -107,7 +109,7 @@ function groupFor(origin: NodeOrigin): string {
 // ---------------------------------------------------------------------------
 
 export function renderLinks(input: SubscriptionInput): string {
-  return plainLinks(input.nodes.map((n) => n.node));
+  return plainLinksMode(input.nodes.map((n) => n.node), input.pattern ?? 'off');
 }
 
 export function renderV2Ray(input: SubscriptionInput): string {

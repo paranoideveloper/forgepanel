@@ -45,6 +45,27 @@ func (s *Server) subNameTemplate() string {
 	return s.db.GetSetting("sub_name_template")
 }
 
+// subPatternDefault is the operator's default for the unsafe-uTLS "pattern"
+// variant on link/v2ray subscriptions (per-request ?patt= overrides it).
+func (s *Server) subPatternDefault() patternMode {
+	if s.db == nil {
+		return patternOff
+	}
+	return parsePatternMode(s.db.GetSetting("sub_pattern_default"), patternOff)
+}
+
+// patternSettingString maps a mode back to its stored form.
+func patternSettingString(m patternMode) string {
+	switch m {
+	case patternOnly:
+		return "only"
+	case patternBoth:
+		return "both"
+	default:
+		return "off"
+	}
+}
+
 // handleGetSubSettings returns the operator's subscription defaults (routing
 // preset + fragment) and the selectable presets for the UI.
 func (s *Server) handleGetSubSettings(c *gin.Context) {
@@ -54,6 +75,8 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 		"presets":        []string{"iran", "full", "block", "off"},
 		"name_template":  s.subNameTemplate(),
 		"name_tokens":    []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
+		"pattern":        patternSettingString(s.subPatternDefault()),
+		"pattern_modes":  []string{"off", "only", "both"},
 	})
 }
 
@@ -63,6 +86,7 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		RoutingPreset *string `json:"routing_preset"`
 		Fragment      *bool   `json:"fragment"`
 		NameTemplate  *string `json:"name_template"`
+		Pattern       *string `json:"pattern"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid payload"})
@@ -84,6 +108,9 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	}
 	if req.NameTemplate != nil {
 		_ = s.db.SetSetting("sub_name_template", strings.TrimSpace(*req.NameTemplate))
+	}
+	if req.Pattern != nil {
+		_ = s.db.SetSetting("sub_pattern_default", patternSettingString(parsePatternMode(*req.Pattern, patternOff)))
 	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
 	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault()})
@@ -211,6 +238,8 @@ func (s *Server) handleSub(c *gin.Context) {
 	if _, explicit := c.Request.URL.Query()["fragment"]; !explicit {
 		frag.Enabled = s.subFragmentDefault()
 	}
+	// The unsafe-uTLS "pattern" variant for the link/v2ray formats.
+	pmode := parsePatternMode(c.Query("patt"), s.subPatternDefault())
 
 	switch format {
 	case "clash":
@@ -221,7 +250,7 @@ func (s *Server) handleSub(c *gin.Context) {
 		}
 		c.Data(200, "text/yaml; charset=utf-8", []byte(clashWithRouting(y, route)))
 	case "links":
-		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinks(nodes)))
+		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinksMode(nodes, pmode)))
 	case "json":
 		c.JSON(200, nodes)
 	case "sing-box":
@@ -235,7 +264,7 @@ func (s *Server) handleSub(c *gin.Context) {
 	case "quantumultx":
 		c.Data(200, "text/plain; charset=utf-8", quantumultxSubscription(nodes))
 	default: // v2ray/base64 subscription (also Shadowrocket)
-		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinks(nodes)))
+		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinksMode(nodes, pmode)))
 		c.Data(200, "text/plain; charset=utf-8", []byte(b64))
 	}
 }
@@ -504,12 +533,31 @@ func redactNodesForClient(nodes []*model.Node) []*model.Node {
 	return out
 }
 
-func plainLinks(nodes []*model.Node) string {
+func plainLinks(nodes []*model.Node) string { return plainLinksMode(nodes, patternOff) }
+
+// plainLinksMode renders the newline-separated share links, optionally adding the
+// unsafe-uTLS "pattern" variant (patt-only, or both normal + patterned).
+func plainLinksMode(nodes []*model.Node, mode patternMode) string {
 	var b strings.Builder
 	for _, n := range nodes {
-		if uri, err := export.URI(n); err == nil {
+		uri, err := export.URI(n)
+		if err != nil {
+			continue
+		}
+		switch mode {
+		case patternOnly:
+			b.WriteString(applyPattern(uri))
+			b.WriteByte('\n')
+		case patternBoth:
 			b.WriteString(uri)
-			b.WriteString("\n")
+			b.WriteByte('\n')
+			if p := applyPattern(uri); p != uri {
+				b.WriteString(tagRemark(p))
+				b.WriteByte('\n')
+			}
+		default:
+			b.WriteString(uri)
+			b.WriteByte('\n')
 		}
 	}
 	return b.String()

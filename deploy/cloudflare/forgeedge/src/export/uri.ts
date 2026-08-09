@@ -321,12 +321,60 @@ export function nodeURI(n: Node): string {
 
 /** Mirror of `api.plainLinks`: one URI per line, unsupported nodes silently skipped. */
 export function plainLinks(nodes: Node[]): string {
+  return plainLinksMode(nodes, 'off');
+}
+
+// The unsafe-uTLS "pattern" (patterniha) params: fp=unsafe ships no ciphers of
+// its own, so cs= must accompany it; fm= is the two-stage TLS fragment. Mirrors
+// the Go side (internal/api/pattern.go) so the VPS and the edge emit the same
+// variant. Only recent Xray cores read these; older clients ignore them.
+export const PATTERN_CS =
+  'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:' +
+  'TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:' +
+  'TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:' +
+  'TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:' +
+  'TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA:' +
+  'TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256';
+export const PATTERN_FM =
+  '{"tcp":[{"type":"fragment","settings":{"packets":"tlshello","lengths":["5","94","1"],"delays":["0"],"maxSplit":"0"}},' +
+  '{"type":"fragment","settings":{"packets":"1-1","lengths":["109","1"],"delays":["1"],"maxSplit":"355"}}]}';
+
+export type PatternMode = 'off' | 'only' | 'both';
+
+// applyPattern stamps the unsafe-uTLS params onto a TLS VLESS/Trojan/VMess link.
+export function applyPattern(uri: string): string {
+  if (!uri.startsWith('vless://') && !uri.startsWith('trojan://') && !uri.startsWith('vmess://')) return uri;
+  const hash = uri.indexOf('#');
+  const body = hash >= 0 ? uri.slice(0, hash) : uri;
+  const frag = hash >= 0 ? uri.slice(hash) : '';
+  const q = body.indexOf('?');
+  if (q < 0) return uri; // base64 vmess / no query
+  const params = new URLSearchParams(body.slice(q + 1));
+  if (params.get('security') !== 'tls') return uri;
+  params.set('fp', 'unsafe');
+  params.set('cs', PATTERN_CS);
+  params.set('fm', PATTERN_FM);
+  params.sort();
+  return body.slice(0, q) + '?' + params.toString() + frag;
+}
+
+export function plainLinksMode(nodes: Node[], mode: PatternMode): string {
   let out = '';
   for (const n of nodes) {
+    let uri: string;
     try {
-      out += nodeURI(n) + '\n';
+      uri = nodeURI(n);
     } catch {
-      // Same as Go: a node with no link form is skipped, never fatal.
+      continue; // a node with no link form is skipped, never fatal
+    }
+    if (mode === 'only') {
+      out += applyPattern(uri) + '\n';
+    } else if (mode === 'both') {
+      out += uri + '\n';
+      const p = applyPattern(uri);
+      if (p !== uri) out += (p.includes('#') ? p + encodeURIComponent(' · Patt') : p) + '\n';
+    } else {
+      out += uri + '\n';
     }
   }
   return out;

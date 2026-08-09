@@ -49,7 +49,7 @@
 
   // subscription defaults (routing preset + TLS fragment) applied to every
   // generated sing-box/Xray/Clash config.
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; }
   let subSettings = $state<SubSettings | null>(null);
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
@@ -63,7 +63,7 @@
     try {
       await apiFetch('/admin/settings/subscription', {
         method: 'POST',
-        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '' })
+        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '', pattern: subSettings.pattern ?? 'off' })
       });
       showToast('Subscription defaults saved', 'success');
     } catch (err: any) {
@@ -256,8 +256,15 @@
         <input type="checkbox" bind:checked={subSettings.fragment} data-testid="fragment-toggle" />
         <span>TLS Fragment (Xray, DPI evasion)</span>
       </label>
+      <label class="field">
+        <span>Pattern (unsafe-uTLS)</span>
+        <select bind:value={subSettings.pattern} data-testid="pattern-mode" title="Adds cs=/fm=/fp=unsafe to VLESS/Trojan/VMess links — the 'patterniha' anti-DPI variant">
+          {#each (subSettings.pattern_modes ?? ['off','only','both']) as m}<option value={m}>{m === 'off' ? 'Off (normal)' : m === 'only' ? 'Pattern only' : 'Both (normal + pattern)'}</option>{/each}
+        </select>
+      </label>
       <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>Save</button>
     </div>
+    <p class="hint">Pattern adds <code>cs</code> (cipher-suites) + <code>fm</code> (TLS fragment) + <code>fp=unsafe</code> to VLESS/Trojan/VMess links — the anti-DPI meta. Per link: <code>?patt=1</code> (pattern) or <code>?patt=both</code>. Needs a recent Xray client (v2rayNG ≥ 1.9 / v2rayN / Husi).</p>
     <div class="row" style="margin-top:10px">
       <label class="field" style="flex:1;min-width:280px">
         <span>Config name template <span class="hint" style="font-weight:400">— blank = keep each inbound's own name</span></span>
