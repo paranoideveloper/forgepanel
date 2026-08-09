@@ -209,6 +209,18 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	// Open every port we bound, and reload the engines once.
 	firewall.EnsureOpen(append(ports, 80, 443))
 	s.startBackground(s.reloadEngines)
+
+	// Turn on the config fan-out that gives the subscription its breadth: SNI
+	// rotation is on by default, and if the operator has no clean-IP list yet,
+	// seed one of known Cloudflare edges (Iran-reachable first) and enable
+	// clean-IP fronting so the CDN inbounds are offered through many addresses —
+	// the same shape as the sample configs' 28-IP fan-out. Never clobber a list
+	// the operator already set.
+	if s.db.GetSetting("sub_clean_ips") == "" {
+		_ = s.db.SetSetting("sub_clean_ips",
+			"188.114.96.3,188.114.97.3,speed.cloudflare.com,cf.090227.xyz,104.17.148.22,cdn.anycast.eu.org")
+		_ = s.db.SetSetting("sub_front_cleanip", "1")
+	}
 	s.audit(c, "wizard.preset", fmt.Sprintf("%d inbounds", len(created)))
 
 	c.JSON(201, gin.H{
