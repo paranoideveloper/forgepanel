@@ -32,6 +32,7 @@ import {
   canonicalSubFormat, detectFormat, renderSubscription, classify,
   type OriginTaggedNode, type SubFormat,
 } from './export/subscription';
+import { buildServerlessXray, serverlessVariant } from './export/serverless';
 import type { Node } from './model/node';
 
 export interface SubContext {
@@ -120,6 +121,23 @@ export async function handleSubscription(
 
   const feed = (await getJSON<CanonicalFeed>(ctx.env, KV_KEYS.feed)) ?? emptyFeed();
   const user = token ? findUser(feed, token) : null;
+
+  // ?serverless=cf|google → a proxy-LESS Xray config that fragments the TLS
+  // ClientHello on a DIRECT connection (edgetunnel "workerless"): the last-ditch
+  // fallback for when every proxy IP is blocked but the destination is only
+  // SNI-filtered, not null-routed. Xray-only; needs no node or token.
+  if (url.searchParams.has('serverless')) {
+    const v = serverlessVariant(url.searchParams.get('serverless') ?? undefined);
+    return new Response(buildServerlessXray(ctx.cfg, v), {
+      status: HttpStatus.OK,
+      headers: subscriptionHeaders(
+        `forgeedge-serverless-${v.id}.json`,
+        'application/json; charset=utf-8',
+        b64EncodeUtf8(ctx.cfg.subTitle),
+        userinfoHeader(user),
+      ),
+    });
+  }
 
   // An unknown token yields a VALID but empty subscription rather than a 404,
   // so an attacker cannot enumerate which tokens exist by status code. This
