@@ -488,6 +488,7 @@ func (s *Server) routes() {
 			admin.DELETE("/domains/:id", s.handleDeleteDomain)
 			admin.GET("/domains-status", s.handleDomainStatus)
 			admin.POST("/inbounds/reality-quickstart", s.handleRealityQuickstart)
+			admin.POST("/wizard/preset", s.handlePresetWizard)
 			admin.POST("/inbounds/:id/tls", s.handleInboundOneClickTLS)
 			admin.POST("/certs/import", s.handleCertImport)
 			admin.GET("/certs", s.handleCertList)
