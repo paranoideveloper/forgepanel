@@ -16,11 +16,22 @@ import (
 	"time"
 )
 
-// PanelData is the read-only view of the panel the bot needs.
+// PanelData is the view of the panel the bot needs: read queries plus the
+// admin-only user-management mutations. Every mutation returns a plain error the
+// bot relays verbatim (e.g. "user not found"), so the router stays transport- and
+// store-agnostic and fully unit-testable.
 type PanelData interface {
 	Stats() (inbounds, users, groups int)
 	UserByName(name string) (username, status string, usedGB, limitGB float64, ok bool)
 	SubURLForToken(token string) (string, bool)
+
+	// Management (admin commands).
+	SetUserStatus(name, status string) error       // "active" | "disabled"
+	ResetUserTraffic(name string) error             // zero usage, un-limit
+	SetUserLimitGB(name string, gb float64) error   // 0 = unlimited
+	ExtendUserDays(name string, days int) (expiry string, err error)
+	CreateUser(name string) (subToken string, err error)
+	DeleteUser(name string) error
 }
 
 // Sender abstracts the Telegram transport so the router is testable.
@@ -142,15 +153,131 @@ func (b *Bot) Handle(chatID int64, text string) {
 		} else {
 			b.sender.Send(chatID, "unknown subscription token")
 		}
+
+	// --- admin: user management ------------------------------------------
+	case "/enable", "/disable":
+		if !b.requireAdmin(chatID, admin) || !b.requireArg(chatID, args, "usage: "+cmd+" <username>") {
+			return
+		}
+		status := "active"
+		if cmd == "/disable" {
+			status = "disabled"
+		}
+		if err := b.data.SetUserStatus(args[0], status); err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		b.sender.Send(chatID, fmt.Sprintf("✅ %s is now *%s*", escapeMarkdown(args[0]), status))
+
+	case "/reset":
+		if !b.requireAdmin(chatID, admin) || !b.requireArg(chatID, args, "usage: /reset <username>") {
+			return
+		}
+		if err := b.data.ResetUserTraffic(args[0]); err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		b.sender.Send(chatID, "✅ traffic reset for *"+escapeMarkdown(args[0])+"*")
+
+	case "/limit":
+		if !b.requireAdmin(chatID, admin) {
+			return
+		}
+		if len(args) < 2 {
+			b.sender.Send(chatID, "usage: /limit <username> <GB>  (0 = unlimited)")
+			return
+		}
+		gb, err := strconv.ParseFloat(args[1], 64)
+		if err != nil || gb < 0 {
+			b.sender.Send(chatID, "the limit must be a number of GB (0 = unlimited)")
+			return
+		}
+		if err := b.data.SetUserLimitGB(args[0], gb); err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		lim := "∞"
+		if gb > 0 {
+			lim = fmt.Sprintf("%.0f GB", gb)
+		}
+		b.sender.Send(chatID, fmt.Sprintf("✅ %s limit set to *%s*", escapeMarkdown(args[0]), lim))
+
+	case "/extend":
+		if !b.requireAdmin(chatID, admin) {
+			return
+		}
+		if len(args) < 2 {
+			b.sender.Send(chatID, "usage: /extend <username> <days>")
+			return
+		}
+		days, err := strconv.Atoi(args[1])
+		if err != nil || days == 0 {
+			b.sender.Send(chatID, "days must be a non-zero whole number (negative shortens)")
+			return
+		}
+		expiry, err := b.data.ExtendUserDays(args[0], days)
+		if err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		b.sender.Send(chatID, fmt.Sprintf("✅ %s now expires *%s*", escapeMarkdown(args[0]), escapeMarkdown(expiry)))
+
+	case "/adduser":
+		if !b.requireAdmin(chatID, admin) || !b.requireArg(chatID, args, "usage: /adduser <username>") {
+			return
+		}
+		tok, err := b.data.CreateUser(args[0])
+		if err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		b.sender.Send(chatID, fmt.Sprintf("✅ created *%s*\nsubscription token:\n`%s`\nfetch the link with `/sub %s`", escapeMarkdown(args[0]), tok, tok))
+
+	case "/deluser":
+		if !b.requireAdmin(chatID, admin) || !b.requireArg(chatID, args, "usage: /deluser <username>") {
+			return
+		}
+		if err := b.data.DeleteUser(args[0]); err != nil {
+			b.sender.Send(chatID, "⚠️ "+err.Error())
+			return
+		}
+		b.sender.Send(chatID, "🗑 deleted *"+escapeMarkdown(args[0])+"*")
+
 	default:
 		b.sender.Send(chatID, "unknown command — /help")
 	}
 }
 
+// requireAdmin messages and returns false when a non-admin runs an admin command.
+func (b *Bot) requireAdmin(chatID int64, admin bool) bool {
+	if !admin {
+		b.sender.Send(chatID, "⛔ admin only")
+		return false
+	}
+	return true
+}
+
+// requireArg messages the usage line and returns false when no argument is given.
+func (b *Bot) requireArg(chatID int64, args []string, usage string) bool {
+	if len(args) == 0 {
+		b.sender.Send(chatID, usage)
+		return false
+	}
+	return true
+}
+
 func helpText(admin bool) string {
 	base := "*ForgePanel bot*\n/sub <token> — get your subscription link\n/help — this message"
 	if admin {
-		base += "\n\n*admin*\n/stats — panel counts\n/user <name> — user status & traffic"
+		base += "\n\n*admin*" +
+			"\n/stats — panel counts" +
+			"\n/user <name> — status & traffic" +
+			"\n/adduser <name> — create a user" +
+			"\n/deluser <name> — delete a user" +
+			"\n/enable <name> · /disable <name>" +
+			"\n/reset <name> — zero traffic" +
+			"\n/limit <name> <GB> — set data cap (0=∞)" +
+			"\n/extend <name> <days> — extend expiry"
 	}
 	return base
 }

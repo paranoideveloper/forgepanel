@@ -1,3 +1,33 @@
+# ForgePanel v1.9.5 — Release Notes
+
+## Feature: manage users from Telegram
+
+The built-in Telegram bot was read-only (`/stats`, `/user`, `/sub`). It now does
+full **user management** from chat, so you can run the panel from your phone:
+
+- `/adduser <name>` — create a user (returns its subscription token)
+- `/deluser <name>` — delete a user
+- `/enable <name>` · `/disable <name>` — cut a user off or restore them
+- `/reset <name>` — zero their traffic (and lift an over-quota cap)
+- `/limit <name> <GB>` — set the data cap (0 = unlimited)
+- `/extend <name> <days>` — extend expiry (from the later of now / current expiry)
+
+Every command is **admin-only** (the chat IDs in `FORGEPANEL_TELEGRAM_ADMINS`),
+validates its arguments, and reports "user not found" rather than failing
+silently. A change made from Telegram **reloads the running cores immediately** —
+exactly like an edit from the web panel — so a disabled or deleted user stops
+being served at once, and status transitions (reset lifts a limited user, extend
+revives an expired one) match the web panel's semantics.
+
+Enable the bot by setting `FORGEPANEL_TELEGRAM_TOKEN` (from @BotFather) and
+`FORGEPANEL_TELEGRAM_ADMINS` (comma-separated Telegram chat IDs), then restart.
+
+Verified: the command router (auth-gating, arg validation, every mutation) is
+unit-tested, and the store integration is exercised end-to-end (create → disable
+→ limit → reset → extend → delete, plus not-found and duplicate paths).
+
+---
+
 # ForgePanel v1.9.4 — Release Notes
 
 ## Feature: country auto-detect (one-click flag for naming templates)
