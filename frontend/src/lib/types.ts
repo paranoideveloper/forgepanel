@@ -18,15 +18,26 @@ export interface UserGroup {
   max_users?: number;
 }
 
+// Mirrors store.Node exactly. It previously declared last_heartbeat and
+// active_users, which the Go model does not have (it reports last_seen), while
+// omitting everything the API does send — so the fields the UI read were always
+// undefined and the fields the server sent were invisible.
 export interface Node {
   id: number;
   name: string;
   address: string;
+  enrolled: boolean;
+  last_seen?: string | null;
+  core_version?: string;
   cpu: number;
   mem_mb: number;
+  disk_used_mb?: number;
+  disk_total_mb?: number;
+  tcp_conns?: number;
+  core_uptime_sec?: number;
   healthy: boolean;
-  last_heartbeat?: string;
-  active_users?: number;
+  config_dirty?: boolean;
+  config_dirty_at?: string | null;
 }
 
 export interface DNSZone {

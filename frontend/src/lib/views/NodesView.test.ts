@@ -193,4 +193,71 @@ describe('NodesView Component', () => {
 
     expect(await screen.findByText('Node API failure')).toBeTruthy();
   });
+
+  // The heartbeat carries disk, connection count, core uptime, last-seen,
+  // enrolled and config_dirty. None of them appeared anywhere in the table, so
+  // the two conditions that actually take a node down — a full disk and a
+  // crash-looping core — were invisible while the node still showed "Online".
+  it('shows disk, connections, core uptime and last-seen', async () => {
+    (globalThis as any).fetch = async () =>
+      ({
+        ok: true,
+        json: async () => [
+          {
+            id: 1, name: 'EU-Node', address: '1.2.3.4', healthy: true, enrolled: true,
+            cpu: 12, mem_mb: 900, disk_used_mb: 4096, disk_total_mb: 20480,
+            tcp_conns: 37, core_uptime_sec: 7200, core_version: '26.2.6',
+            last_seen: new Date(Date.now() - 30_000).toISOString()
+          }
+        ]
+      }) as Response;
+
+    render(NodesView);
+
+    expect(await screen.findByText('EU-Node')).toBeTruthy();
+    expect(screen.getByText('4.0 / 20.0 GB')).toBeTruthy();
+    expect(screen.getByText('37')).toBeTruthy();
+    expect(screen.getByText('2h')).toBeTruthy();
+    expect(screen.getByText(/30s ago/)).toBeTruthy();
+  });
+
+  // A node that is connected but whose core never stays up is the case a status
+  // badge alone cannot express.
+  it('reports a core that is not running as down, even while the node is online', async () => {
+    (globalThis as any).fetch = async () =>
+      ({
+        ok: true,
+        json: async () => [
+          {
+            id: 1, name: 'Flapping', address: '1.2.3.4', healthy: true, enrolled: true,
+            cpu: 5, mem_mb: 100, core_uptime_sec: 0, tcp_conns: 0,
+            disk_used_mb: 19000, disk_total_mb: 20480,
+            last_seen: new Date().toISOString()
+          }
+        ]
+      }) as Response;
+
+    render(NodesView);
+
+    expect(await screen.findByText('Flapping')).toBeTruthy();
+    expect(screen.getByText('down')).toBeTruthy();
+    // 92% full: the operator has to be told before writes start failing.
+    expect(screen.getByTitle(/will stop writing configs/)).toBeTruthy();
+  });
+
+  // A node registered but never checked in looks identical to a working one
+  // without this.
+  it('marks a registered node whose agent has never checked in', async () => {
+    (globalThis as any).fetch = async () =>
+      ({
+        ok: true,
+        json: async () => [
+          { id: 1, name: 'Pending', address: '', healthy: false, enrolled: false, cpu: 0, mem_mb: 0 }
+        ]
+      }) as Response;
+
+    render(NodesView);
+    expect(await screen.findByText('Not enrolled')).toBeTruthy();
+    expect(screen.getByText('never')).toBeTruthy();
+  });
 });

@@ -19,6 +19,49 @@
   let enrolledName = $state('');
   let enrollFingerprint = $state('');
 
+  // A node whose disk fills stops writing configs and goes quiet, so this is
+  // shown as used-of-total rather than a bare number, and flagged past 90%.
+  function diskLabel(n: Node): string {
+    if (!n.disk_total_mb) return '—';
+    const used = n.disk_used_mb ?? 0;
+    const gb = (v: number) => (v / 1024).toFixed(1);
+    return `${gb(used)} / ${gb(n.disk_total_mb)} GB`;
+  }
+  function diskPct(n: Node): number {
+    if (!n.disk_total_mb) return 0;
+    return ((n.disk_used_mb ?? 0) / n.disk_total_mb) * 100;
+  }
+  function diskCritical(n: Node): boolean {
+    return diskPct(n) >= 90;
+  }
+  function diskTitle(n: Node): string {
+    if (!n.disk_total_mb) return 'not reported';
+    const p = Math.round(diskPct(n));
+    return diskCritical(n) ? `${p}% full — the node will stop writing configs` : `${p}% full`;
+  }
+
+  // Uptime separates a node that is connected from one whose core is
+  // crash-looping: the agent reports in fine while the core it supervises never
+  // stays up long enough to serve anything.
+  function coreLabel(n: Node): string {
+    const s = n.core_uptime_sec ?? 0;
+    if (!s) return 'down';
+    if (s < 90) return `${s}s`;
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    if (s < 86400) return `${Math.round(s / 3600)}h`;
+    return `${Math.round(s / 86400)}d`;
+  }
+
+  function lastSeenLabel(n: Node): string {
+    if (!n.last_seen) return 'never';
+    const age = (Date.now() - new Date(n.last_seen).getTime()) / 1000;
+    if (!Number.isFinite(age) || age < 0) return '—';
+    if (age < 90) return `${Math.round(age)}s ago`;
+    if (age < 3600) return `${Math.round(age / 60)}m ago`;
+    if (age < 86400) return `${Math.round(age / 3600)}h ago`;
+    return `${Math.round(age / 86400)}d ago`;
+  }
+
   async function loadNodes() {
     loading = true;
     try {
@@ -133,6 +176,10 @@
           <th>Address</th>
           <th>CPU</th>
           <th>Memory</th>
+          <th>Disk</th>
+          <th>Conns</th>
+          <th>Core</th>
+          <th>Last seen</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
@@ -142,12 +189,28 @@
           <tr>
             <td><strong>{n.name}</strong></td>
             <td><code>{n.address}</code></td>
-            <td>{n.cpu || 0}%</td>
+            <td>{Math.round(n.cpu || 0)}%</td>
             <td>{n.mem_mb || 0} MB</td>
+            <td class={diskCritical(n) ? 'warn-cell' : ''} title={diskTitle(n)}>{diskLabel(n)}</td>
+            <td>{n.tcp_conns ?? '—'}</td>
+            <td title={n.core_version ? `core ${n.core_version}` : 'core version not reported'}>
+              {coreLabel(n)}
+            </td>
+            <td title={n.last_seen || 'never'}>{lastSeenLabel(n)}</td>
             <td>
               <span class="badge {n.healthy ? 'badge-ok' : 'badge-err'}">
                 {n.healthy ? 'Online' : 'Stale'}
               </span>
+              {#if !n.enrolled}
+                <span class="badge badge-warn" title="Registered but the agent has never checked in">
+                  Not enrolled
+                </span>
+              {/if}
+              {#if n.config_dirty}
+                <span class="badge badge-warn" title="The node is running an older config than the panel holds">
+                  Config stale
+                </span>
+              {/if}
             </td>
             <td>
               <button class="btn-sm danger" onclick={() => deleteNode(n.id)}>Remove</button>
@@ -207,4 +270,6 @@
   .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
   .muted { color: rgba(255,255,255,0.6); }
   pre { background: #0F1420; padding: 14px; border-radius: 8px; overflow-x: auto; color: #FF7A1A; font-family: monospace; }
+  .warn-cell { color: #d99b2b; font-weight: 600; }
+  .badge-warn { background: rgba(217,155,43,0.15); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); }
 </style>

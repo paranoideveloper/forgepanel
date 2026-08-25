@@ -247,14 +247,23 @@ func AllModels() []any {
 // one-time secret printed in the `curl | bash` enrollment command.
 type Node struct {
 	Base
-	Name          string     `gorm:"uniqueIndex;not null" json:"name"`
-	Address       string     `json:"address"`
-	EnrollToken   string     `gorm:"uniqueIndex" json:"-"`
-	Enrolled      bool       `json:"enrolled"`
-	LastSeen      *time.Time `json:"last_seen"`
-	CoreVersion   string     `json:"core_version"`
-	CPU           float64    `json:"cpu"`
-	MemMB         int        `json:"mem_mb"`
+	Name        string     `gorm:"uniqueIndex;not null" json:"name"`
+	Address     string     `json:"address"`
+	EnrollToken string     `gorm:"uniqueIndex" json:"-"`
+	Enrolled    bool       `json:"enrolled"`
+	LastSeen    *time.Time `json:"last_seen"`
+	CoreVersion string     `json:"core_version"`
+	CPU         float64    `json:"cpu"`
+	MemMB       int        `json:"mem_mb"`
+	// Disk, connection count and core uptime. Disk is the metric that turns
+	// into an outage with no warning — a node whose filesystem fills stops
+	// writing configs and simply goes quiet — and core uptime is the only
+	// signal that separates a node which is "connected" from one whose core is
+	// crash-looping and serving nothing.
+	DiskUsedMB    int        `json:"disk_used_mb"`
+	DiskTotalMB   int        `json:"disk_total_mb"`
+	TCPConns      int        `json:"tcp_conns"`
+	CoreUptimeSec int        `json:"core_uptime_sec"`
 	Healthy       bool       `json:"healthy"`
 	ConfigDirty   bool       `json:"config_dirty"`
 	ConfigDirtyAt *time.Time `json:"config_dirty_at"`

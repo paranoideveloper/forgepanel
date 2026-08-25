@@ -398,7 +398,7 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // the change up from the baseline, but a database already at the current version
 // only ever gets it from a migration. When this test fails, add the migration
 // that carries the change to existing databases, then update this constant.
-const modelSchemaFingerprintPinned = "59df01697a9ab8cc0fa7b202066b099a76a1a165991e4988dcad65f2a2f0d6c8"
+const modelSchemaFingerprintPinned = "2e4feddbe36e12752ef944960b0696639d1068c7b3e909467c0d40aa2a3ac202"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

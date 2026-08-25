@@ -32,6 +32,7 @@ const (
 	migVAlignLegacy   uint64 = 2
 	migVRepairOrphans uint64 = 3
 	migVTrafficSnaps  uint64 = 4
+	migVNodeMetrics   uint64 = 5
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -73,6 +74,20 @@ func migrations() []migrate.Migration {
 			// cycle's traffic whenever the panel is killed mid-cycle.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&TrafficSnapshot{}})
+				return err
+			},
+		},
+		{
+			Version: migVNodeMetrics,
+			Name:    "node_disk_conns_uptime",
+			Rollback: "safe to drop. The columns hold the newest reported metrics only; " +
+				"losing them costs one heartbeat of history, which the next heartbeat replaces.",
+			// Adds disk, TCP connection count and core uptime to the node row.
+			// Without the migration an existing database keeps the old columns
+			// and every node reports these as zero forever, which reads as
+			// "healthy with an empty disk" rather than "not collected".
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Node{}})
 				return err
 			},
 		},

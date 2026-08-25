@@ -119,7 +119,11 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// heartbeat, keyed by the stats email the panel stamped into its config.
 		// Without it a node's traffic was counted nowhere and a user assigned to
 		// a node had no enforceable quota at all.
-		Traffic map[string]int64 `json:"traffic"`
+		Traffic       map[string]int64 `json:"traffic"`
+		DiskUsedMB    int              `json:"disk_used_mb"`
+		DiskTotalMB   int              `json:"disk_total_mb"`
+		TCPConns      int              `json:"tcp_conns"`
+		CoreUptimeSec int              `json:"core_uptime_sec"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -134,6 +138,10 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.LastSeen = &now
 	n.CPU = req.CPU
 	n.MemMB = req.MemMB
+	n.DiskUsedMB = req.DiskUsedMB
+	n.DiskTotalMB = req.DiskTotalMB
+	n.TCPConns = req.TCPConns
+	n.CoreUptimeSec = req.CoreUptimeSec
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
 	s.accountNodeTraffic(req.Traffic)

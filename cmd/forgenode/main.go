@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
@@ -39,6 +40,20 @@ type NodeAgent struct {
 	lastCfg   string
 	mu        sync.Mutex
 	activeCmd *exec.Cmd
+	// coreStartedAt is when the supervised core last started, so the heartbeat
+	// can report real uptime. A core that is crash-looping reports a
+	// permanently near-zero value, which is the only way the panel can tell a
+	// node that is "connected but serving nothing" from a healthy one.
+	coreStartedAt time.Time
+}
+
+// stateDir is the filesystem the node's own data lives on, and the one whose
+// exhaustion actually takes the node down.
+func (a *NodeAgent) stateDir() string {
+	if a.dataDir != "" {
+		return a.dataDir
+	}
+	return "/"
 }
 
 func main() {
@@ -152,6 +167,11 @@ func (a *NodeAgent) applyConfig(cfg string) {
 
 	// Launch xray core with validated config
 	cmd := exec.Command(a.xrayBin, "run", "-config", configPath)
+	// Stamped on every (re)start so the heartbeat can report how long the core
+	// has actually been up. A core that is quietly crash-looping shows a
+	// permanently near-zero uptime, which is the only signal the panel gets that
+	// the node is "connected" but serving nothing.
+	a.coreStartedAt = time.Now()
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -170,6 +190,12 @@ func (a *NodeAgent) register() error {
 
 func (a *NodeAgent) heartbeat() (string, error) {
 	cpu, mem := systemMetrics()
+	diskUsed, diskTotal := diskUsage(a.stateDir())
+	conns := tcpConnections()
+	coreUptime := 0
+	if !a.coreStartedAt.IsZero() && a.activeCmd != nil {
+		coreUptime = int(time.Since(a.coreStartedAt).Seconds())
+	}
 	// Read WITHOUT resetting first. If the post fails, the counters are still
 	// in xray and the next heartbeat picks them up; resetting before a
 	// successful delivery would drop that traffic on the floor, and traffic a
@@ -177,6 +203,8 @@ func (a *NodeAgent) heartbeat() (string, error) {
 	traffic := a.collectTraffic(false)
 	body, _ := json.Marshal(map[string]any{
 		"token": a.token, "cpu": cpu, "mem_mb": mem, "traffic": traffic,
+		"disk_used_mb": diskUsed, "disk_total_mb": diskTotal,
+		"tcp_conns": conns, "core_uptime_sec": coreUptime,
 	})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
@@ -323,6 +351,53 @@ func (a *NodeAgent) collectTraffic(reset bool) map[string]int64 {
 // The heartbeat previously sent the constants cpu:0.1 and mem_mb:128, which is
 // why every enrolled node displayed identical figures in the panel no matter
 // what it was doing — a dashboard that cannot show a node under load.
+// diskUsage reports the used and total megabytes of the filesystem holding path.
+// Disk is the metric that turns into an outage without warning: a node whose
+// disk fills stops writing configs and logs and simply goes quiet, and the panel
+// had no way to see it coming.
+func diskUsage(path string) (usedMB, totalMB int) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0
+	}
+	bs := uint64(st.Bsize)
+	total := st.Blocks * bs
+	// Free-to-unprivileged, not free-to-root: the reserved blocks are not usable
+	// by the agent, so counting them as free would report headroom that does not
+	// exist for the process that needs it.
+	free := st.Bavail * bs
+	const mb = 1024 * 1024
+	return int((total - free) / mb), int(total / mb)
+}
+
+// tcpConnections counts ESTABLISHED sockets across IPv4 and IPv6.
+//
+// This is the closest thing to "how many clients are on this node" that needs no
+// per-protocol support, so it works for every engine the node runs rather than
+// only the ones with a stats API.
+func tcpConnections() int {
+	const stateEstablished = "01"
+	n := 0
+	for _, f := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			if i == 0 {
+				continue // header
+			}
+			fields := strings.Fields(line)
+			// local, remote, st -> the state column is index 3.
+			if len(fields) > 3 && fields[3] == stateEstablished {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func systemMetrics() (cpuPct float64, memMB int) {
 	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
 		if f := strings.Fields(string(b)); len(f) > 0 {
