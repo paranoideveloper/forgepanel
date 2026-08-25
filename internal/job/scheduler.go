@@ -55,6 +55,7 @@ type Scheduler struct {
 	activeAddresses func(email string) int
 	auditHook       func(action, target string, seen, limit int)
 	ipLimits        *ipLimitState
+	maintenance     func()
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -94,6 +95,14 @@ type Config struct {
 	// AuditIPLimit records enforcement actions so an account that stops working
 	// has a findable reason.
 	AuditIPLimit func(action, target string, seen, limit int)
+	// Maintenance is the periodic housekeeping that has no other home: evicting
+	// idle tunnel sessions, re-verifying clean-IP sets. Nil disables it.
+	//
+	// One hook rather than several: these run on the same cadence and each is a
+	// few lines, and a scheduler with a field per chore accumulates fields
+	// nobody wires up — which is how EvictIdle ended up documented as "called by
+	// the scheduler" with no caller anywhere.
+	Maintenance func()
 }
 
 // New builds a Scheduler with sane defaults.
@@ -114,6 +123,7 @@ func New(cfg Config) *Scheduler {
 		activeAddresses:       cfg.ActiveAddresses,
 		auditHook:             cfg.AuditIPLimit,
 		ipLimits:              newIPLimitState(),
+		maintenance:           cfg.Maintenance,
 		now:                   time.Now,
 	}
 }
@@ -141,6 +151,28 @@ func (s *Scheduler) Start() {
 			s.runScheduledBackup()
 		})
 	}()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		// Housekeeping, on its own loop rather than folded into the hourly one:
+		// idle sessions have to be evicted on a much tighter cadence than
+		// retention pruning, and an hour of leaked sessions on a busy tunnel is
+		// real memory.
+		s.loop(ctx, s.sweepEvery, s.runMaintenance)
+	}()
+}
+
+// runMaintenance calls the maintenance hook, containing any panic.
+//
+// It runs on a long-lived goroutine that also has no other job. A panic here
+// would silently stop every future maintenance run, and the resulting leak would
+// show up hours later as memory growth with nothing pointing at the cause.
+func (s *Scheduler) runMaintenance() {
+	if s.maintenance == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.maintenance()
 }
 
 // runScheduledBackup takes a backup when one is due.

@@ -223,6 +223,10 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		// An account that stops working needs a findable reason. Without this the
 		// user reports an outage, the panel shows them active, and nothing
 		// anywhere says the panel did it on purpose.
+		// Housekeeping that had no caller. EvictIdle's own doc comment said
+		// "called by the scheduler" and nothing called it, so every ForgeDNS
+		// session lived until the process restarted.
+		Maintenance: s.runMaintenance,
 		AuditIPLimit: func(action, target string, seen, limit int) {
 			if s.db == nil {
 				return
@@ -509,10 +513,43 @@ func (s *Server) routes() {
 			// encryption. Registration is best-effort: a store/key failure must not
 			// take the rest of the admin API down.
 			if s.db != nil {
-				if gs, err := dns.NewGormStore(s.db.DB()); err == nil {
-					if enc, err := dns.NewAESGCMFromPassphrase(deriveSecret(s.cfg)); err == nil {
-						dns.RegisterRoutes(admin, dns.Deps{Credentials: gs, Encryptor: enc, Pools: gs, CleanIPs: gs})
+				gs, storeErr := dns.NewGormStore(s.db.DB())
+				enc, encErr := dns.NewAESGCMFromPassphrase(deriveSecret(s.cfg))
+				switch {
+				case storeErr != nil || encErr != nil:
+					// Best-effort registration must still SAY it did not happen.
+					// Failing silently left the DNS routes absent with no
+					// indication why, so the UI's DNS section 404'd and looked
+					// like a bug in the frontend.
+					err := storeErr
+					if err == nil {
+						err = encErr
 					}
+					fmt.Fprintln(os.Stderr, "forgepanel: DNS automation is unavailable:", err)
+				default:
+					dns.RegisterRoutes(admin, dns.Deps{
+						Credentials: gs, Encryptor: enc, Pools: gs, CleanIPs: gs,
+						// Audit was nil, so NOT ONE DNS mutation was ever
+						// recorded: adding a provider credential, repointing a
+						// domain, rotating an address — the changes most likely
+						// to break a deployment and most worth being able to
+						// trace afterwards — happened with no trail at all,
+						// while every other mutation in the panel was logged.
+						// The action strings the DNS package passes already carry
+						// their own "dns." prefix ("dns.credential.create"), so
+						// this must NOT add another.
+						Audit: func(c *gin.Context, action, target, result string) {
+							if result != "" && result != "ok" {
+								// Failures are recorded too. A trail that holds
+								// only successes cannot answer "did someone
+								// try", which is the question asked after a
+								// breach.
+								s.audit(c, action+".failed", target+": "+result)
+								return
+							}
+							s.audit(c, action, target)
+						},
+					})
 				}
 			}
 			// §6 ForgeEdge control plane, mounted the same way at
