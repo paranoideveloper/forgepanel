@@ -78,12 +78,27 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 	}
 }
 
+// bearer reads the access token from the Authorization header, and ONLY from
+// there.
+//
+// There was a fallback to a "token" cookie. Nothing in the panel ever set that
+// cookie — the frontend authenticates with localStorage and an Authorization
+// header — so the branch was dead for the shipped UI while remaining live for
+// anyone who set the cookie themselves.
+//
+// That distinction is the entire CSRF surface of this panel. A browser attaches
+// cookies to cross-site requests automatically, so any page on the internet
+// could have made a state-changing request to the panel and had the browser
+// authenticate it. An Authorization header cannot be set cross-site, so the
+// header path is immune by construction.
+//
+// The fix is removal rather than CSRF tokens: tokens are machinery to defend a
+// door, and this door was one nobody was using. Deleting it removes the
+// vulnerability class instead of mitigating it, and there is a test that the
+// cookie is no longer accepted.
 func bearer(c *gin.Context) string {
 	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
-	}
-	if ck, err := c.Cookie("token"); err == nil {
-		return ck
 	}
 	return ""
 }

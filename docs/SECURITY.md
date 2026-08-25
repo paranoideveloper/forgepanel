@@ -45,9 +45,19 @@ dependency surface with `govulncheck` in CI.
 **An adversary who has found the panel and is attacking authentication.**
 Credential stuffing, brute force, session fixation, CSRF from a page the admin
 visits while logged in. Mitigations: argon2id, mandatory-capable TOTP with
-recovery codes, progressive login delays, session revocation, CSRF tokens, strict
-CORS, hardened cookies, and optional IP allowlisting and TLS client certificates
-for the admin surface.
+recovery codes, progressive login delays, session revocation, strict CORS, and
+optional IP allowlisting and TLS client certificates for the admin surface.
+
+CSRF is addressed by CONSTRUCTION rather than by tokens: the panel authenticates
+only from an `Authorization` header, which a cross-site page cannot set. A
+browser attaches cookies to cross-site requests automatically, so cookie auth is
+what makes CSRF possible in the first place — and the panel has none. A `token`
+cookie fallback did exist in the middleware, unused by the shipped UI and live
+for anyone who set it; it was removed rather than defended, because a CSRF token
+is machinery to guard a door nobody was using.
+
+This is why there is no CSRF token to configure, and why the deployment
+checklist has no cookie hardening step: there are no session cookies to harden.
 
 **An adversary with filesystem or backup access but not a running process.** A
 stolen backup archive, a snapshot of the VPS disk, a misconfigured object-storage
@@ -249,7 +259,6 @@ part of the suite. See [FORGEDNS.md](FORGEDNS.md#security-hardening).
 - [ ] Confirm security headers are being sent: HSTS, CSP, `X-Frame-Options`,
       `X-Content-Type-Options`, `Referrer-Policy`.
 - [ ] Confirm CORS is restricted to the panel's own origin.
-- [ ] Confirm cookies are `Secure`, `HttpOnly` and `SameSite=Strict`.
 - [ ] Review API keys: scope each to the minimum it needs, set per-key rate
       limits, and revoke unused keys.
 - [ ] Set IP and device limits per user with an automatic action, so a leaked
