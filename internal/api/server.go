@@ -36,6 +36,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/telegram"
 	"github.com/forgepanel/forgepanel/internal/version"
 )
 
@@ -56,7 +57,10 @@ type Server struct {
 	fdns    *core.ForgeDNSController // DNS-tunnel manager (spec §5)
 	domains *domain.Registry         // domain registry + DNS health (spec §7)
 	certs   *cert.Store              // cert store + ACME (spec §7)
-	stop    context.CancelFunc
+	// notifier pushes operator alerts. Nil when Telegram is not configured, and
+	// every method on it is a safe no-op in that state, so no call site checks.
+	notifier *telegram.Notifier
+	stop     context.CancelFunc
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -232,6 +236,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		// "called by the scheduler" and nothing called it, so every ForgeDNS
 		// session lived until the process restarted.
 		Maintenance: s.runMaintenance,
+		// Quota trips and expiries are the transitions a customer notices before
+		// the operator does.
+		Notify: func(event, subject, message string) {
+			s.notifier.Notify(telegram.Event(event), subject, message)
+		},
 		AuditIPLimit: func(action, target string, seen, limit int) {
 			if s.db == nil {
 				return

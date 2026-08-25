@@ -5,6 +5,7 @@
 package job
 
 import (
+	"fmt"
 	"strings"
 
 	"context"
@@ -56,6 +57,7 @@ type Scheduler struct {
 	auditHook       func(action, target string, seen, limit int)
 	ipLimits        *ipLimitState
 	maintenance     func()
+	notify          func(event, subject, message string)
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -95,6 +97,12 @@ type Config struct {
 	// AuditIPLimit records enforcement actions so an account that stops working
 	// has a findable reason.
 	AuditIPLimit func(action, target string, seen, limit int)
+	// Notify pushes an operator-facing alert. Nil disables notifications, so a
+	// panel with no Telegram configured needs no checks at any call site.
+	//
+	// It takes the SUBJECT separately from the message because the notifier
+	// deduplicates on it: an ongoing problem must not be announced every sweep.
+	Notify func(event, subject, message string)
 	// Maintenance is the periodic housekeeping that has no other home: evicting
 	// idle tunnel sessions, re-verifying clean-IP sets. Nil disables it.
 	//
@@ -124,6 +132,7 @@ func New(cfg Config) *Scheduler {
 		auditHook:             cfg.AuditIPLimit,
 		ipLimits:              newIPLimitState(),
 		maintenance:           cfg.Maintenance,
+		notify:                cfg.Notify,
 		now:                   time.Now,
 	}
 }
@@ -160,6 +169,19 @@ func (s *Scheduler) Start() {
 		// real memory.
 		s.loop(ctx, s.sweepEvery, s.runMaintenance)
 	}()
+}
+
+// alert pushes an operator-facing notification, containing any panic.
+//
+// Notification is a side effect of the lifecycle sweep, never a condition of it:
+// a bot that is down, rate-limited or misconfigured must not stop users being
+// suspended or expired.
+func (s *Scheduler) alert(event, subject, message string) {
+	if s.notify == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	s.notify(event, subject, message)
 }
 
 // runMaintenance calls the maintenance hook, containing any panic.
@@ -373,6 +395,11 @@ func (s *Scheduler) pollAndAccount() {
 		}
 		if tripped {
 			changed = true
+			// The moment a quota trips is the one worth telling someone about:
+			// the customer is about to notice, and the operator would otherwise
+			// find out from them.
+			s.alert("traffic-limit", u.Username,
+				fmt.Sprintf("*%s* has reached their data limit and is now suspended.", u.Username))
 		}
 	}
 	if changed && s.reloadHook != nil {
@@ -421,6 +448,8 @@ func (s *Scheduler) sweepAt(now time.Time) {
 			u.Status = store.StatusExpired
 			_ = s.db.SaveUser(u)
 			changed = true
+			s.alert("expiry", u.Username,
+				fmt.Sprintf("*%s* has expired and is no longer being served.", u.Username))
 			continue
 		}
 

@@ -182,5 +182,9 @@ func (s *Server) startBot(ctx context.Context) {
 		}
 	}
 	bot := telegram.New(s.cfg.TelegramToken, ids, tgPanelData{s})
+	// The bot could always SEND; nothing ever asked it to. Without this the
+	// panel knew a node was down, a quota had tripped or an account had expired
+	// and told nobody until someone thought to ask.
+	s.notifier = telegram.NewNotifier(bot, ids)
 	go bot.Run(ctx)
 }

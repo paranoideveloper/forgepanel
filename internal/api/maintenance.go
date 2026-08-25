@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/dns"
+	"github.com/forgepanel/forgepanel/internal/telegram"
 )
 
 const (
@@ -32,10 +33,55 @@ const (
 	cleanIPRefreshTimeout = 3 * time.Minute
 )
 
+// nodeSilentAfter is how long a node may go without reporting before it counts
+// as down.
+//
+// Three minutes, matching the health endpoint's own threshold — two different
+// answers to "is this node up" is how an operator ends up trusting neither. A
+// node heartbeats far more often than this, so the window tolerates one missed
+// beat and a slow network without crying wolf.
+const nodeSilentAfter = 3 * time.Minute
+
 // runMaintenance is the scheduler's periodic housekeeping hook.
 func (s *Server) runMaintenance() {
 	s.evictIdleTunnelSessions()
 	s.refreshCleanIPs()
+	s.checkNodesReachable()
+}
+
+// checkNodesReachable alerts on nodes that have stopped reporting, and announces
+// it when they come back.
+//
+// The health endpoint answers this on demand, which means somebody has to look.
+// A node that goes down at 3am stays down until someone thinks to check.
+func (s *Server) checkNodesReachable() {
+	if s.db == nil || s.notifier == nil {
+		return
+	}
+	nodes, err := s.db.ListNodes()
+	if err != nil {
+		// Cannot tell up from down, so say nothing. Alerting on a failed read
+		// would announce that every node is down whenever the database hiccups.
+		return
+	}
+	cutoff := time.Now().Add(-nodeSilentAfter)
+	for _, n := range nodes {
+		if !n.Enrolled {
+			// Never enrolled: it has no reason to be reporting, and alerting on
+			// it would fire forever for a node nobody finished setting up.
+			continue
+		}
+		silent := n.LastSeen == nil || n.LastSeen.Before(cutoff)
+		if silent {
+			s.notifier.Notify(telegram.EventNodeDown, n.Name,
+				fmt.Sprintf("*%s* has stopped reporting. Its inbounds may be down.", n.Name))
+			continue
+		}
+		// Only announces if it was actually alerted on, so a healthy fleet stays
+		// silent instead of announcing a recovery per node per minute.
+		s.notifier.Resolve(telegram.EventNodeDown, n.Name,
+			fmt.Sprintf("*%s* is reporting again.", n.Name))
+	}
 }
 
 // evictIdleTunnelSessions releases sessions whose clients have gone away.
