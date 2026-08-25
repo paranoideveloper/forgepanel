@@ -68,6 +68,24 @@ builds:
       - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
       - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
 
+  # forgeedge-bot is a standalone Telegram bot (docs/EDGE_BOT.md). It is separate
+  # from the panel — its own process and encrypted state — but reuses
+  # internal/edge, so it embeds the same Worker bundle the panel deploys.
+  - id: forgeedge-bot
+    main: ./cmd/forgeedge-bot
+    binary: forgeedge-bot
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+
 archives:
   # Raw, uncompressed binaries: forgepanel-linux-amd64, forgectl-linux-arm64, …
   - id: binaries
@@ -174,6 +192,10 @@ release:
   extra_files:
     - glob: ./install.sh
     - glob: ./install.sh.sha256
+    # The standalone ForgeEdge bot's systemd unit and env template, so an
+    # operator can wire it up without cloning the repo (docs/EDGE_BOT.md).
+    - glob: ./packaging/systemd/forgeedge-bot.service
+    - glob: ./packaging/forgeedge-bot.env.example
   prerelease: auto
   footer: |
     ## Install

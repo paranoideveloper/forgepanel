@@ -20,6 +20,7 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 - **Subscription landing page** — opening a subscription link in a browser shows a friendly page with a **scannable QR and one-tap Import** for each client (v2rayNG, Hiddify, Streisand, Clash, sing-box). **Node-naming templates** (`{FLAG} {NAME} {COUNTRY} …`) name every config, with a per-inbound country and one-click **geoip auto-detect** for the flag.
 - **ForgeEdge (Cloudflare Worker)** — deploy a VLESS/Trojan-over-WebSocket edge to Cloudflare **in one click** (the worker is embedded in the panel), serving the same subscription your VPS does, and provision **free Cloudflare WARP + AmneziaWG** (DPI-obfuscated WireGuard) straight into it.
 - **Telegram bot** — run the panel from chat: get your subscription link, and (admin) create / delete / enable / disable / reset / limit / extend users — changes reload the running cores immediately. Built into the binary; enable it by putting a @BotFather token + your chat id in `/etc/forgepanel/forgepanel.env` and restarting ([setup](docs/CONFIGURATION.md#telegram-bot)).
+- **ForgeEdge Bot (standalone)** — a separate single-binary Telegram bot that deploys and manages ForgeEdge Workers entirely from chat, with **no panel required**. Access is request-and-approve (you approve each user), and every approved user brings **their own** Cloudflare token to deploy and manage **their own** Workers — clean-IPs, SNI/CDN fronting, fragment, WARP, custom domains and more. It reuses the same `internal/edge` engine and embedded Worker as the panel ([guide](docs/EDGE_BOT.md)).
 - **Engines managed for you** — it downloads, pins, verifies and supervises `xray`, `sing-box` and `brook` automatically. Configs are validated before they're applied, so a bad edit can never take your traffic down.
 - **HTTPS by default** — the panel serves TLS with a self-signed certificate out of the box, and switches to automatic Let's Encrypt (ACME) when you set a domain. Admin logins are argon2id + JWT with optional TOTP 2FA and rate-limiting.
 - **Diagnostics** — a Panel Doctor, a coded bilingual (EN/FA) validation catalogue, and a Paste-Anything importer that turns pasted links / subscriptions / JSON into inbounds.
@@ -28,7 +29,7 @@ Create, manage and share proxy configs from a clean web UI — the panel downloa
 
 ## Install
 
-Every published mode uses the same release version. Replace `v1.19.1` with the
+Every published mode uses the same release version. Replace `v1.20.0` with the
 version you intend to run and keep it pinned in production.
 
 ### Verified Linux installer (recommended)
@@ -38,7 +39,7 @@ access. It installs the three matching binaries, records ownership in an
 installation manifest, starts the service, and prints the one-time setup token.
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 curl -fsSLO "$BASE/install.sh"
 curl -fsSLO "$BASE/install.sh.sha256"
@@ -52,7 +53,7 @@ preserves data by default; `--purge --yes` is explicit.
 ### Debian and Ubuntu package
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 ARCH=$(dpkg --print-architecture)       # amd64 or arm64
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.deb
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -62,7 +63,7 @@ sudo apt install "./$ASSET"
 ### Fedora, RHEL, Rocky, and AlmaLinux package
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
 ASSET=forgepanel_${VERSION#v}_linux_${ARCH}.rpm
 curl -fSLO "https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION/$ASSET"
@@ -72,7 +73,7 @@ sudo dnf install "./$ASSET"
 ### Docker
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 docker build -t forgepanel:$VERSION \
@@ -100,7 +101,7 @@ Alpine mirrors:
 docker run -d --name forgepanel --restart unless-stopped \
   -p 2053:2053 -p 80:80 -p 443:443 -p 2096:2096 -p 53:53/udp \
   -v forgepanel-data:/var/lib/forgepanel \
-  ghcr.io/paranoideveloper/forgepanel:v1.19.1
+  ghcr.io/paranoideveloper/forgepanel:v1.20.0
 docker logs -f forgepanel
 ```
 
@@ -110,7 +111,7 @@ The checked-in Compose file defaults to the same GHCR image, so `up -d` **pulls*
 it (add `--build` only if you deliberately want a local build from source):
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 git clone --depth 1 --branch "$VERSION" https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
 FORGEPANEL_VERSION=$VERSION docker compose up -d
@@ -123,7 +124,7 @@ Use this mode for a foreground process, testing, or custom supervision. The
 systemd installer or package remains the supported VPS management path.
 
 ```bash
-VERSION=v1.19.1
+VERSION=v1.20.0
 ARCH=amd64                         # use arm64 on 64-bit ARM
 BASE=https://github.com/paranoideveloper/forgepanel/releases/download/$VERSION
 for bin in forgepanel forgectl forgenode; do
@@ -140,7 +141,7 @@ Requires Go 1.25+ and is intended for development or a custom supervisor.
 ```bash
 git clone https://github.com/paranoideveloper/forgepanel.git
 cd forgepanel
-git checkout v1.19.1
+git checkout v1.20.0
 make build
 FORGEPANEL_DATA="$PWD/forgepanel-data" ./bin/forgepanel
 ```

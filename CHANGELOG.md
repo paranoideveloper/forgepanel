@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.20.0 — ForgeEdge Bot: deploy Workers from Telegram, standalone
+
+### Added
+- **ForgeEdge Bot** — a new standalone single-binary Telegram bot
+  (`forgeedge-bot`) that does what the panel's Worker Wizard does, but entirely
+  from chat and with **no panel required**. It is a separate process with its own
+  AES-GCM-encrypted state, yet reuses the panel's `internal/edge` engine and the
+  same embedded Worker bundle, so a Worker it deploys is byte-for-byte the panel's.
+  - **Request-and-approve access.** One owner (`FORGEEDGE_BOT_OWNER`) is the root
+    approver: when anyone messages the bot they become *pending* and the owner
+    gets an inline ✅ Approve / ❌ Deny (also `/approve` `/deny` `/revoke`
+    `/users`). Each approved user brings **their own** Cloudflare token with `/cf`
+    (the bot deletes that message immediately; the token is stored encrypted) and
+    sees only **their own** Workers.
+  - **Full config editor in chat.** `/deploy` `/list` `/status` `/sub` `/config`
+    `/update` `/rotate` `/destroy`; clean-IPs + fronting (`/addip` `/rmip` `/ips`
+    `/probeip` `/refreships` `/sni` `/cdnhost` `/cdnaddr`); transport/obfuscation
+    (`/ports` `/fingerprint` `/fragment` `/proxyip` `/nat64` `/chain`
+    `/protocols`); `/backend` `/extsub` `/domain`; and WARP (`/warp` `/warpconf`,
+    serving WireGuard + AmneziaWG nodes). Config edits are read-modify-write and
+    validated by the Worker, which relays any rejection verbatim.
+  - The bot never needs a Worker's admin password — it authenticates to each
+    Worker with that Worker's machine credential (the feed push token) captured at
+    deploy. It makes only outbound HTTPS, so it runs as an unprivileged systemd
+    dynamic user. Ships as a release binary with a hardened systemd unit + env
+    template; full setup in [docs/EDGE_BOT.md](docs/EDGE_BOT.md).
+- On the panel side, `internal/edge` gained a config editor on the Worker client
+  (`GetConfigRaw`/`PutConfigRaw`) plus clean-IP refresh/probe and external-sub
+  refresh helpers, all authenticated by the machine push token.
+
 ## v1.19.1 — Telegram bot setup made discoverable
 
 ### Fixed / docs

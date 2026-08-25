@@ -1,8 +1,10 @@
 package edge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -560,7 +562,14 @@ type mockWorker struct {
 	loggedIn  bool
 	feed      []byte
 	rotated   string
+	config    []byte
 	srv       *httptest.Server
+}
+
+// machineAuthed reports whether the request carries the push token as a bearer,
+// which the real Worker accepts on every panel route (handler.ts).
+func (m *mockWorker) machineAuthed(r *http.Request) bool {
+	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") == m.pushToken
 }
 
 func newMockWorker(t *testing.T) *mockWorker {
@@ -603,6 +612,36 @@ func (m *mockWorker) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		m.rotated = "freshpath23456789abcdefg"
 		_, _ = w.Write([]byte(`{"success":true,"status":200,"message":"Rotated.","body":{"securePath":"freshpath23456789abcdefg"}}`))
+	case "/api/config":
+		if !m.machineAuthed(r) && !m.loggedIn {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"status":401,"message":"Unauthorized.","body":null}`))
+			return
+		}
+		if r.Method == http.MethodPut {
+			body, _ := io.ReadAll(r.Body)
+			// Reject a config whose customCdnSni is obviously bad, so the test can
+			// prove a validation error is relayed verbatim.
+			if bytes.Contains(body, []byte(`"customCdnSni":"bad sni"`)) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"success":false,"status":400,"message":"customCdnSni is not a hostname","body":null}`))
+				return
+			}
+			m.config = body
+			_, _ = w.Write(append(append([]byte(`{"success":true,"status":200,"message":"Saved.","body":`), body...), '}'))
+			return
+		}
+		if m.config == nil {
+			m.config = []byte(`{"version":1,"cleanIPs":["1.2.3.4"],"customCdnSni":"","ports":[443]}`)
+		}
+		_, _ = w.Write(append(append([]byte(`{"success":true,"status":200,"message":null,"body":`), m.config...), '}'))
+	case "/api/clean-ip/refresh":
+		if !m.machineAuthed(r) && !m.loggedIn {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"status":401,"message":"Unauthorized.","body":null}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"status":200,"message":null,"body":{"entries":["1.2.3.4","104.16.0.1"],"updatedAt":"2026-08-09T00:00:00Z"}}`))
 	case "/feed":
 		if strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != m.pushToken {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -650,6 +689,51 @@ func TestWorkerClient_StatusAndRotate(t *testing.T) {
 	}
 	if fresh != "freshpath23456789abcdefg" {
 		t.Fatalf("rotated path = %q", fresh)
+	}
+}
+
+func TestWorkerClient_ConfigEditor(t *testing.T) {
+	m := newMockWorker(t)
+	wc := NewWorkerClient(m.srv.URL, m.path)
+	wc.HTTP = m.srv.Client()
+	wc.Bearer = m.pushToken // machine credential — no admin password needed
+
+	// Read-modify-write: pull the live config, add a clean IP, write it back.
+	cfg, err := wc.GetConfigRaw(ctx(t))
+	if err != nil {
+		t.Fatalf("GetConfigRaw: %v", err)
+	}
+	ips, _ := cfg["cleanIPs"].([]any)
+	if len(ips) != 1 {
+		t.Fatalf("seed cleanIPs = %v", cfg["cleanIPs"])
+	}
+	cfg["cleanIPs"] = append(ips, "5.6.7.8")
+	saved, err := wc.PutConfigRaw(ctx(t), cfg)
+	if err != nil {
+		t.Fatalf("PutConfigRaw: %v", err)
+	}
+	if got, _ := saved["cleanIPs"].([]any); len(got) != 2 {
+		t.Fatalf("saved cleanIPs = %v", saved["cleanIPs"])
+	}
+
+	// A validation failure is relayed as a KindValidation error with the
+	// Worker's own message, never swallowed.
+	cfg["customCdnSni"] = "bad sni"
+	if _, err := wc.PutConfigRaw(ctx(t), cfg); err == nil {
+		t.Fatal("expected the Worker's validation error")
+	} else if e, ok := AsError(err); !ok || e.Kind != KindValidation {
+		t.Fatalf("want a validation error, got %v", err)
+	} else if !strings.Contains(e.Message, "customCdnSni") {
+		t.Fatalf("message not relayed: %q", e.Message)
+	}
+
+	// Machine bearer also drives a clean-IP refresh.
+	store, err := wc.RefreshCleanIPs(ctx(t))
+	if err != nil {
+		t.Fatalf("RefreshCleanIPs: %v", err)
+	}
+	if len(store.Entries) != 2 {
+		t.Fatalf("refresh entries = %v", store.Entries)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -243,6 +244,100 @@ func (w *WorkerClient) RotatePath(ctx context.Context, password string) (string,
 		return "", decodeError("edge-rotate-path", err)
 	}
 	return res.SecurePath, nil
+}
+
+// --- config editor ----------------------------------------------------------
+//
+// The Worker's EdgeConfig has ~40 fields and gains more over time. Rather than
+// mirror that whole schema on the Go side and drift from it, the config editor
+// is read-modify-write on an opaque map: fetch the live config, change the one
+// field, write it back. The Worker migrates and validates the result, so any
+// mistake comes back as its own field-level complaint, relayed verbatim. All of
+// these authenticate with w.Bearer (the feed push token) — the Worker accepts
+// the machine credential on every panel route, not just /feed.
+
+// GetConfigRaw reads the Worker's live EdgeConfig as an opaque JSON object.
+func (w *WorkerClient) GetConfigRaw(ctx context.Context) (map[string]any, error) {
+	env, err := w.call(ctx, http.MethodGet, w.URL("api", "config"), nil, "edge-config-get")
+	if err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(env.Body, &cfg); err != nil {
+		return nil, decodeError("edge-config-get", err)
+	}
+	return cfg, nil
+}
+
+// PutConfigRaw writes a full EdgeConfig back and returns the saved (migrated)
+// object. A validation failure surfaces as a KindValidation *Error whose message
+// is the Worker's own complaint.
+func (w *WorkerClient) PutConfigRaw(ctx context.Context, cfg map[string]any) (map[string]any, error) {
+	env, err := w.call(ctx, http.MethodPut, w.URL("api", "config"), cfg, "edge-config-put")
+	if err != nil {
+		return nil, err
+	}
+	var saved map[string]any
+	if len(env.Body) > 0 {
+		_ = json.Unmarshal(env.Body, &saved)
+	}
+	return saved, nil
+}
+
+// CleanIPStore mirrors the Worker's clean-IP store summary.
+type CleanIPStore struct {
+	Entries   []string `json:"entries"`
+	UpdatedAt string   `json:"updatedAt"`
+}
+
+// RefreshCleanIPs triggers the Worker's clean-IP refresh now — merging its
+// remote sources and minting fresh random Cloudflare edge IPs per its config.
+func (w *WorkerClient) RefreshCleanIPs(ctx context.Context) (*CleanIPStore, error) {
+	env, err := w.call(ctx, http.MethodPost, w.URL("api", "clean-ip", "refresh"), map[string]any{}, "edge-cleanip-refresh")
+	if err != nil {
+		return nil, err
+	}
+	var st CleanIPStore
+	if err := json.Unmarshal(env.Body, &st); err != nil {
+		return nil, decodeError("edge-cleanip-refresh", err)
+	}
+	return &st, nil
+}
+
+// CleanIPProbe is the Worker's probe verdict for one candidate front.
+type CleanIPProbe struct {
+	Target       string `json:"target"`
+	SuccessRate  string `json:"successRate"`
+	AvgLatencyMs *int   `json:"avgLatencyMs"`
+}
+
+// ProbeCleanIP asks the Worker to reach a candidate front a few times from its
+// own colo and report the success rate and average latency.
+func (w *WorkerClient) ProbeCleanIP(ctx context.Context, target string) (*CleanIPProbe, error) {
+	u := w.URL("api", "clean-ip", "probe") + "?target=" + url.QueryEscape(target)
+	env, err := w.call(ctx, http.MethodGet, u, nil, "edge-cleanip-probe")
+	if err != nil {
+		return nil, err
+	}
+	var pr CleanIPProbe
+	if err := json.Unmarshal(env.Body, &pr); err != nil {
+		return nil, decodeError("edge-cleanip-probe", err)
+	}
+	return &pr, nil
+}
+
+// RefreshExternal re-pulls the Worker's configured external subscription sources
+// and returns how many nodes the merge produced.
+func (w *WorkerClient) RefreshExternal(ctx context.Context) (int, error) {
+	env, err := w.call(ctx, http.MethodPost, w.URL("api", "external", "refresh"), map[string]any{}, "edge-external-refresh")
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Count int `json:"count"`
+	}
+	_ = json.Unmarshal(env.Body, &out)
+	return out.Count, nil
 }
 
 // WarpAccountSummary is one registered WARP account, as the Worker reports it.
