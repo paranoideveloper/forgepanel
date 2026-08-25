@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,4 +415,62 @@ func TestPortCollisionTransportAliasRidesUDP(t *testing.T) {
 	}
 	// The same inbound over plain TCP does not collide.
 	mustCreate(t, r, vlessBody(24459, "tcp-side"))
+}
+
+// The guard existed, was correct, was thoroughly tested — and was mounted only
+// inside this test file. Production had no port-collision check at all, and
+// nothing could tell: every test passed because each one wired the middleware
+// itself.
+//
+// This asserts against the REAL router, so the check is that the server mounts
+// it, not that a test can.
+func TestPortCollisionGuardIsMountedOnTheRealServer(t *testing.T) {
+	stubListeners(t) // host table empty: this is about inbound-vs-inbound
+	s, _, token := createComprehensiveTestServer(t)
+
+	body := map[string]any{
+		"protocol": "vless", "remark": "first", "address": "0.0.0.0", "port": 24601,
+		"uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+	}
+	if code, resp := realPost(t, s, "/api/admin/inbounds", token, body); code != 201 {
+		t.Fatalf("first create should succeed, got %d: %s", code, resp)
+	}
+
+	body["remark"] = "second"
+	code, resp := realPost(t, s, "/api/admin/inbounds", token, body)
+	if code != http.StatusConflict {
+		t.Fatalf("a second inbound on the same port must be refused with 409, got %d: %s", code, resp)
+	}
+	if !strings.Contains(resp, "port_conflict") {
+		t.Fatalf("the 409 should carry the port_conflict code so the UI can act on it: %s", resp)
+	}
+}
+
+// The pre-flight query route must be mounted too, or the create form cannot warn
+// before the operator submits.
+func TestPortCheckRouteIsMountedOnTheRealServer(t *testing.T) {
+	stubListeners(t)
+	s, _, token := createComprehensiveTestServer(t)
+	code, resp := realPost(t, s, "/api/admin/ports/check", token, map[string]any{
+		"protocol": "vless", "address": "0.0.0.0", "port": 24602,
+	})
+	if code != 200 {
+		t.Fatalf("/ports/check should answer 200, got %d: %s", code, resp)
+	}
+	if !strings.Contains(resp, "available") {
+		t.Fatalf("the answer should report availability: %s", resp)
+	}
+}
+
+// realPost drives the SERVER's own handler chain, not a router assembled by the
+// test. That distinction is the whole point of the two tests above.
+func realPost(t *testing.T, s *Server, path, token string, body map[string]any) (int, string) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	return w.Code, w.Body.String()
 }

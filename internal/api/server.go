@@ -436,10 +436,21 @@ func (s *Server) routes() {
 			admin := api.Group("/admin", s.signer.Middleware(), s.authz())
 			admin.GET("/me", s.handleMe)
 			admin.GET("/inbounds", s.handleListInbounds)
-			admin.POST("/inbounds", s.handleCreateInbound)
-			admin.PUT("/inbounds/:id", s.handleUpdateInbound)
+			// portCollisionGuard runs BEFORE the handler writes the row. Two
+			// inbounds on one port do not fail politely: the engine rejects the
+			// generated document as a whole, so one bad create takes EVERY other
+			// inbound offline, and because the panel never applies a config the
+			// core rejected the operator sees a silent no-op with the stale
+			// config still running. The guard existed and was mounted only
+			// inside its own test, so the tests passed while production had no
+			// check at all.
+			admin.POST("/inbounds", s.portCollisionGuard(), s.handleCreateInbound)
+			admin.PUT("/inbounds/:id", s.portCollisionGuard(), s.handleUpdateInbound)
 			admin.GET("/inbounds/:id/config", s.handleInboundConfig)
 			admin.GET("/inbounds/:id/porthop", s.handlePortHop)
+			// Lets the create form warn while the operator is still typing
+			// rather than after they submit.
+			s.registerPortRoutes(admin)
 			admin.DELETE("/inbounds/:id", s.handleDeleteInbound)
 			// Edit lifecycle (BUG-4): clone, toggle, undo, bulk.
 			admin.POST("/inbounds/:id/clone", s.handleCloneInbound)

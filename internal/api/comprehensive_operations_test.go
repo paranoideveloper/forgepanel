@@ -9,12 +9,24 @@ import (
 	"testing"
 
 	"github.com/forgepanel/forgepanel/internal/config"
+	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
 func createComprehensiveTestServer(t *testing.T) (*Server, *store.Store, string) {
 	t.Helper()
+	// Detach from the host's live socket table. The port-collision guard now runs
+	// on the real inbound routes, and these tests create inbounds on 443/8443 —
+	// ports a developer machine or CI box very often already serves. Without this
+	// the suite would pass or fail depending on what else the host happens to be
+	// running, which tests the box rather than the code. Inbound-vs-inbound
+	// collision detection is unaffected and still exercised here; the host-holder
+	// branch has its own tests in portcheck_test.go.
+	oldListeners := hostListeners
+	hostListeners = func() []firewall.Listener { return nil }
+	t.Cleanup(func() { hostListeners = oldListeners })
+
 	dir := t.TempDir()
 	t.Setenv("FORGEPANEL_DATA", dir)
 
