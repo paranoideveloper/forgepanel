@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -153,4 +155,74 @@ func TestAnUnsupportedSingboxReportsNoCapability(t *testing.T) {
 	if a.singboxStatsSupported() {
 		t.Fatal("a node with no sing-box binary claimed it could report stats")
 	}
+}
+
+func TestANodeDoesNotRestartForAUserOnlyChange(t *testing.T) {
+	dir := t.TempDir()
+	a := &NodeAgent{dataDir: dir, engines: testEngines("")}
+	e := a.engines["xray"]
+
+	// A user-only change must not restart the core. On a node with hundreds of
+	// users, one account tripping a quota would otherwise drop every other
+	// connection — the panel solved that for its own cores and the fleet kept
+	// restarting.
+	var hotCalls int
+	e.spec.hotApply = func(bin, dataDir string, oldCfg, newCfg []byte) (bool, error) {
+		hotCalls++
+		return true, nil
+	}
+	// Pretend the core is up, without spawning one.
+	e.cmd = fakeRunningCmd(t)
+	e.bin = "/bin/true"
+
+	base := `{"inbounds":[{"tag":"in","settings":{"clients":[{"email":"u.1","id":"a"}]}}]}`
+	e.lastCfg = base
+	withUser := `{"inbounds":[{"tag":"in","settings":{"clients":[{"email":"u.1","id":"a"},{"email":"u.2","id":"b"}]}}]}`
+
+	e.apply(dir, withUser)
+
+	if hotCalls != 1 {
+		t.Fatalf("hot apply was called %d times, want 1", hotCalls)
+	}
+	// Still the same process: not stopped and restarted.
+	if e.cmd == nil {
+		t.Fatal("the core was restarted for a user-only change")
+	}
+	if e.lastCfg != withUser {
+		t.Fatal("the new config was not recorded, so the next heartbeat would reapply it")
+	}
+}
+
+func TestAFailedHotApplyFallsBackToARestart(t *testing.T) {
+	dir := t.TempDir()
+	a := &NodeAgent{dataDir: dir, engines: testEngines("")}
+	e := a.engines["xray"]
+	e.spec.hotApply = func(bin, dataDir string, oldCfg, newCfg []byte) (bool, error) {
+		return false, errFake
+	}
+	e.cmd = fakeRunningCmd(t)
+	e.bin = "" // no binary: apply writes the config and does not spawn
+
+	e.lastCfg = `{"inbounds":[]}`
+	e.apply(dir, `{"inbounds":[{"tag":"x"}]}`)
+
+	// A restart is the one action that always reconciles a core with its config,
+	// so a hot apply that failed must not leave the core on the old one.
+	if e.cmd != nil {
+		t.Fatal("the core was not stopped after a failed hot apply")
+	}
+}
+
+var errFake = fmt.Errorf("simulated hot-apply failure")
+
+// fakeRunningCmd returns a started process that stands in for a live core, so
+// the restart path can be observed without spawning a real engine.
+func fakeRunningCmd(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	return cmd
 }

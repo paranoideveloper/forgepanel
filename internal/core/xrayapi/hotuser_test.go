@@ -1,4 +1,4 @@
-package core
+package xrayapi
 
 import (
 	"encoding/json"
@@ -44,7 +44,7 @@ func TestAddedUserIsADelta(t *testing.T) {
 	old := cfg(t, base(client("u.1", "aaa")))
 	next := cfg(t, base(client("u.1", "aaa"), client("u.2", "bbb")))
 
-	deltas, ok, err := diffUsersOnly(old, next)
+	deltas, ok, err := DiffUsersOnly(old, next)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v, want a hot-appliable user change", ok, err)
 	}
@@ -60,7 +60,7 @@ func TestRemovedUserIsADelta(t *testing.T) {
 	old := cfg(t, base(client("u.1", "aaa"), client("u.2", "bbb")))
 	next := cfg(t, base(client("u.1", "aaa")))
 
-	deltas, ok, _ := diffUsersOnly(old, next)
+	deltas, ok, _ := DiffUsersOnly(old, next)
 	if !ok || len(deltas) != 1 {
 		t.Fatalf("deltas=%+v ok=%v", deltas, ok)
 	}
@@ -73,7 +73,7 @@ func TestRotatedCredentialIsRemoveThenAdd(t *testing.T) {
 	old := cfg(t, base(client("u.1", "old-uuid")))
 	next := cfg(t, base(client("u.1", "new-uuid")))
 
-	deltas, ok, _ := diffUsersOnly(old, next)
+	deltas, ok, _ := DiffUsersOnly(old, next)
 	if !ok || len(deltas) != 1 {
 		t.Fatalf("deltas=%+v ok=%v", deltas, ok)
 	}
@@ -103,7 +103,7 @@ func TestNoChangeIsNoRestart(t *testing.T) {
 	  ]
 	}`)
 
-	deltas, ok, err := diffUsersOnly(old, next)
+	deltas, ok, err := DiffUsersOnly(old, next)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestNonUserChangesRefuseTheHotPath(t *testing.T) {
 	for name, mutate := range cases {
 		m := base(client("u.1", "aaa"))
 		mutate(m)
-		_, ok, _ := diffUsersOnly(old, cfg(t, m))
+		_, ok, _ := DiffUsersOnly(old, cfg(t, m))
 		if ok {
 			t.Errorf("%s was accepted as a user-only change; it needs a restart to take effect, "+
 				"and hot-applying would leave the core disagreeing with its own config", name)
@@ -175,7 +175,7 @@ func TestInboundsWithoutKeyedClientsRefuseTheHotPath(t *testing.T) {
 	// so an inbound carrying one is not hot-appliable in either direction.
 	old := cfg(t, base(map[string]any{"id": "aaa"}))
 	next := cfg(t, base(map[string]any{"id": "aaa"}, map[string]any{"id": "bbb"}))
-	if _, ok, _ := diffUsersOnly(old, next); ok {
+	if _, ok, _ := DiffUsersOnly(old, next); ok {
 		t.Error("an inbound with an email-less client was accepted; its users cannot be removed by the handler API")
 	}
 
@@ -188,10 +188,10 @@ func TestInboundsWithoutKeyedClientsRefuseTheHotPath(t *testing.T) {
 	// would be demanding a restart for a config that did not change.
 	dup := cfg(t, base(client("u.1", "aaa"), client("u.1", "bbb")))
 	dupChanged := cfg(t, base(client("u.1", "aaa"), client("u.1", "bbb"), client("u.2", "ccc")))
-	if _, ok, _ := diffUsersOnly(dup, dupChanged); ok {
+	if _, ok, _ := DiffUsersOnly(dup, dupChanged); ok {
 		t.Error("a change to an inbound with duplicate client emails was accepted; a removal would be ambiguous")
 	}
-	if _, ok, _ := diffUsersOnly(dup, dup); !ok {
+	if _, ok, _ := DiffUsersOnly(dup, dup); !ok {
 		t.Error("an unchanged inbound was refused; nothing is applied, so there is nothing to be ambiguous about")
 	}
 }
@@ -201,11 +201,11 @@ func TestMalformedConfigsFallBackRatherThanError(t *testing.T) {
 	for _, bad := range [][]byte{[]byte("{"), []byte("null"), []byte(`{"inbounds": 3}`), {}} {
 		// The caller treats an error the same as "not hot-appliable", but it must
 		// never panic or report success.
-		_, ok, _ := diffUsersOnly(bad, good)
+		_, ok, _ := DiffUsersOnly(bad, good)
 		if ok {
 			t.Errorf("unparseable old config %q was accepted as hot-appliable", bad)
 		}
-		_, ok, _ = diffUsersOnly(good, bad)
+		_, ok, _ = DiffUsersOnly(good, bad)
 		if ok {
 			t.Errorf("unparseable new config %q was accepted as hot-appliable", bad)
 		}

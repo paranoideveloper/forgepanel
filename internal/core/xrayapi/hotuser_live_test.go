@@ -1,4 +1,4 @@
-package core
+package xrayapi
 
 import (
 	"encoding/json"
@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"strings"
 	"testing"
 	"time"
@@ -97,18 +96,10 @@ func TestHotApplyAgainstRealXray(t *testing.T) {
 		t.Fatalf("starting user count = %d, want 1", got)
 	}
 
-	// A real binmgr rooted at the temp dir, with the system Xray symlinked where
-	// it expects to find one. Injecting a fake resolver would let the test pass
-	// against a path the panel would never actually use.
-	bins := binmgr.New(dir)
-	want := bins.Path(binmgr.EngineXray)
-	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(bin, want); err != nil {
-		t.Fatal(err)
-	}
-	c := &Controller{dataDir: dir, xrayAPIPort: liveAPIPort, bins: bins}
+	// The REAL binary, against a REAL running core. A stub here would prove
+	// nothing about whether `xray api adu` accepts the document this code sends.
+	server := "127.0.0.1:" + strconv.Itoa(liveAPIPort)
+	workDir := filepath.Join(dir, "hot")
 
 	// --- add ---------------------------------------------------------------
 	newCfg, err := json.MarshalIndent(liveXrayConfig(t, 25693, []any{
@@ -118,7 +109,7 @@ func TestHotApplyAgainstRealXray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, err := c.xrayHotApply(oldCfg, newCfg)
+	applied, err := hotApplyForTest(bin, server, workDir, oldCfg, newCfg)
 	if err != nil {
 		t.Fatalf("hot add: %v", err)
 	}
@@ -130,7 +121,7 @@ func TestHotApplyAgainstRealXray(t *testing.T) {
 	}
 
 	// --- remove ------------------------------------------------------------
-	applied, err = c.xrayHotApply(newCfg, oldCfg)
+	applied, err = hotApplyForTest(bin, server, workDir, newCfg, oldCfg)
 	if err != nil {
 		t.Fatalf("hot remove: %v", err)
 	}
@@ -148,7 +139,7 @@ func TestHotApplyAgainstRealXray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, err = c.xrayHotApply(oldCfg, portChanged)
+	applied, err = hotApplyForTest(bin, server, workDir, oldCfg, portChanged)
 	if err != nil {
 		t.Fatalf("port change should decline quietly, not error: %v", err)
 	}
@@ -158,7 +149,7 @@ func TestHotApplyAgainstRealXray(t *testing.T) {
 
 	// --- the credentials file does not survive the call --------------------
 	// It carries the UUIDs of the users being added.
-	leftovers, _ := filepath.Glob(filepath.Join(c.hotApplyDir(), "*"))
+	leftovers, _ := filepath.Glob(filepath.Join(workDir, "*"))
 	if len(leftovers) != 0 {
 		t.Errorf("credential documents left on disk: %v", leftovers)
 	}
@@ -176,10 +167,10 @@ func TestHotApplyReportsTheCoresOwnZeroAdd(t *testing.T) {
 	// `adu` against a core that is not listening must FAIL, not quietly report
 	// success. This is the guard on the silent-zero-add behaviour: the CLI exits
 	// zero and prints "Added 0 user(s)" for a document it cannot apply.
-	err := addXrayUsers(bin, "127.0.0.1:1", t.TempDir(), userDelta{
+	err := AddUsers(bin, "127.0.0.1:1", t.TempDir(), UserDelta{
 		Tag:   "in-1",
 		Add:   []json.RawMessage{json.RawMessage(`{"id":"x","email":"u.9"}`)},
-		entry: map[string]json.RawMessage{"tag": json.RawMessage(`"in-1"`)},
+		Entry: map[string]json.RawMessage{"tag": json.RawMessage(`"in-1"`)},
 	})
 	if err == nil {
 		t.Fatal("adding a user against a dead API reported success; the panel would then believe a user exists that the core has never heard of")
@@ -187,4 +178,10 @@ func TestHotApplyReportsTheCoresOwnZeroAdd(t *testing.T) {
 	if !strings.Contains(err.Error(), "u.9") && !strings.Contains(err.Error(), "in-1") {
 		t.Errorf("error does not say what failed: %v", err)
 	}
+}
+
+// hotApplyForTest drives HotApply with a stub binary path, standing in for the
+// Controller wiring that lives in internal/core.
+func hotApplyForTest(bin, server, workDir string, oldCfg, newCfg []byte) (bool, error) {
+	return HotApply(HotApplyOptions{Bin: bin, Server: server, WorkDir: workDir}, oldCfg, newCfg)
 }

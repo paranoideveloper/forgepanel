@@ -15,7 +15,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"strconv"
+
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
+	"github.com/forgepanel/forgepanel/internal/core/xrayapi"
 )
 
 // engineSpec describes how to validate and run one core.
@@ -32,6 +35,13 @@ type engineSpec struct {
 	// this is not hardcoded.
 	testArgs func(path string) []string
 	runArgs  func(path string) []string
+	// hotApply, when set, is offered the old and new configs before the core is
+	// restarted. Returning true means the change reached the running process.
+	//
+	// Only Xray has one: sing-box has no equivalent handler API in the builds
+	// shipped here, and claiming otherwise would leave its users out of sync
+	// with its config.
+	hotApply func(bin, dataDir string, oldCfg, newCfg []byte) (bool, error)
 }
 
 func engineSpecs() []engineSpec {
@@ -40,6 +50,16 @@ func engineSpecs() []engineSpec {
 			name: "xray", engine: binmgr.EngineXray, configFile: "node-xray.json",
 			testArgs: func(p string) []string { return []string{"run", "-test", "-config", p} },
 			runArgs:  func(p string) []string { return []string{"run", "-config", p} },
+			hotApply: func(bin, dataDir string, oldCfg, newCfg []byte) (bool, error) {
+				return xrayapi.HotApply(xrayapi.HotApplyOptions{
+					Bin:    bin,
+					Server: "127.0.0.1:" + strconv.Itoa(nodeXrayAPIPort),
+					// Under the node's own data directory, not /tmp: the
+					// documents carry user credentials for as long as the call
+					// takes.
+					WorkDir: filepath.Join(dataDir, "hot"),
+				}, oldCfg, newCfg)
+			},
 		},
 		{
 			name: "sing-box", engine: binmgr.EngineSingbox, configFile: "node-singbox.json",
@@ -99,7 +119,28 @@ func (e *engineProc) apply(dataDir, cfg string) {
 		_ = os.Remove(tmp)
 		return
 	}
+	prev := e.lastCfg
 	e.lastCfg = cfg
+
+	// A user-only change is applied to the RUNNING core rather than restarting
+	// it. Without this, one user tripping a quota or one account being created
+	// dropped EVERY connection on this node — the panel solved that for its own
+	// cores and the fleet kept restarting.
+	//
+	// Only when the core is already up: there is nothing to hot-apply into
+	// otherwise, and the start below is the correct path.
+	if e.bin != "" && e.running() && e.spec.hotApply != nil {
+		if applied, err := e.spec.hotApply(e.bin, dataDir, []byte(prev), []byte(cfg)); err == nil && applied {
+			fmt.Printf("forgenode: %s users updated without a restart\n", e.spec.name)
+			return
+		} else if err != nil {
+			// Fall through to the restart, which is the one action that always
+			// reconciles a core with its config. Recorded so the restart is not
+			// a mystery.
+			fmt.Fprintf(os.Stderr, "forgenode: %s hot apply failed, restarting: %v\n",
+				e.spec.name, err)
+		}
+	}
 
 	e.stop()
 	if e.bin == "" {
