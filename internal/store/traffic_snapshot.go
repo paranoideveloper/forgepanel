@@ -23,9 +23,20 @@ package store
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+// nodeIDFromScope pulls the node id out of a "node:<id>" counter scope.
+func nodeIDFromScope(scope string) (string, bool) {
+	id, ok := strings.CutPrefix(scope, "node:")
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
+}
 
 // TrafficSnapshot is the last cumulative counter value seen for one key.
 //
@@ -73,6 +84,13 @@ func (s *Store) TrafficSnapshots(scope string) (map[string]int64, error) {
 // It returns the user's usage after the update, and whether the update pushed
 // them over their data limit, so the caller can enforce without a second read.
 func (s *Store) ApplyTrafficDelta(scope, key string, userID uint, delta, cumulative int64, stamp func(*User)) (used int64, limited bool, err error) {
+	return s.ApplyTrafficDeltaAt(scope, key, userID, delta, cumulative, time.Now(), stamp)
+}
+
+// ApplyTrafficDeltaAt is ApplyTrafficDelta with an explicit observation time,
+// which is what places the usage in the right history bucket. Tests drive it;
+// production passes time.Now().
+func (s *Store) ApplyTrafficDeltaAt(scope, key string, userID uint, delta, cumulative int64, at time.Time, stamp func(*User)) (used int64, limited bool, err error) {
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var u User
 		if err := tx.First(&u, userID).Error; err != nil {
@@ -95,6 +113,19 @@ func (s *Store) ApplyTrafficDelta(scope, key string, userID uint, delta, cumulat
 		}
 		if err := upsertSnapshot(tx, scope, key, cumulative); err != nil {
 			return err
+		}
+		// The history is written from the SAME delta, in the SAME transaction,
+		// so a chart and an invoice cannot disagree and a crash cannot bill
+		// traffic that never lands in the history.
+		if err := recordUsage(tx, ScopeUser, UserRollupKey(userID), at, delta); err != nil {
+			return err
+		}
+		// A remote node's scope is "node:<id>"; credit the node too, so "which
+		// node carried this" is answerable without re-deriving it from users.
+		if nodeID, ok := nodeIDFromScope(scope); ok {
+			if err := recordUsage(tx, ScopeNode, nodeID, at, delta); err != nil {
+				return err
+			}
 		}
 		used = u.UsedTraffic
 		limited = u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit

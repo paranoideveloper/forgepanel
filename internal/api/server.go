@@ -180,6 +180,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		// incident found weeks later, short enough that the table does not
 		// become the largest thing in the database on a busy panel.
 		AuditRetention: 90 * 24 * time.Hour,
+		// Hourly detail for a month is enough to investigate a spike; daily is
+		// billing history and is kept for two years so a year-long chart has a
+		// year to show.
+		RollupHourlyRetention: 31 * 24 * time.Hour,
+		RollupDailyRetention:  730 * 24 * time.Hour,
 		PollTraffic: func(reset bool) (map[string]int64, error) {
 			if s.engine == nil {
 				return nil, nil
@@ -495,6 +500,9 @@ func (s *Server) routes() {
 			admin.GET("/quota", s.handleQuota)
 			// The audit trail. Entries carry the actor, their IP and what they
 			// did across every admin, so this is owner/admin only.
+			// Usage history, from the rollups written alongside billing.
+			admin.GET("/traffic/series", s.handleTrafficSeries)
+			admin.GET("/traffic/top", s.handleTopConsumers)
 			admin.GET("/audit", s.handleListAudit)
 			admin.GET("/audit/actions", s.handleAuditActions)
 			// Admin/reseller provisioning. Owner-only: see internal/api/authz.go.

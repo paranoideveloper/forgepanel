@@ -35,11 +35,16 @@ type Scheduler struct {
 	// which is a deliberate choice an operator can make (some need an unbounded
 	// trail for compliance) rather than a default that quietly fills a disk.
 	auditRetention time.Duration
-	reloadHook     func()                                     // called after a mutation to reapply engine configs
-	pollTraffic    func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	now            func() time.Time // injectable clock (tests use a controllable one)
+	// Rollup retention is TWO clocks: hourly is debug detail worth weeks, daily
+	// is billing history worth years. One shared cutoff would either keep an
+	// unusable amount of hourly data or destroy the long-range chart.
+	rollupHourlyRetention time.Duration
+	rollupDailyRetention  time.Duration
+	reloadHook            func()                                     // called after a mutation to reapply engine configs
+	pollTraffic           func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	now                   func() time.Time // injectable clock (tests use a controllable one)
 }
 
 // Config configures a Scheduler.
@@ -53,6 +58,10 @@ type Config struct {
 	// quietly fills a disk, because the pruner treats zero as "keep" rather
 	// than as a cutoff of now.
 	AuditRetention time.Duration
+	// RollupHourlyRetention / RollupDailyRetention bound the usage history.
+	// Zero keeps everything for that resolution.
+	RollupHourlyRetention time.Duration
+	RollupDailyRetention  time.Duration
 	// PollTraffic returns the engine's per-user counters. The scheduler always
 	// calls it with reset=false and accounts by subtraction against a stored
 	// snapshot: a destructive read makes the in-flight value the only copy of
@@ -75,8 +84,10 @@ func New(cfg Config) *Scheduler {
 	return &Scheduler{
 		db: cfg.DB, pollEvery: cfg.PollEvery, sweepEvery: cfg.SweepEvery,
 		reloadHook: cfg.ReloadHook, pollTraffic: cfg.PollTraffic,
-		auditRetention: cfg.AuditRetention,
-		now:            time.Now,
+		auditRetention:        cfg.AuditRetention,
+		rollupHourlyRetention: cfg.RollupHourlyRetention,
+		rollupDailyRetention:  cfg.RollupDailyRetention,
+		now:                   time.Now,
 	}
 }
 
@@ -97,8 +108,35 @@ func (s *Scheduler) Start() {
 		defer s.wg.Done()
 		// Hourly is often enough: retention is measured in days, and a tighter
 		// cadence would delete a handful of rows over and over for no benefit.
-		s.loop(ctx, time.Hour, s.pruneAudit)
+		s.loop(ctx, time.Hour, func() {
+			s.pruneAudit()
+			s.pruneRollups()
+		})
 	}()
+}
+
+// pruneRollups enforces the usage-history retention windows.
+//
+// Zero for a resolution keeps it forever, and is treated as "keep" rather than
+// as a cutoff of now — read the other way it would erase the history it exists
+// to preserve.
+func (s *Scheduler) pruneRollups() {
+	if s.db == nil {
+		return
+	}
+	now := s.now()
+	var hourly, daily time.Time
+	if s.rollupHourlyRetention > 0 {
+		hourly = now.Add(-s.rollupHourlyRetention)
+	}
+	if s.rollupDailyRetention > 0 {
+		daily = now.Add(-s.rollupDailyRetention)
+	}
+	if hourly.IsZero() && daily.IsZero() {
+		return
+	}
+	// Losing a prune costs disk, not correctness, and the next hour retries.
+	_, _ = s.db.PruneRollups(hourly, daily)
 }
 
 // pruneAudit enforces the audit retention window.

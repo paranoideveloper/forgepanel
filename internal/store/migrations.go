@@ -33,6 +33,7 @@ const (
 	migVRepairOrphans uint64 = 3
 	migVTrafficSnaps  uint64 = 4
 	migVNodeMetrics   uint64 = 5
+	migVRollups       uint64 = 6
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -88,6 +89,19 @@ func migrations() []migrate.Migration {
 			// "healthy with an empty disk" rather than "not collected".
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Node{}})
+				return err
+			},
+		},
+		{
+			Version: migVRollups,
+			Name:    "traffic_rollups",
+			Rollback: "safe to drop. The table holds usage HISTORY only; losing it costs the charts " +
+				"their past, not any user's current balance, which lives on the user row.",
+			// Usage history per hour and per day. Without the table the panel
+			// knows totals and nothing about when, so there are no charts, no
+			// usage reports and no way to watch a quota being consumed.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&TrafficRollup{}})
 				return err
 			},
 		},

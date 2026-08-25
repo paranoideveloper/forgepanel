@@ -124,6 +124,13 @@ var adminAuthzRules = []authzRule{
 	{path: "/api/admin/edge/feed-token", roles: ownerAdmin},
 	{path: "/api/admin/dns/credentials", roles: ownerAdmin},
 
+	// --- usage history ------------------------------------------------------
+	//
+	// A reseller may chart their own customers, and the handler scopes each
+	// request to what they own; node and inbound totals aggregate across
+	// tenants and are refused there.
+	{methods: get, path: "/api/admin/traffic", roles: tenantMgmt},
+
 	// --- the audit trail --------------------------------------------------
 	//
 	// Entries name the actor, their IP and what they did, across every admin.
