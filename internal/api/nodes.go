@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"github.com/forgepanel/forgepanel/internal/job"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +115,11 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		Token string  `json:"token"`
 		CPU   float64 `json:"cpu"`
 		MemMB int     `json:"mem_mb"`
+		// Traffic is the per-user delta this node served since its last
+		// heartbeat, keyed by the stats email the panel stamped into its config.
+		// Without it a node's traffic was counted nowhere and a user assigned to
+		// a node had no enforceable quota at all.
+		Traffic map[string]int64 `json:"traffic"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -129,6 +136,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.MemMB = req.MemMB
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
+	s.accountNodeTraffic(req.Traffic)
 	// Return the current xray config bundle so the node runs the same inbounds.
 	// A control-plane-only panel has no local engine; the heartbeat still
 	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
@@ -212,4 +220,53 @@ func (s *Server) panelCertFingerprint() string {
 	}
 	sum := sha256.Sum256(block.Bytes)
 	return hex.EncodeToString(sum[:])
+}
+
+// accountNodeTraffic adds a node's reported per-user deltas to those users and
+// enforces their data limit, so traffic served remotely counts exactly like
+// traffic the panel served itself.
+//
+// The node reports deltas keyed by the stats email the panel stamped into the
+// config it handed that node (job.UserEmail), which is the same key the local
+// poller uses — so both planes converge on one number per user rather than two
+// half-counts nobody can reconcile.
+//
+// Enforcement is applied here as well as in the local poller. A user who blows
+// their quota entirely on remote nodes would otherwise stay active until the
+// local poller happened to see traffic that, by definition, is not passing
+// through the panel.
+func (s *Server) accountNodeTraffic(deltas map[string]int64) {
+	if s.db == nil || len(deltas) == 0 {
+		return
+	}
+	changed := false
+	for email, bytes := range deltas {
+		if bytes <= 0 {
+			continue
+		}
+		id, ok := job.UserIDFromEmail(email)
+		if !ok {
+			continue
+		}
+		u, err := s.db.UserByID(id)
+		if err != nil || u == nil {
+			continue
+		}
+		if math.MaxInt64-bytes < u.UsedTraffic {
+			u.UsedTraffic = math.MaxInt64
+		} else {
+			u.UsedTraffic += bytes
+		}
+		now := time.Now()
+		u.LastSeenAt = &now
+		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
+			u.Status = store.StatusLimited
+			changed = true
+		}
+		_ = s.db.SaveUser(u)
+	}
+	// A user who just went over now has to stop being served, on every plane.
+	if changed {
+		s.startBackground(s.reloadEngines)
+	}
 }

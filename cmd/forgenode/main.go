@@ -16,6 +16,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,12 +169,26 @@ func (a *NodeAgent) register() error {
 }
 
 func (a *NodeAgent) heartbeat() (string, error) {
-	body, _ := json.Marshal(map[string]any{"token": a.token, "cpu": 0.1, "mem_mb": 128})
+	cpu, mem := systemMetrics()
+	// Read WITHOUT resetting first. If the post fails, the counters are still
+	// in xray and the next heartbeat picks them up; resetting before a
+	// successful delivery would drop that traffic on the floor, and traffic a
+	// quota system silently loses is worse than traffic it never saw.
+	traffic := a.collectTraffic(false)
+	body, _ := json.Marshal(map[string]any{
+		"token": a.token, "cpu": cpu, "mem_mb": mem, "traffic": traffic,
+	})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
 	}
 	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
 		return "", err
+	}
+	// Delivered: now clear what we just reported so the next delta starts from
+	// zero. A counter that grew between the two reads is not lost — it simply
+	// arrives in the following heartbeat.
+	if len(traffic) > 0 {
+		a.collectTraffic(true)
 	}
 	return resp.XrayConfig, nil
 }
@@ -239,4 +255,113 @@ func (a *NodeAgent) post(path string, body []byte, out any) error {
 		return json.NewDecoder(r.Body).Decode(out)
 	}
 	return nil
+}
+
+// nodeXrayAPIPort is the port the panel puts the local gRPC api inbound on when
+// it builds a node's config (see handleNodeHeartbeat -> engine.BuildMulti).
+// The node reads its own counters through it.
+const nodeXrayAPIPort = 10085
+
+// collectTraffic reads per-user counters from the node's OWN xray and RESETS
+// them, so each heartbeat carries a delta.
+//
+// Without this a node reported nothing but cpu and memory, and traffic it served
+// was never counted anywhere: measured on live hosts, 4 MB pushed through a
+// remote node moved the panel's used_traffic by exactly 0. A user assigned to a
+// node therefore had unlimited traffic and no quota could ever apply to them.
+//
+// Resetting on read is what makes the value a delta the panel can simply add.
+// It also means a heartbeat that is COLLECTED but never DELIVERED loses that
+// slice of traffic, so the counters are only reset once the post succeeds —
+// see heartbeat().
+func (a *NodeAgent) collectTraffic(reset bool) map[string]int64 {
+	if a.xrayBin == "" {
+		return nil
+	}
+	args := []string{"api", "statsquery",
+		"--server=127.0.0.1:" + strconv.Itoa(nodeXrayAPIPort), "-pattern", "user>>>"}
+	if reset {
+		args = append(args, "-reset")
+	}
+	out, err := exec.Command(a.xrayBin, args...).CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var parsed struct {
+		Stat []struct {
+			Name  string          `json:"name"`
+			Value json.RawMessage `json:"value"`
+		} `json:"stat"`
+	}
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return nil
+	}
+	totals := map[string]int64{}
+	for _, s := range parsed.Stat {
+		// user>>>EMAIL>>>traffic>>>uplink|downlink
+		parts := strings.Split(s.Name, ">>>")
+		if len(parts) != 4 || parts[0] != "user" {
+			continue
+		}
+		// Xray writes the value as a JSON number or a quoted string depending on
+		// version; accept both rather than silently counting zero.
+		raw := strings.Trim(string(s.Value), `"`)
+		if raw == "" || raw == "null" {
+			continue
+		}
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			continue
+		}
+		totals[parts[1]] += v
+	}
+	return totals
+}
+
+// systemMetrics reports this host's real CPU and memory use.
+//
+// The heartbeat previously sent the constants cpu:0.1 and mem_mb:128, which is
+// why every enrolled node displayed identical figures in the panel no matter
+// what it was doing — a dashboard that cannot show a node under load.
+func systemMetrics() (cpuPct float64, memMB int) {
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		if f := strings.Fields(string(b)); len(f) > 0 {
+			if la, err := strconv.ParseFloat(f[0], 64); err == nil {
+				n := runtime.NumCPU()
+				if n < 1 {
+					n = 1
+				}
+				// Load average over core count, as a percentage. It is not
+				// instantaneous utilisation, but it is a real measurement of
+				// this machine rather than a constant.
+				cpuPct = la / float64(n) * 100
+				if cpuPct > 100 {
+					cpuPct = 100
+				}
+			}
+		}
+	}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var total, avail int64
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) < 2 {
+				continue
+			}
+			v, err := strconv.ParseInt(f[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			switch f[0] {
+			case "MemTotal:":
+				total = v
+			case "MemAvailable:":
+				avail = v
+			}
+		}
+		if total > 0 && avail >= 0 {
+			memMB = int((total - avail) / 1024)
+		}
+	}
+	return cpuPct, memMB
 }
