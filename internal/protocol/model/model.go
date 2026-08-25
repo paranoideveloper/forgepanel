@@ -352,9 +352,6 @@ type Hysteria2Options struct {
 	MasqueradeType string         `json:"masquerade_type,omitempty"` // legacy: proxy, file, string
 	MasqueradeURL  string         `json:"masquerade_url,omitempty"`  // legacy
 
-	// HopIntervalMax, when > PortHopInterval, enables a randomized hop interval.
-	HopIntervalMax int `json:"hop_interval_max,omitempty"`
-
 	// BrutalCC is a PANEL preset flag only — sing-box has no brutal_cc field, so it
 	// is NEVER rendered. When set, applyCreateDefaults selects a matching bandwidth
 	// profile instead. Kept for backwards-compatible persistence.
@@ -470,23 +467,35 @@ type SSHOptions struct {
 // BrookOptions holds Brook parameters. Brook is supervised as an external
 // process only -- never imported or linked (GPL-3.0; see docs/LICENSING.md).
 type BrookOptions struct {
-	Mode                 string `json:"mode,omitempty"` // server, wsserver, wssserver, quicserver
-	Path                 string `json:"path,omitempty"`
-	UDPOverTCP           bool   `json:"udp_over_tcp,omitempty"`
-	WithoutBrookProtocol bool   `json:"without_brook_protocol,omitempty"`
+	Mode string `json:"mode,omitempty"` // server, wsserver, wssserver, quicserver
+	Path string `json:"path,omitempty"`
+	// UDPOverTCP is a CLIENT-side setting: it appears in the generated link, not
+	// in the server invocation. Checked against the pinned binary —
+	// `brook link --udpovertcp` emits `udpovertcp=true` and `brook server` has
+	// no such flag.
+	UDPOverTCP bool `json:"udp_over_tcp,omitempty"`
 }
 
 // ForgeDNSOptions holds DNS-tunnel parameters (spec §5). Adapter selects the
 // wire format; Zone is the delegated tunnel domain.
 type ForgeDNSOptions struct {
-	Adapter       string `json:"adapter,omitempty"` // stormdns, masterdns, cottendns
-	Zone          string `json:"zone,omitempty"`
-	NSHost        string `json:"ns_host,omitempty"`
-	Key           string `json:"key,omitempty"`
-	RRType        string `json:"rrtype,omitempty"` // TXT, NULL, CNAME, A, AAAA, MX
-	MaxUpstream   int    `json:"max_upstream,omitempty"`
-	MaxDownstream int    `json:"max_downstream,omitempty"`
-	EDNSBuffer    int    `json:"edns_buffer,omitempty"`
+	Adapter string `json:"adapter,omitempty"` // stormdns, masterdns, cottendns
+	Zone    string `json:"zone,omitempty"`
+	NSHost  string `json:"ns_host,omitempty"`
+	Key     string `json:"key,omitempty"`
+	RRType  string `json:"rrtype,omitempty"` // TXT, NULL, CNAME, A, AAAA, MX
+	// Chunk-size overrides. NOT HONOURED YET, and kept only so a stored config
+	// carrying them survives a round trip. The adapter derives its own limits
+	// from the wire format (internal/forgedns/adapter), the forgedns:// link
+	// carries no field for them, and the tunnel's egress path is still
+	// incomplete (FP-DNS-001) — so wiring a tuning override into it now would
+	// tune something that does not yet carry traffic. Documented rather than
+	// deleted because the values are meaningful and will be honoured once the
+	// egress path lands; documented rather than left bare because a field the
+	// panel accepts and silently ignores is worse than one it does not offer.
+	MaxUpstream   int `json:"max_upstream,omitempty"`
+	MaxDownstream int `json:"max_downstream,omitempty"`
+	EDNSBuffer    int `json:"edns_buffer,omitempty"`
 }
 
 // SSPluginOptions holds a Shadowsocks plugin (SIP003).

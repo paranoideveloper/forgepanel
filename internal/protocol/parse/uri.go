@@ -577,7 +577,12 @@ func parseBrook(raw string) (*model.Node, error) {
 	return &model.Node{
 		Protocol: model.ProtoBrook, Address: h, Port: p,
 		Password: q.Get("password"), Remark: frag,
-		Brook: &model.BrookOptions{Mode: mode},
+		// udpovertcp round-trips, so importing a link the panel exported (or one
+		// brook itself generated) does not quietly drop the setting.
+		Brook: &model.BrookOptions{
+			Mode:       mode,
+			UDPOverTCP: q.Get("udpovertcp") == "true",
+		},
 	}, nil
 }
 

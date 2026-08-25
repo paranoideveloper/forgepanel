@@ -454,8 +454,18 @@ func brookURI(n *model.Node) (string, error) {
 	v.Set("password", n.Password)
 	v.Set("server", net.JoinHostPort(n.Address, strconv.Itoa(n.Port)))
 	mode := "server"
-	if n.Brook != nil && n.Brook.Mode != "" {
-		mode = n.Brook.Mode
+	if n.Brook != nil {
+		if n.Brook.Mode != "" {
+			mode = n.Brook.Mode
+		}
+		// UDP over TCP was stored and never emitted, so a client configured for
+		// it silently ran plain UDP — which is exactly the case where UDP does
+		// not survive the network in between, and the reason the setting exists.
+		// The parameter name and value were taken from the pinned brook binary's
+		// own output (`brook link --udpovertcp`), not from documentation.
+		if n.Brook.UDPOverTCP {
+			v.Set("udpovertcp", "true")
+		}
 	}
 	return "brook://" + mode + "?" + encodeQuery(v) + frag(n.Remark), nil
 }
