@@ -812,6 +812,11 @@ type protoMeta struct {
 	Transports []string `json:"transports"`
 	Securities []string `json:"securities"`
 	Engine     string   `json:"engine"`
+	// ServesInbound is false for a protocol the panel can only DIAL, never
+	// listen on. Without it the UI offered SSH as an inbound protocol that no
+	// core can serve, and the resulting inbound sat in the database serving
+	// nobody.
+	ServesInbound bool `json:"serves_inbound"`
 }
 
 func (s *Server) handleProtocols(c *gin.Context) {
@@ -829,7 +834,11 @@ func (s *Server) handleProtocols(c *gin.Context) {
 	}
 	out := []protoMeta{}
 	for _, p := range model.AllProtocols() {
-		m := protoMeta{Proto: string(p), Label: labels[p], Engine: render.EngineFor(p)}
+		m := protoMeta{Proto: string(p), Label: labels[p], Engine: render.EngineFor(p),
+			// Published so the UI does not offer a protocol the panel cannot
+			// serve. SSH is dialable as an egress hop and cannot be an inbound:
+			// sing-box has an SSH outbound and no SSH inbound.
+			ServesInbound: render.ServesInbound(p)}
 		if p.UsesTransport() {
 			m.Transports = transportsAll
 			m.Securities = securitiesAll

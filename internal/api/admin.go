@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/version"
 )
@@ -189,6 +191,20 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	// Refuse a protocol no core can LISTEN on, before it is stored. SSH is
+	// dialable as an egress hop and has no server side here: sing-box provides
+	// an SSH outbound and no SSH inbound. Accepting it created an inbound that
+	// sat in the database, failed to render on every reload, and served nobody —
+	// with a default credential minted for it, which made it look configured.
+	if !render.ServesInbound(n.Protocol) {
+		c.JSON(400, gin.H{
+			"error": fmt.Sprintf("%s cannot be served as an inbound: no core in this panel implements an %s server",
+				n.Protocol, n.Protocol),
+			"remediation": "SSH can be used as an egress hop on another inbound's relay chain. " +
+				"For SSH tunnelling to this host, use the system's own sshd, which the panel does not manage.",
+		})
 		return
 	}
 	applyCreateDefaults(&n) // panel fills in keys/dest/flow/creds so it "just works"

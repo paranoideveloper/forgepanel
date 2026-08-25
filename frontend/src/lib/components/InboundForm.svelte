@@ -216,7 +216,11 @@
         <div class="fg">
           <label for="proto">Protocol</label>
           <select id="proto" data-testid="proto-select" bind:value={proto} onchange={onProtoChange}>
-            {#each schema.protocols as p}
+            <!-- Only protocols the panel can actually LISTEN on. SSH is
+                 dialable as an egress hop and has no server side here, and
+                 offering it produced an inbound that failed to render on every
+                 reload while looking configured. -->
+            {#each schema.protocols.filter((p) => p.serves_inbound !== false) as p}
               <option value={p.proto}>{p.label} ({p.engine})</option>
             {/each}
           </select>

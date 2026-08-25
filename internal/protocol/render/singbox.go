@@ -534,6 +534,27 @@ func sbPortRanges(spec string) []string {
 // side), for the supervisor's aggregate config. It covers the protocols
 // sing-box serves natively; returns an error for the rest so the caller routes
 // them to the correct engine.
+// ServesInbound reports whether ForgePanel can serve this protocol as an
+// INBOUND, as opposed to only dialling it as an outbound hop.
+//
+// SSH is the whole reason this exists. sing-box has an SSH OUTBOUND and no SSH
+// inbound, and the engine map routes SSH to sing-box — so the panel advertised
+// SSH in its protocol list, minted a default credential for it, accepted the
+// inbound, and then failed to render it on every reload. The inbound existed in
+// the database and served nobody.
+//
+// A false here is not a gap to be filled later: no core in this panel implements
+// an SSH server, and SSH tunnelling on a VPS is provided by the host's own sshd,
+// which is not this panel's to manage.
+func ServesInbound(p model.Protocol) bool {
+	switch p {
+	case model.ProtoSSH:
+		return false
+	default:
+		return true
+	}
+}
+
 func SingboxInbound(n *model.Node) (jobj, error) {
 	c := n.Clone()
 	c.Normalize()

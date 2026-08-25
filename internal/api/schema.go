@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
 )
 
 // Field describes one form input. Key is a dot-path into the canonical node JSON
@@ -33,6 +34,11 @@ type ProtoSchema struct {
 	// showing it for a protocol whose builder ignores it is how an operator ends
 	// up believing traffic is relayed when it leaves the machine directly.
 	Chainable bool `json:"chainable"`
+	// ServesInbound reports whether the panel can LISTEN on this protocol, as
+	// opposed to only dialling it as an outbound hop. The form must not offer a
+	// protocol that no core can serve: the resulting inbound is accepted, fails
+	// to render on every reload, and sits in the database serving nobody.
+	ServesInbound bool `json:"serves_inbound"`
 }
 
 // handleSchema returns the full field schema so the UI can render every option
@@ -78,9 +84,14 @@ func commonFields() []Field {
 func protocolSchemas(transports, securities []string) []ProtoSchema {
 	out := protocolSchemaList(transports, securities)
 	// Chainability comes from the one authority that decides it, so a protocol
-	// can never advertise a chain the builder would ignore.
+	// can never advertise a chain the builder would ignore. Servability is
+	// derived the same way, for the same reason: SSH was offered in this list
+	// while no core could serve it as an inbound, so the form let an operator
+	// build one that failed to render on every reload.
 	for i := range out {
-		out[i].Chainable = model.SupportsEgress(model.Protocol(out[i].Proto))
+		p := model.Protocol(out[i].Proto)
+		out[i].Chainable = model.SupportsEgress(p)
+		out[i].ServesInbound = render.ServesInbound(p)
 	}
 	return out
 }

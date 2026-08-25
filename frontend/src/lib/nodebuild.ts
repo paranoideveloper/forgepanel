@@ -27,6 +27,8 @@ export interface ProtoSchema {
   // Whether this protocol's engine can honour an upstream hop. Protocols whose
   // builder would ignore a chain must not be offered one.
   chainable?: boolean;
+  /** False when no core can LISTEN on this protocol; the form must not offer it. */
+  serves_inbound?: boolean;
 }
 
 export interface Schema {
