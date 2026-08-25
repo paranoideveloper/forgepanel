@@ -121,6 +121,14 @@ type fakeBins struct {
 
 func (f *fakeBins) Path(e binmgr.Engine) string { return filepath.Join(f.dir, string(e)) }
 
+// Present mirrors the real resolver: on disk and non-empty. The tests write real
+// stub binaries, so this answers truthfully rather than always saying yes — a
+// double that always claims presence would hide a caller that skips validation.
+func (f *fakeBins) Present(e binmgr.Engine) bool {
+	st, err := os.Stat(f.Path(e))
+	return err == nil && !st.IsDir() && st.Size() > 0
+}
+
 func (f *fakeBins) Ensure(e binmgr.Engine) (string, error) {
 	f.mu.Lock()
 	f.ensured = append(f.ensured, e)

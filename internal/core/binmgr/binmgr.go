@@ -204,9 +204,77 @@ func (m *Manager) installXray(dst string) error {
 	if err != nil {
 		return fmt.Errorf("download xray: %w", err)
 	}
-	return finalizeInstall(dst, asset, zipBytes,
+	if err := finalizeInstall(dst, asset, zipBytes,
 		func(tmp string) error { return extractZipFile(zipBytes, "xray", tmp) },
-		"Xray "+strings.TrimPrefix(XrayVersion, "v"))
+		"Xray "+strings.TrimPrefix(XrayVersion, "v")); err != nil {
+		return err
+	}
+	return installGeodata(filepath.Dir(dst), zipBytes)
+}
+
+// GeoAssetNames are the geodata files Xray needs to resolve geosite: and geoip:
+// rules.
+var GeoAssetNames = []string{"geoip.dat", "geosite.dat"}
+
+// installGeodata extracts the geodata files that ship in the SAME archive as the
+// binary.
+//
+// They were being thrown away. The extractor pulled out "xray" and discarded the
+// rest, so a panel-managed Xray had no geosite.dat or geoip.dat — and every rule
+// using `geosite:category-ads-all` or `geoip:private` failed, both when the panel
+// validated it and when the core ran it. Not a subtle failure: the core refuses
+// the whole config with "code not found in geosite.dat", taking every inbound
+// down. It only looked fine on a machine that happened to have a system-wide
+// Xray installed separately.
+//
+// They are installed NEXT TO the binary, and the engines are started with
+// XRAY_LOCATION_ASSET pointing there, so the panel's core uses the panel's
+// geodata rather than whatever version some unrelated system install left behind.
+func installGeodata(dir string, zipBytes []byte) error {
+	for _, name := range GeoAssetNames {
+		dst := filepath.Join(dir, name)
+		tmp := dst + ".tmp"
+		_ = os.Remove(tmp)
+		if err := extractZipFile(zipBytes, name, tmp); err != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("xray geodata: %w", err)
+		}
+		if err := os.Rename(tmp, dst); err != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("install %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Present reports whether an engine's binary is already installed, WITHOUT
+// downloading it.
+//
+// The distinction matters: Ensure fetches ~60MB when the binary is absent, which
+// is right for a reload and completely wrong for validating an edit. A routing
+// rule save that silently triggered a download would block the request for as
+// long as the transfer took, on a panel that had not asked for the core yet.
+func (m *Manager) Present(e Engine) bool {
+	st, err := os.Stat(m.Path(e))
+	return err == nil && !st.IsDir() && st.Size() > 0
+}
+
+// GeoAssetDir is the directory holding the geodata for an engine's binary.
+func (m *Manager) GeoAssetDir(e Engine) string { return filepath.Dir(m.Path(e)) }
+
+// GeoAssetsPresent reports whether both geodata files are installed.
+//
+// Used to tell "this rule names a category that does not exist" apart from "this
+// panel has no geodata at all" — two failures with the same core error message
+// and completely different fixes.
+func (m *Manager) GeoAssetsPresent(e Engine) bool {
+	dir := m.GeoAssetDir(e)
+	for _, name := range GeoAssetNames {
+		if st, err := os.Stat(filepath.Join(dir, name)); err != nil || st.Size() == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // installSingbox downloads the tar.gz, extracts the binary, and verifies the

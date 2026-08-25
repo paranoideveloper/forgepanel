@@ -184,6 +184,9 @@ type Health struct {
 // BinaryResolver is the part of binmgr an adapter needs: where a pinned core
 // binary lives, and how to make sure it is there. *binmgr.Manager implements it.
 type BinaryResolver interface {
+	// Present reports whether the binary is already installed, without
+	// downloading it.
+	Present(e binmgr.Engine) bool
 	// Path is where the pinned binary would live, whether or not it is present.
 	Path(e binmgr.Engine) string
 	// Ensure downloads and checksum-verifies the pinned binary if needed.
@@ -236,6 +239,10 @@ type Options struct {
 	// equivalent handler API in the builds the panel ships, and claiming
 	// otherwise would leave its users out of sync with its config.
 	HotApply map[string]func(oldCfg, newCfg []byte) (bool, error)
+	// EngineEnv adds environment entries to a supervised core, keyed by engine
+	// name. Used for XRAY_LOCATION_ASSET so the core reads the panel's geodata
+	// rather than an unrelated system-wide install's.
+	EngineEnv map[string][]string
 }
 
 func (o Options) certs() (string, string) {

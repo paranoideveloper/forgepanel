@@ -71,6 +71,11 @@ type Controller struct {
 	// A function rather than stored state so an edit takes effect on the next
 	// reload without the controller having to be told about it — the pattern
 	// that let a stale copy of the config linger before.
+	//
+	// It has its OWN mutex rather than sharing c.mu: it is read from Validate,
+	// which deliberately runs without the reload lock so a preview cannot be
+	// blocked by a reload in progress.
+	routingMu     sync.RWMutex
 	routingSource func() ([]engine.OutboundSpec, []engine.RuleSpec)
 
 	mu      sync.Mutex
@@ -419,17 +424,54 @@ func validateResult(err error) string {
 // routing rules. Nil (the default) renders a config identical to one from before
 // the feature existed.
 func (c *Controller) SetRoutingSource(fn func() ([]engine.OutboundSpec, []engine.RuleSpec)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.routingMu.Lock()
+	defer c.routingMu.Unlock()
 	c.routingSource = fn
 }
 
-// routing reads the current routing definition. Callers hold c.mu.
+// routing reads the current routing definition.
 func (c *Controller) routing() ([]engine.OutboundSpec, []engine.RuleSpec) {
-	if c.routingSource == nil {
+	c.routingMu.RLock()
+	fn := c.routingSource
+	c.routingMu.RUnlock()
+	if fn == nil {
 		return nil, nil
 	}
-	return c.routingSource()
+	return fn()
+}
+
+// ValidateGenerated asks each core to validate an already-built bundle.
+//
+// Rendering only proves the panel can produce the JSON; it says nothing about
+// whether the core accepts it. A routing rule naming a geosite category that
+// does not exist renders perfectly and is refused by the core with "code not
+// found in geosite.dat" — which rejects the whole config and takes every inbound
+// with it.
+//
+// A missing binary is NOT an error: a panel whose core has not been downloaded
+// yet must still be configurable, and the reload path validates before applying
+// regardless, so nothing unvalidated reaches a running core.
+func (c *Controller) ValidateGenerated(b *engine.Bundle) error {
+	if b == nil {
+		return nil
+	}
+	c.mu.Lock()
+	reg := c.registry
+	c.mu.Unlock()
+	if reg == nil {
+		return nil
+	}
+	return reg.ValidateBundle(b)
+}
+
+// GeoDataReady reports whether the geodata Xray needs for geosite:/geoip: rules
+// is installed.
+//
+// The core's error for a missing database is indistinguishable from its error
+// for a misspelt category, so knowing which of the two is happening has to come
+// from somewhere else.
+func (c *Controller) GeoDataReady() bool {
+	return c.bins.GeoAssetsPresent(binmgr.EngineXray)
 }
 
 // LocalNodeName labels sessions served by the cores this panel runs itself, so

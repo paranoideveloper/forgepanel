@@ -156,8 +156,16 @@ func probeInbound(t *testing.T, dir, xrayBin, sbBin string, srv *model.Node, ori
 	}
 	stop := startProc(t, bin, "run", "-c", cfgPath)
 	defer stop()
-	// wait for socks to open
-	deadline := time.Now().Add(6 * time.Second)
+	// Wait for the client's SOCKS listener.
+	//
+	// Generous on purpose. The loop exits the moment the port answers, so a long
+	// deadline costs nothing when the machine is idle — it only matters when it
+	// is not. Six seconds was enough until this package grew a set of tests that
+	// each spawn a real core, at which point a loaded CI box (or a `-race` build
+	// running alongside) started failing here for reasons that had nothing to do
+	// with connectivity. A test that fails on a busy machine teaches people to
+	// re-run it, which is how a real failure gets ignored.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(socks), 200*time.Millisecond); err == nil {
 			c.Close()

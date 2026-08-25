@@ -79,6 +79,14 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 		HotApply: map[string]func(old, next []byte) (bool, error){
 			model.EngineXray: c.xrayHotApply,
 		},
+		// The geodata that ships in Xray's own archive was being discarded by
+		// the installer, so every geosite:/geoip: rule failed with "code not
+		// found in geosite.dat" — taking the whole config, and therefore every
+		// inbound, down. It is installed now, and pointed at explicitly so the
+		// core cannot silently fall back to a stale system-wide copy.
+		EngineEnv: map[string][]string{
+			model.EngineXray: {"XRAY_LOCATION_ASSET=" + c.bins.GeoAssetDir(binmgr.EngineXray)},
+		},
 	}, c.brook, c.awg)
 }
 

@@ -134,6 +134,7 @@ func (a *supervised) spec() supervisor.EngineSpec {
 		ConfigPath: a.configPath(),
 		OnLine:     a.opts.OnEngineLine,
 		HotApply:   a.opts.HotApply[a.name],
+		Env:        a.opts.EngineEnv[a.name],
 	}
 }
 
@@ -175,6 +176,10 @@ func (a *supervised) GenerateMultiUser(specs []engine.InboundSpec, certPath, key
 	cfg, n := a.pick(b)
 	return cfg, n, b.Skipped, nil
 }
+
+// BinaryPresent reports whether this core's binary is already installed. It lets
+// a caller skip validation rather than pay for a download inside a check.
+func (a *supervised) BinaryPresent() bool { return a.bins.Present(a.binEngine) }
 
 func (a *supervised) ValidateConfig(cfg []byte) error {
 	if _, err := a.bins.Ensure(a.binEngine); err != nil {

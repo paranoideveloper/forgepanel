@@ -255,3 +255,52 @@ func DefaultRegistry(opts Options, brook BrookRunner, awg InterfaceRunner) (*Reg
 	}
 	return r, nil
 }
+
+// ValidateBundle asks each core to validate its share of an already-built
+// bundle.
+//
+// This is the gap between "the panel produced JSON" and "the core accepts it".
+// A routing rule naming a geosite category that does not exist renders perfectly
+// and is refused with "code not found in geosite.dat", which rejects the WHOLE
+// config — every inbound on the box, for one typo. Only the core can say so.
+//
+// A missing binary is not an error. A panel whose core has not been downloaded
+// yet must still be configurable, and the reload path validates before applying
+// regardless.
+func (r *Registry) ValidateBundle(b *engine.Bundle) error {
+	if b == nil {
+		return nil
+	}
+	for _, a := range r.All() {
+		var cfg []byte
+		switch a.Name() {
+		case model.EngineXray:
+			if b.XrayN == 0 {
+				continue
+			}
+			cfg = b.Xray
+		case model.EngineSingBox:
+			if b.SingboxN == 0 {
+				continue
+			}
+			cfg = b.Singbox
+		default:
+			// Cores whose config this bundle does not carry — Brook, AmneziaWG —
+			// are validated on their own path.
+			continue
+		}
+		if len(cfg) == 0 {
+			continue
+		}
+		if v, ok := a.(interface{ BinaryPresent() bool }); ok && !v.BinaryPresent() {
+			// The core has not been downloaded yet. Validating would trigger a
+			// ~60MB fetch inside what the caller thinks is a cheap check, and
+			// the reload path validates before applying anyway.
+			continue
+		}
+		if err := a.ValidateConfig(cfg); err != nil {
+			return fmt.Errorf("%s: %w", a.Name(), err)
+		}
+	}
+	return nil
+}

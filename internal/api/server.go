@@ -556,6 +556,8 @@ func (s *Server) routes() {
 			admin.PUT("/routing/rules/:id", s.handleSaveRoutingRule)
 			admin.DELETE("/routing/rules/:id", s.handleDeleteRoutingRule)
 			admin.POST("/routing/rules/reorder", s.handleReorderRoutingRules)
+			admin.GET("/routing/presets", s.handleListRoutingPresets)
+			admin.POST("/routing/presets/:name", s.handleApplyRoutingPreset)
 			admin.GET("/traffic/series", s.handleTrafficSeries)
 			admin.GET("/traffic/top", s.handleTopConsumers)
 			admin.GET("/audit", s.handleListAudit)

@@ -86,9 +86,28 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 		return true
 	}
 	outs, rules := s.routingSpecs()
-	_, err := engine.BuildMultiWithRouting(s.enabledInboundSpecs(), 0, "", "", outs, rules)
+	bundle, err := engine.BuildMultiWithRouting(s.enabledInboundSpecs(), 0, "", "", outs, rules)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+
+	// Then ask the CORE. Rendering only proves the panel can produce the JSON;
+	// it says nothing about whether the core will accept it. A rule naming a
+	// geosite category that does not exist renders perfectly and is refused by
+	// the core with "code not found in geosite.dat" — which rejects the WHOLE
+	// config and takes every inbound down. That is not hypothetical: a preset
+	// written for this very feature referenced a torrent category that turned
+	// out not to exist, and only the core could say so.
+	//
+	// Best-effort: a panel whose core has not been downloaded yet must still be
+	// configurable, and the reload path validates before applying regardless, so
+	// nothing unvalidated ever reaches a running core.
+	if err := s.engine.ValidateGenerated(bundle); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+			"hint":  "the core rejected this configuration; a geosite:/geoip: name that does not exist is the usual cause",
+		})
 		return false
 	}
 	return true

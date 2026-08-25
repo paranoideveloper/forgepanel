@@ -59,6 +59,15 @@ type EngineSpec struct {
 	// this change hot-appliable" belongs to the engine that knows, and so a
 	// change it does not understand can safely decline.
 	HotApply func(oldCfg, newCfg []byte) (bool, error)
+
+	// Env is added to the engine process's environment.
+	//
+	// This is how XRAY_LOCATION_ASSET reaches the core. Without it, Xray falls
+	// back to searching /usr/local/share/xray and /usr/share/xray, so a panel
+	// whose own geodata is current would silently use whatever version an
+	// unrelated system-wide install left behind — or find none at all and refuse
+	// every config containing a geosite: rule.
+	Env []string
 }
 
 // Process supervises one EngineSpec.
@@ -87,9 +96,22 @@ func NewProcess(spec EngineSpec) *Process {
 // Validate runs "<bin> <testArgs> <config>" against a candidate config file and
 // returns the engine's own verdict. This is the §18 gate (`xray run -test`,
 // `sing-box check`).
+// validateEnv mirrors the run environment. A config validated WITHOUT the
+// geodata path and then run WITH it (or the reverse) would pass one and fail the
+// other, which is the worst possible split: the panel says the config is good
+// and the core refuses it.
+func (p *Process) validateEnv() []string {
+	if len(p.spec.Env) == 0 {
+		return nil
+	}
+	return append(os.Environ(), p.spec.Env...)
+}
+
 func (p *Process) Validate(configPath string) error {
 	args := append(append([]string{}, p.spec.TestArgs...), configPath)
-	out, err := exec.Command(p.spec.BinPath, args...).CombinedOutput()
+	cmd := exec.Command(p.spec.BinPath, args...)
+	cmd.Env = p.validateEnv()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s rejected config: %s", p.spec.Name, tail(string(out)))
 	}
@@ -186,6 +208,9 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		}
 		args := append(append([]string{}, p.spec.RunArgs...), p.spec.ConfigPath)
 		cmd := exec.CommandContext(ctx, p.spec.BinPath, args...)
+		if len(p.spec.Env) > 0 {
+			cmd.Env = append(os.Environ(), p.spec.Env...)
+		}
 		// Graceful shutdown on ctx cancel: SIGTERM first, then Go force-kills after
 		// WaitDelay if the core ignores it. Crucially, Wait() (below) does not
 		// return until the process is reaped, so Stop() -> <-done guarantees the

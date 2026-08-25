@@ -267,3 +267,138 @@ func TestDisabledRoutingIsNotRendered(t *testing.T) {
 		t.Fatalf("a disabled rule was rendered: %+v", rules)
 	}
 }
+
+// --- presets ---------------------------------------------------------------
+
+func TestPresetsIncludeTheSecurityOne(t *testing.T) {
+	s, token := adminAPI(t)
+	code, body := doGET(t, s, "/api/admin/routing/presets", token)
+	if code != 200 {
+		t.Fatalf("%d: %s", code, body)
+	}
+	var res struct {
+		Presets []struct {
+			Name  string `json:"name"`
+			Title string `json:"title"`
+			Why   string `json:"why"`
+			Rules []struct {
+				IP []string `json:"ip"`
+			} `json:"rules"`
+		} `json:"presets"`
+		GeodataReady bool `json:"geodata_ready"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+
+	var priv *struct {
+		Name  string `json:"name"`
+		Title string `json:"title"`
+		Why   string `json:"why"`
+		Rules []struct {
+			IP []string `json:"ip"`
+		} `json:"rules"`
+	}
+	for i := range res.Presets {
+		if res.Presets[i].Name == "block-private" {
+			priv = &res.Presets[i]
+		}
+	}
+	if priv == nil {
+		t.Fatal("there is no block-private preset")
+	}
+	// The link-local range is the one that matters: 169.254.169.254 serves cloud
+	// instance credentials to anything on the box that asks, and a proxy will
+	// ask on a user's behalf because that is its job.
+	found := false
+	for _, r := range priv.Rules {
+		for _, ip := range r.IP {
+			if ip == "169.254.0.0/16" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the private-network preset does not block 169.254.0.0/16; " +
+			"cloud instance metadata is reachable through the proxy")
+	}
+	// A preset whose consequences are not stated gets applied and then blamed.
+	if priv.Why == "" || priv.Title == "" {
+		t.Error("the preset does not explain what it is for")
+	}
+}
+
+func TestApplyingAPresetIsIdempotent(t *testing.T) {
+	s, token := adminAPI(t)
+	code, body := doPOST(t, s, "/api/admin/routing/presets/block-private", token, `{}`)
+	if code != 200 {
+		t.Fatalf("first apply: %d %s", code, body)
+	}
+	var first struct {
+		Applied int      `json:"applied"`
+		Skipped []string `json:"skipped"`
+	}
+	if err := json.Unmarshal([]byte(body), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Applied == 0 {
+		t.Fatal("the preset added nothing")
+	}
+
+	code, body = doPOST(t, s, "/api/admin/routing/presets/block-private", token, `{}`)
+	if code != 200 {
+		t.Fatalf("second apply: %d %s", code, body)
+	}
+	var second struct {
+		Applied int      `json:"applied"`
+		Skipped []string `json:"skipped"`
+	}
+	if err := json.Unmarshal([]byte(body), &second); err != nil {
+		t.Fatal(err)
+	}
+	// A duplicated rule can never match, because the identical one above it
+	// already did. It is pure confusion in a table read top to bottom.
+	if second.Applied != 0 || len(second.Skipped) != first.Applied {
+		t.Fatalf("re-applying duplicated rules: applied=%d skipped=%v", second.Applied, second.Skipped)
+	}
+}
+
+func TestApplyingAPresetKeepsExistingRules(t *testing.T) {
+	s, token := adminAPI(t)
+	if code, b := doPOST(t, s, "/api/admin/routing/rules", token,
+		`{"name":"mine","domain":["hand.written"],"outbound_tag":"block","enabled":true}`); code != 200 {
+		t.Fatalf("%d: %s", code, b)
+	}
+	if code, b := doPOST(t, s, "/api/admin/routing/presets/block-ads", token, `{}`); code != 200 {
+		t.Fatalf("%d: %s", code, b)
+	}
+
+	var res struct {
+		Rules []store.RoutingRule `json:"rules"`
+	}
+	_, body := doGET(t, s, "/api/admin/routing/rules", token)
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatal(err)
+	}
+	// Wiping the table in response to one click on a convenience feature would
+	// destroy rules an operator spent real time on.
+	found := false
+	for _, r := range res.Rules {
+		if r.Name == "mine" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("applying a preset removed a hand-written rule")
+	}
+	if len(res.Rules) < 2 {
+		t.Fatalf("rules = %d, want the hand-written one plus the preset's", len(res.Rules))
+	}
+}
+
+func TestUnknownPresetIs404(t *testing.T) {
+	s, token := adminAPI(t)
+	if code, _ := doPOST(t, s, "/api/admin/routing/presets/nonsense", token, `{}`); code != 404 {
+		t.Errorf("unknown preset returned %d, want 404", code)
+	}
+}
