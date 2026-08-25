@@ -1,6 +1,12 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -39,8 +45,25 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 	}
 	s.audit(c, "node.enroll", req.Name)
 	panelURL := "https://" + c.Request.Host
-	enroll := "curl -fsSL " + panelURL + "/node-install.sh | PANEL=" + panelURL + " TOKEN=" + tok + " bash"
-	c.JSON(201, gin.H{"id": n.ID, "name": n.Name, "enroll_command": enroll, "token": tok})
+	// The node must be able to VERIFY this panel. Until a domain and a real
+	// certificate exist, the panel serves a self-signed one that no remote host
+	// can chain to a public CA — measured on live servers, forgenode crash-looped
+	// on "certificate signed by unknown authority" and enrolment could never
+	// complete. Handing the node the certificate's fingerprint at enrolment
+	// time gives it a trust anchor without weakening the transport: the node
+	// pins this exact certificate rather than skipping verification, so the
+	// enrolment token is never shipped over an unverified connection.
+	//
+	// An empty fingerprint is not an error: it means the panel presents a
+	// CA-issued certificate, and the node should use the system trust store.
+	fp := s.panelCertFingerprint()
+	enroll := "curl -fsSL " + panelURL + "/node-install.sh | PANEL=" + panelURL + " TOKEN=" + tok
+	if fp != "" {
+		enroll += " PANEL_FINGERPRINT=" + fp
+	}
+	enroll += " bash"
+	c.JSON(201, gin.H{"id": n.ID, "name": n.Name, "enroll_command": enroll,
+		"token": tok, "panel_fingerprint": fp})
 }
 
 // handleNodeRegister is called by a node agent with its enroll token to complete
@@ -146,4 +169,36 @@ systemctl daemon-reload && systemctl enable --now forgenode
 echo "forgenode: started"
 `
 	c.Data(200, "text/x-shellscript; charset=utf-8", []byte(script))
+}
+
+// panelCertFingerprint returns the SHA-256 of the certificate this panel serves,
+// hex encoded, for a node to pin.
+//
+// It reads the certificate the panel actually presents rather than any
+// configured path, because those can diverge: a panel that fell back to its
+// self-signed certificate after an ACME failure would otherwise hand out the
+// fingerprint of a certificate it is not using, and every node would then
+// refuse to connect for what looks like an interception.
+//
+// A CA-issued certificate returns "" — the node uses the system trust store and
+// needs no pin.
+func (s *Server) panelCertFingerprint() string {
+	if s.cfg == nil || s.cfg.Panel() == nil {
+		return ""
+	}
+	p := s.cfg.Panel()
+	// A configured domain implies a real certificate; nothing to pin.
+	if strings.TrimSpace(p.Domain) != "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "certs", "self.crt"))
+	if err != nil {
+		return ""
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:])
 }

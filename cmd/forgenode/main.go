@@ -5,6 +5,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,8 +25,12 @@ import (
 )
 
 type NodeAgent struct {
-	panel     string
-	token     string
+	panel string
+	token string
+	// pin is the panel's certificate SHA-256, hex. Empty means "use the system
+	// trust store", which is correct once the panel has a real certificate.
+	pin       string
+	client    *http.Client
 	dataDir   string
 	binMgr    *binmgr.Manager
 	xrayBin   string
@@ -37,6 +46,7 @@ func main() {
 	}
 	panel := os.Getenv("PANEL")
 	token := os.Getenv("TOKEN")
+	pin := os.Getenv("PANEL_FINGERPRINT")
 	if panel == "" || token == "" {
 		fmt.Fprintln(os.Stderr, "forgenode: set PANEL and TOKEN environment variables")
 		os.Exit(2)
@@ -58,6 +68,7 @@ func main() {
 	agent := &NodeAgent{
 		panel:   panel,
 		token:   token,
+		pin:     pin,
 		dataDir: dataDir,
 		binMgr:  bm,
 		xrayBin: xrayPath,
@@ -166,6 +177,48 @@ func (a *NodeAgent) heartbeat() (string, error) {
 	return resp.XrayConfig, nil
 }
 
+// httpClient returns the client used for every panel call.
+//
+// A fresh panel serves HTTPS with a self-signed certificate, because a domain
+// is optional and most installs start life reachable only by IP. A remote node
+// cannot verify that certificate against the system trust store — measured on
+// live servers, forgenode crash-looped on "certificate signed by unknown
+// authority" and a multi-node install simply could not complete.
+//
+// Disabling verification outright would be the easy fix and the wrong one: the
+// node ships its enrolment token on this connection, so an unverified transport
+// hands that token to anyone who can intercept it. Instead the node PINS the
+// panel's certificate by SHA-256 fingerprint, supplied at enrolment time
+// alongside the token. Verification still happens; the trust anchor is just the
+// pin rather than a public CA. With no pin configured the system trust store is
+// used unchanged, which is what a panel with a real certificate wants.
+func (a *NodeAgent) httpClient() *http.Client {
+	if a.client != nil {
+		return a.client
+	}
+	c := &http.Client{Timeout: 10 * time.Second}
+	if a.pin != "" {
+		want := strings.ToLower(strings.NewReplacer(":", "", " ", "").Replace(a.pin))
+		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{
+			// The pin IS the verification, so the default chain check is
+			// bypassed and replaced below rather than simply switched off.
+			InsecureSkipVerify: true,
+			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				for _, raw := range rawCerts {
+					sum := sha256.Sum256(raw)
+					if hex.EncodeToString(sum[:]) == want {
+						return nil
+					}
+				}
+				return fmt.Errorf("panel certificate does not match the pinned fingerprint %s; "+
+					"re-run enrolment to get the current pin, or the connection is being intercepted", want)
+			},
+		}}
+	}
+	a.client = c
+	return c
+}
+
 func (a *NodeAgent) post(path string, body []byte, out any) error {
 	url := a.panel + path
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
@@ -173,8 +226,7 @@ func (a *NodeAgent) post(path string, body []byte, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	r, err := client.Do(req)
+	r, err := a.httpClient().Do(req)
 	if err != nil {
 		return err
 	}
