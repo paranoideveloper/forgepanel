@@ -36,6 +36,7 @@ const (
 	migVRollups       uint64 = 6
 	migVIPLimit       uint64 = 7
 	migVRouting       uint64 = 8
+	migVNotServing    uint64 = 9
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -134,6 +135,20 @@ func migrations() []migrate.Migration {
 			// per-user exit.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Outbound{}, &RoutingRule{}})
+				return err
+			},
+		},
+		{
+			Version: migVNotServing,
+			Name:    "inbound_not_serving_reason",
+			Rollback: "safe to drop. The columns hold a diagnostic recomputed on every reload; " +
+				"losing them costs the current explanation, which the next reload rewrites.",
+			// Records WHY an inbound is absent from the running configuration.
+			// Without the migration the columns do not exist, the write fails on
+			// every reload, and the panel goes back to accepting an inbound that
+			// silently never serves.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Inbound{}})
 				return err
 			},
 		},

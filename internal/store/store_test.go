@@ -239,3 +239,58 @@ func TestResetUserUsageCASReactivatesLimited(t *testing.T) {
 		t.Fatalf("an expired user must stay limited after a quota reset, got status=%s", got2.Status)
 	}
 }
+
+// TestCreatingADisabledInboundKeepsItDisabled guards a GORM landmine.
+//
+// Inbound.Enabled carries `gorm:"default:true"`, and GORM omits a zero-valued
+// field on INSERT when its column declares a default — so creating an inbound
+// with Enabled:false stored it as ENABLED. A caller that asked for a disabled
+// inbound got a live listener on a port they had not agreed to open.
+//
+// GORM also writes the applied default BACK into the struct, so the in-memory
+// value reads true afterwards too: nothing anywhere retained what was asked for.
+func TestCreatingADisabledInboundKeepsItDisabled(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &Inbound{Remark: "deliberately-off", Protocol: "vless", Port: 1443, Enabled: false}
+	if err := db.SaveInbound(in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Enabled {
+		t.Error("the struct was rewritten to enabled; the caller's request is gone")
+	}
+	got, err := db.InboundByID(in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatal("an inbound created as disabled was stored as ENABLED — a listener on a port nobody agreed to open")
+	}
+
+	// The default must still apply when the caller says nothing about it, or
+	// every existing creation path starts producing dead inbounds.
+	on := &Inbound{Remark: "default-on", Protocol: "vless", Port: 1444, Enabled: true}
+	if err := db.SaveInbound(on); err != nil {
+		t.Fatal(err)
+	}
+	back, err := db.InboundByID(on.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.Enabled {
+		t.Fatal("an inbound created as enabled is disabled")
+	}
+
+	// And disabling an EXISTING inbound must keep working: that path writes
+	// every field and was never affected, but it is the one operators use.
+	back.Enabled = false
+	if err := db.SaveInbound(back); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := db.InboundByID(on.ID)
+	if again.Enabled {
+		t.Fatal("disabling an existing inbound did not stick")
+	}
+}

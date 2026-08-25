@@ -149,7 +149,11 @@ func (s *Server) reloadEngines() {
 		return
 	}
 	specs := s.enabledInboundSpecs()
-	_, _ = s.engine.ReloadSpecs(specs)
+	bundle, _ := s.engine.ReloadSpecs(specs)
+	// The bundle used to be discarded. It carries the list of inbounds no core
+	// could serve, so throwing it away meant an operator created an inbound, the
+	// panel accepted it, it never carried a byte, and NOTHING anywhere said why.
+	s.recordNotServing(bundle)
 	// Keep the host firewall in sync with the inbound ports so a created inbound
 	// is actually reachable from the internet — otherwise it listens, passes the
 	// loopback Verify, and ufw silently drops every external client (a phone).

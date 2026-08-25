@@ -166,6 +166,18 @@ type Inbound struct {
 	// PrevNodeJSON holds the config as it was BEFORE the last edit, so a single
 	// level of undo can restore it. Empty means there is nothing to undo.
 	PrevNodeJSON string `gorm:"type:text" json:"-"`
+
+	// NotServingReason is why this inbound is not in the running configuration,
+	// or empty when it is serving normally.
+	//
+	// An inbound no core can serve is left OUT of the generated config so that
+	// one bad inbound cannot take the whole panel down — which is right, and was
+	// already the behaviour. What was missing is that nothing told anyone. The
+	// operator created an inbound, the panel accepted it, it never carried a
+	// byte, and the only trace was a field in a bundle the reload path threw
+	// away.
+	NotServingReason string     `gorm:"type:text" json:"not_serving_reason,omitempty"`
+	NotServingSince  *time.Time `json:"not_serving_since,omitempty"`
 }
 
 // Node rehydrates the canonical model.Node from the stored JSON.

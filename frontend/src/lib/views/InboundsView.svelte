@@ -8,6 +8,7 @@
 
   interface Row {
     id: number; remark: string; protocol: string; port: number; enabled: boolean;
+    not_serving_reason?: string; not_serving_since?: string;
     reachable?: boolean;
     node?: any;
   }
@@ -226,6 +227,16 @@
             <td>{r.port}</td>
             <td>
               <span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? 'Enabled' : 'Disabled'}</span>
+              <!-- An inbound no core could serve is left OUT of the running
+                   config so one bad inbound cannot take the rest down. Without
+                   this badge the operator sees "Enabled", the inbound carries no
+                   traffic, and nothing anywhere says why. -->
+              {#if r.enabled && r.not_serving_reason}
+                <span class="badge err" data-testid="not-serving"
+                      title="This inbound is enabled but is NOT in the running configuration: {r.not_serving_reason}{r.not_serving_since ? ' (since ' + new Date(r.not_serving_since).toLocaleString() + ')' : ''}">
+                  ⚠ not serving
+                </span>
+              {/if}
               {#if r.enabled && r.reachable === false}
                 <span class="badge err" data-testid="fw-blocked" title="Port {r.port} is not allowed in the host firewall (ufw), so external clients are dropped even though Verify passes on loopback. A native install running as root opens it automatically; inside Docker or behind a VPS provider firewall the panel cannot, so allow it yourself: ufw allow {r.port} (and in your provider's firewall panel).">🔥 firewall</span>
               {/if}

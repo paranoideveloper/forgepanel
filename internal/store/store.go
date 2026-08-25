@@ -107,7 +107,48 @@ func (s *Store) InboundByID(id uint) (*Inbound, error) {
 }
 
 // SaveInbound updates an inbound.
-func (s *Store) SaveInbound(in *Inbound) error { return s.db.Save(in).Error }
+// SaveInbound creates or updates an inbound.
+//
+// Creating one with Enabled:false silently stored it as ENABLED, so a caller
+// that asked for a disabled inbound got a live listener. Inbound.Enabled carries
+// `gorm:"default:true"`, and GORM omits a zero-valued field on INSERT when its
+// column declares a default. Select("*") does NOT override that — measured — and
+// GORM additionally writes the applied default back into the struct, which is
+// why the intent must be captured before the call. The UPDATE path writes every
+// field and was never affected.
+func (s *Store) SaveInbound(in *Inbound) error {
+	if in.ID == 0 {
+		// The caller's intent has to be captured BEFORE the insert. GORM omits a
+		// zero-valued field on INSERT when its column declares a default, and
+		// then writes the applied default BACK into the struct — so by the time
+		// Create returns, in.Enabled reads true whatever the caller passed, and
+		// the original request is gone.
+		wantEnabled := in.Enabled
+		if err := s.db.Create(in).Error; err != nil {
+			return err
+		}
+		if !wantEnabled {
+			in.Enabled = false
+			return s.db.Model(&Inbound{}).Where("id = ?", in.ID).
+				UpdateColumn("enabled", false).Error
+		}
+		return nil
+	}
+	return s.db.Save(in).Error
+}
+
+// UpdateInboundFields writes named columns only.
+//
+// A targeted update rather than SaveInbound: the caller here runs on every
+// engine reload and holds an inbound it read moments ago, and saving the whole
+// row would overwrite any concurrent edit an operator made in between with the
+// stale copy.
+func (s *Store) UpdateInboundFields(id uint, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	return s.db.Model(&Inbound{}).Where("id = ?", id).Updates(fields).Error
+}
 
 // --- groups & users -------------------------------------------------------
 
