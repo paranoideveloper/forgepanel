@@ -555,8 +555,10 @@ func TestXrayStreamSettingsTransports(t *testing.T) {
 					t.Errorf("multiMode = %v, want false", g["multiMode"])
 				}
 			}},
+		// maxConcurrency and maxConnections are alternative strategies the core
+		// refuses to see together, so the two are exercised separately.
 		{"xhttp full", model.Transport{Network: model.NetXHTTP, Path: "/xh", Host: "x.example.com", XHTTPMode: "stream-up", XPaddingB: "100-1000",
-			XMux: &model.XMux{MaxConcurrency: "16", MaxConnections: "8", CMaxReuseTimes: "64", CMaxLifetimeMs: "600000", HMaxRequestTime: "600", HKeepAlivePeriod: 45}},
+			XMux: &model.XMux{MaxConcurrency: "16", CMaxReuseTimes: "64", HMaxRequestTime: "600", HMaxReusableSecs: "1800-3000", HKeepAlivePeriod: 45}},
 			func(t *testing.T, ss jobj) {
 				xh := sub(t, ss, "xhttpSettings")
 				if str(t, xh, "path") != "/xh" || str(t, xh, "mode") != "stream-up" ||
@@ -564,8 +566,8 @@ func TestXrayStreamSettingsTransports(t *testing.T) {
 					t.Fatalf("xhttpSettings = %v", xh)
 				}
 				xm := sub(t, xh, "xmux")
-				for k, want := range map[string]string{"maxConcurrency": "16", "maxConnections": "8",
-					"cMaxReuseTimes": "64", "cMaxLifetimeMs": "600000", "hMaxRequestTimes": "600"} {
+				for k, want := range map[string]string{"maxConcurrency": "16",
+					"cMaxReuseTimes": "64", "hMaxRequestTimes": "600", "hMaxReusableSecs": "1800-3000"} {
 					if str(t, xm, k) != want {
 						t.Errorf("xmux.%s = %v, want %q", k, xm[k], want)
 					}
@@ -573,6 +575,16 @@ func TestXrayStreamSettingsTransports(t *testing.T) {
 				if num(t, xm, "hKeepAlivePeriod") != 45 {
 					t.Errorf("xmux.hKeepAlivePeriod = %v", xm["hKeepAlivePeriod"])
 				}
+				// cMaxLifetimeMs is not part of the pinned core's xmux schema.
+				mustAbsent(t, xm, "cMaxLifetimeMs", "maxConnections")
+			}},
+		{"xhttp xmux connection pool", model.Transport{Network: model.NetXHTTP, XMux: &model.XMux{MaxConnections: "8"}},
+			func(t *testing.T, ss jobj) {
+				xm := sub(t, sub(t, ss, "xhttpSettings"), "xmux")
+				if str(t, xm, "maxConnections") != "8" {
+					t.Errorf("xmux.maxConnections = %v", xm["maxConnections"])
+				}
+				mustAbsent(t, xm, "maxConcurrency")
 			}},
 		{"xhttp empty xmux is omitted", model.Transport{Network: model.NetXHTTP, XMux: &model.XMux{}},
 			func(t *testing.T, ss jobj) {

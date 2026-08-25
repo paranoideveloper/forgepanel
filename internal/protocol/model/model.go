@@ -172,10 +172,49 @@ type Transport struct {
 	InitialWindows int    `json:"initial_windows,omitempty"`
 	PermitWithout  bool   `json:"permit_without_stream,omitempty"`
 
-	// xhttp / splithttp
+	// xhttp / splithttp -- see xhttp.go for the enum tables and the rules the
+	// core enforces on these. Path/Host/Headers above are shared with ws.
 	XHTTPMode string `json:"xhttp_mode,omitempty"` // auto, packet-up, stream-up, stream-one
 	XPaddingB string `json:"x_padding_bytes,omitempty"`
 	XMux      *XMux  `json:"xmux,omitempty"`
+
+	// Obfuscated padding: where the padding token rides and how it is built.
+	XPaddingObfsMode  bool   `json:"x_padding_obfs_mode,omitempty"`
+	XPaddingKey       string `json:"x_padding_key,omitempty"`
+	XPaddingHeader    string `json:"x_padding_header,omitempty"`
+	XPaddingPlacement string `json:"x_padding_placement,omitempty"` // queryInHeader, header, cookie, query
+	XPaddingMethod    string `json:"x_padding_method,omitempty"`    // repeat-x, tokenish
+
+	// Response-shape switches. Both strip a layer of camouflage the CDN in
+	// front may otherwise mangle.
+	NoGRPCHeader bool `json:"no_grpc_header,omitempty"`
+	NoSSEHeader  bool `json:"no_sse_header,omitempty"`
+
+	// packet-up / stream-up flow control. The sc* ranges are Int32Range
+	// literals ("1000000" or "500000-1000000").
+	SCMaxEachPostBytes   string `json:"sc_max_each_post_bytes,omitempty"`
+	SCMinPostsIntervalMs string `json:"sc_min_posts_interval_ms,omitempty"`
+	SCMaxBufferedPosts   int    `json:"sc_max_buffered_posts,omitempty"`
+	SCStreamUpServerSecs string `json:"sc_stream_up_server_secs,omitempty"`
+
+	// Where the session id and the packet sequence number are carried. Moving
+	// them out of the path is what defeats path-pattern DPI.
+	SessionPlacement string `json:"session_placement,omitempty"` // path, header, cookie, query
+	SessionKey       string `json:"session_key,omitempty"`
+	SeqPlacement     string `json:"seq_placement,omitempty"` // path, header, cookie, query
+	SeqKey           string `json:"seq_key,omitempty"`
+
+	// Uplink shaping (packet-up).
+	UplinkDataPlacement string `json:"uplink_data_placement,omitempty"` // body, header, cookie
+	UplinkDataKey       string `json:"uplink_data_key,omitempty"`
+	UplinkHTTPMethod    string `json:"uplink_http_method,omitempty"` // POST, PUT, PATCH, GET
+	UplinkChunkSize     int    `json:"uplink_chunk_size,omitempty"`
+
+	// ServerMaxHeaderBytes caps inbound header size; server-side only.
+	ServerMaxHeaderBytes int `json:"server_max_header_bytes,omitempty"`
+
+	// XHTTPDownload is the separate download leg (`downloadSettings`).
+	XHTTPDownload *XHTTPDownload `json:"download_settings,omitempty"`
 
 	// h2
 	H2Hosts []string `json:"h2_hosts,omitempty"`
@@ -198,13 +237,24 @@ type Transport struct {
 	QUICKey      string `json:"quic_key,omitempty"`
 }
 
-// XMux holds xhttp multiplexing parameters.
+// XMux holds xhttp multiplexing parameters. The string fields are Int32Range
+// literals: a bare number ("16") or an inclusive range ("16-32") the client
+// re-rolls per connection, which is what keeps the traffic shape from being a
+// fingerprint.
+//
+// MaxConcurrency and MaxConnections are ALTERNATIVE strategies -- streams per
+// connection versus a fixed connection pool -- and the core refuses a config
+// that sets both ("maxConnections cannot be specified together with
+// maxConcurrency"); Validate rejects that pairing before it reaches the engine.
+//
+// There is deliberately no cMaxLifetimeMs: it is not part of the XHTTP xmux
+// schema of the pinned Xray, which silently ignores it.
 type XMux struct {
 	MaxConcurrency   string `json:"max_concurrency,omitempty"`
 	MaxConnections   string `json:"max_connections,omitempty"`
 	CMaxReuseTimes   string `json:"c_max_reuse_times,omitempty"`
-	CMaxLifetimeMs   string `json:"c_max_lifetime_ms,omitempty"`
 	HMaxRequestTime  string `json:"h_max_request_times,omitempty"`
+	HMaxReusableSecs string `json:"h_max_reusable_secs,omitempty"`
 	HKeepAlivePeriod int    `json:"h_keep_alive_period,omitempty"`
 }
 
@@ -679,6 +729,14 @@ func (n *Node) Validate() error {
 			return errors.New("transport quic was removed in Xray 26 — use xhttp or a QUIC protocol (hysteria2/tuic)")
 		case NetMKCP:
 			return errors.New("transport mKCP was removed in Xray 26 — use ws/grpc/xhttp")
+		case NetXHTTP:
+			// XHTTP has more cross-field rules than every other transport put
+			// together, and the core enforces them at config-build time: an
+			// invalid combination is not a degraded tunnel, it is an engine that
+			// will not start. Catch it here so Config Doctor can say why.
+			if err := validateXHTTP(&n.Transport); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -943,14 +1001,22 @@ func (t *Transport) clearIrrelevant() {
 			Host: t.Host,
 		}
 	case NetXHTTP:
-		mode := t.XHTTPMode
-		if mode == "" {
-			mode = "auto"
-		}
 		*t = Transport{
 			Network: t.Network, Path: t.Path, Host: t.Host, Headers: t.Headers,
-			XHTTPMode: mode, XPaddingB: t.XPaddingB, XMux: t.XMux,
+			XHTTPMode: t.XHTTPMode, XPaddingB: t.XPaddingB, XMux: t.XMux,
+			XPaddingObfsMode: t.XPaddingObfsMode, XPaddingKey: t.XPaddingKey,
+			XPaddingHeader: t.XPaddingHeader, XPaddingPlacement: t.XPaddingPlacement,
+			XPaddingMethod: t.XPaddingMethod,
+			NoGRPCHeader:   t.NoGRPCHeader, NoSSEHeader: t.NoSSEHeader,
+			SCMaxEachPostBytes: t.SCMaxEachPostBytes, SCMinPostsIntervalMs: t.SCMinPostsIntervalMs,
+			SCMaxBufferedPosts: t.SCMaxBufferedPosts, SCStreamUpServerSecs: t.SCStreamUpServerSecs,
+			SessionPlacement: t.SessionPlacement, SessionKey: t.SessionKey,
+			SeqPlacement: t.SeqPlacement, SeqKey: t.SeqKey,
+			UplinkDataPlacement: t.UplinkDataPlacement, UplinkDataKey: t.UplinkDataKey,
+			UplinkHTTPMethod: t.UplinkHTTPMethod, UplinkChunkSize: t.UplinkChunkSize,
+			ServerMaxHeaderBytes: t.ServerMaxHeaderBytes, XHTTPDownload: t.XHTTPDownload,
 		}
+		t.normalizeXHTTP()
 	case NetH2:
 		*t = Transport{Network: t.Network, Path: t.Path, Host: t.Host, H2Hosts: t.H2Hosts, Headers: t.Headers}
 	case NetMKCP:
@@ -1119,6 +1185,7 @@ func (t Transport) clone() Transport {
 		x := *t.XMux
 		c.XMux = &x
 	}
+	c.XHTTPDownload = t.XHTTPDownload.clone()
 	return c
 }
 

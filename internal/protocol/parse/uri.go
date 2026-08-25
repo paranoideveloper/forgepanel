@@ -167,6 +167,7 @@ func applyTransportSecurity(n *model.Node, q url.Values) {
 		if m := q.Get("mode"); m != "" {
 			t.XHTTPMode = m
 		}
+		applyXHTTPExtended(t, q)
 	case "h2", "http":
 		t.Network = model.NetH2
 		t.Path = q.Get("path")

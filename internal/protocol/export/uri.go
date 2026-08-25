@@ -108,6 +108,15 @@ func transportSecurityParams(n *model.Node, v url.Values) {
 		if t.XHTTPMode != "" && t.XHTTPMode != "auto" {
 			v.Set("mode", t.XHTTPMode)
 		}
+		// The rest of the modern XHTTP field set (padding shape, session/seq
+		// carriage, flow control, xmux, the split download leg) has no
+		// individual share-link parameter; it rides in the `extra` payload the
+		// clients and the other panels already read. Without it the link is a
+		// lossy export: the node comes back from a re-import with its CDN
+		// tuning silently reset to defaults.
+		if extra := t.XHTTPExtra(); extra != "" {
+			v.Set("extra", extra)
+		}
 	case model.NetH2:
 		if t.Path != "" {
 			v.Set("path", t.Path)
