@@ -210,3 +210,36 @@ func TestRoutesReportMatchOrder(t *testing.T) {
 		t.Fatalf("longest suffix must be evaluated first, got %v", got)
 	}
 }
+
+// The zone apex must be routable when a backend claims the bare zone.
+//
+// This is the delegation trap: measured against real resolvers, traffic under
+// t1.<zone> resolved fine through 1.1.1.1, 8.8.8.8 and 9.9.9.9 while SOA/NS
+// queries for <zone> itself were dropped, because no backend owned the bare
+// name. Registrars and monitoring probe the apex, so a zone whose apex never
+// answers looks broken even though every tunnel through it works.
+func TestApexIsRoutableWhenABackendClaimsTheBareZone(t *testing.T) {
+	zone := "dnslab.example.com"
+	tbl, err := NewTable([]Backend{
+		{Name: "primary", Suffixes: []string{"t1." + zone, zone}, UDPAddr: "127.0.0.1:5301"},
+		{Name: "deep", Suffixes: []string{"deep.t1." + zone}, UDPAddr: "127.0.0.1:5302"},
+	})
+	if err != nil {
+		t.Fatalf("NewTable: %v", err)
+	}
+	// The apex itself resolves...
+	if b, ok := tbl.Match(zone); !ok || b.Name != "primary" {
+		t.Fatalf("apex %q -> %+v ok=%v, want the primary backend", zone, b, ok)
+	}
+	// ...and claiming the apex must not swallow the more specific routes.
+	if b, ok := tbl.Match("payload.deep.t1." + zone); !ok || b.Name != "deep" {
+		t.Fatalf("deep route lost to the apex claim: %+v ok=%v", b, ok)
+	}
+	if b, ok := tbl.Match("x.t1." + zone); !ok || b.Name != "primary" {
+		t.Fatalf("t1 route broken: %+v ok=%v", b, ok)
+	}
+	// A sibling zone that merely ends the same way must still not match.
+	if b, ok := tbl.Match("notdnslab.example.com"); ok {
+		t.Fatalf("unanchored suffix matched %q", b.Name)
+	}
+}

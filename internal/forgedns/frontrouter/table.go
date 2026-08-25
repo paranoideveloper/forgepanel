@@ -89,6 +89,16 @@ func NewTable(backends []Backend) (*Table, error) {
 
 // Match returns the backend owning a QNAME.
 //
+// DELEGATION NOTE: a name matches a suffix when it IS the suffix, so listing the
+// delegated zone itself as a suffix is what makes the ZONE APEX routable. That
+// matters more than it looks. Measured against real resolvers: tunnel traffic
+// under t1.<zone> resolved correctly through 1.1.1.1, 8.8.8.8 and 9.9.9.9 while
+// SOA and NS queries for <zone> itself were dropped, because no backend claimed
+// the bare name. Registrars and monitoring probe the apex, and a zone whose apex
+// never answers looks broken even though every tunnel through it works.
+// ForgePanel's own authoritative server documents the same trap: answering the
+// apex NXDOMAIN "makes the zone undelegatable".
+//
 // A name matches a suffix when it IS the suffix or ends with "."+suffix. The
 // dot is what makes this safe: a plain strings.HasSuffix would route
 // "notexample.com" to the backend that owns "example.com", handing an attacker
