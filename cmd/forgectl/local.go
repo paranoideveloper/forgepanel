@@ -97,15 +97,28 @@ func jsonOutput(v any) error {
 	return nil
 }
 
+// panelURL is the address forgectl uses to reach the panel — for `settings
+// show`, and for the health check that decides whether a settings change is
+// kept or rolled back.
+//
+// The scheme is ALWAYS https. The panel always serves TLS: self-signed when no
+// domain is set, ACME once one is (see api.Server.PublicURL, which hardcodes
+// the same thing). This function used to emit http:// unless BOTH HTTPSEnabled
+// and Domain were set, which is exactly the state of a fresh install — so the
+// post-change health probe hit http:// against a TLS listener, failed, and
+// `forgectl settings set` rolled the change back every time. Setting a domain
+// on a default install was therefore impossible, which also made it impossible
+// to ever obtain an ACME certificate. Measured on a live host: the panel
+// answered https 200 and http 400 while settings reported https_enabled=false.
+//
+// The probe itself already tolerates a self-signed certificate (see probe()),
+// so https is safe here before a real certificate exists.
 func panelURL(p *config.PanelSettings) string {
-	host, scheme := p.Domain, "http"
+	host := p.Domain
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	if p.HTTPSEnabled && p.Domain != "" {
-		scheme = "https"
-	}
-	return fmt.Sprintf("%s://%s:%d%s", scheme, host, p.Port, p.AdminPath)
+	return fmt.Sprintf("https://%s:%d%s", host, p.Port, p.AdminPath)
 }
 
 func localActor() string {
@@ -314,8 +327,38 @@ func cmdSettingsSet(args []string) error {
 	return nil
 }
 
+// verifyHealthDeadline bounds how long a settings change waits for the panel to
+// come back before deciding the change broke it.
+//
+// It is generous on purpose. The cost of waiting too long is a slow command;
+// the cost of waiting too little is rolling back a change that was perfectly
+// good, which is far worse and much harder for an operator to diagnose.
+const verifyHealthDeadline = 45 * time.Second
+
 var verifyHealth = func(cfg *config.Config) error {
-	return cmdHealth([]string{strconv.Itoa(cfg.Panel().Port)})
+	// systemctl restart returns once systemd has forked the unit, NOT once the
+	// panel has bound its port. Probing immediately therefore raced the restart
+	// and reported "connection refused" for a panel that was about to come up
+	// perfectly — and because a failed probe rolls the change back, setting a
+	// domain failed every time on a real host even though the panel was healthy
+	// seconds later. Measured: `forgectl settings set --domain ...` rolled back
+	// while the panel was `active` and answering immediately afterwards.
+	//
+	// The first boot after enabling a domain is also the slowest one, because
+	// that is when ACME runs, so this is exactly the change most likely to be
+	// rolled back by an impatient probe.
+	port := strconv.Itoa(cfg.Panel().Port)
+	deadline := time.Now().Add(verifyHealthDeadline)
+	var err error
+	for {
+		if err = cmdHealth([]string{port}); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 func restartAndVerify(cfg *config.Config) error {

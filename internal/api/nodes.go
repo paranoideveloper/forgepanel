@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,17 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 		return
 	}
 	s.audit(c, "node.enroll", req.Name)
+	// Address the node to the panel's PUBLIC identity, not to whatever host the
+	// admin happened to type. Once a domain is configured the panel presents an
+	// ACME certificate for that NAME and a self-signed one for a bare IP, and a
+	// node is given no fingerprint to pin (see below) — so an enrolment command
+	// built from an IP request host would hand the node a URL whose certificate
+	// it can never verify. Measured on a live host: with a domain set and ACME
+	// issued, the enrol command still read https://<ip>:2053.
 	panelURL := "https://" + c.Request.Host
+	if d := strings.TrimSpace(s.cfg.Panel().Domain); d != "" {
+		panelURL = fmt.Sprintf("https://%s:%d", d, s.cfg.Panel().Port)
+	}
 	// The node must be able to VERIFY this panel. Until a domain and a real
 	// certificate exist, the panel serves a self-signed one that no remote host
 	// can chain to a public CA — measured on live servers, forgenode crash-looped
