@@ -126,19 +126,64 @@
     } catch (err: any) { showToast(err.message || 'Failed to update user', 'error'); }
   }
 
-  async function resetCreds(user: User) {
-    if (!confirm(`Reset ${user.username}'s credentials (UUID, password and subscription token)? Existing configs stop working.`)) return;
+  // Rotation is SELECTIVE. The API has always taken three independent flags,
+  // and the panel sent all three every time — so an operator who only wanted to
+  // hand out a fresh subscription link (a leaked URL, a departing housemate) also
+  // rotated the UUID and password, breaking every client config the user had
+  // already imported. Those are different blast radii and they need different
+  // buttons.
+  let rotateOpen = $state(false);
+  let rotateUser = $state<User | null>(null);
+  let rotateSub = $state(true);
+  let rotateUUID = $state(false);
+  let rotatePassword = $state(false);
+  let rotating = $state(false);
+
+  function openRotate(user: User) {
+    rotateUser = user;
+    // Default to the narrow one: it is the common case and the only one that
+    // does not invalidate configs already in people's hands.
+    rotateSub = true;
+    rotateUUID = false;
+    rotatePassword = false;
+    rotateOpen = true;
+  }
+
+  const rotateNothing = $derived(!rotateSub && !rotateUUID && !rotatePassword);
+
+  async function doRotate() {
+    if (!rotateUser || rotateNothing) return;
+    rotating = true;
     try {
       // The handler refuses a request that names nothing to rotate
       // ("specify at least one of uuid, password, sub_token"), so posting an
       // empty body made credential rotation impossible from the panel.
-      await apiFetch(`/admin/users/${user.id}/reset-credentials`, {
-        method: 'POST',
-        body: JSON.stringify({ uuid: true, password: true, sub_token: true })
-      });
-      showToast('Credentials reset', 'success');
+      const res = await apiFetch<{ sub_url: string }>(
+        `/admin/users/${rotateUser.id}/reset-credentials`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ uuid: rotateUUID, password: rotatePassword, sub_token: rotateSub })
+        }
+      );
+      rotateOpen = false;
+      // The new subscription URL is the point of the operation; making the
+      // operator hunt for it afterwards is how the old link keeps being sent.
+      if (rotateSub && res?.sub_url) {
+        try {
+          await navigator.clipboard.writeText(res.sub_url);
+          showToast('Rotated — new subscription link copied', 'success');
+        } catch {
+          showToast('Rotated — the subscription link is in the Sub dialog', 'success');
+        }
+      } else {
+        showToast('Rotated', 'success');
+      }
       await loadData();
-    } catch (err: any) { showToast(err.message || 'Failed to reset', 'error'); }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to rotate', 'error');
+    } finally {
+      rotating = false;
+    }
   }
 
   async function deleteUser(id: number) {
@@ -364,7 +409,7 @@
               <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>Manage</button>
               <button class="sm" onclick={() => openSubModal(u)}>Sub</button>
               <button class="sm" onclick={() => setStatus(u, (u as any).status === 'active' ? 'disabled' : 'active')}>{(u as any).status === 'active' ? 'Disable' : 'Enable'}</button>
-              <button class="sm" onclick={() => resetCreds(u)}>Reset</button>
+              <button class="sm" data-testid="rotate" onclick={() => openRotate(u)}>Rotate</button>
               <button class="sm danger" onclick={() => deleteUser(u.id)}>Delete</button>
             </td>
           </tr>
@@ -398,6 +443,51 @@
 </div>
 
 <!-- Manage user modal -->
+<Modal
+  title={'Rotate credentials · ' + (rotateUser?.username || '')}
+  isOpen={rotateOpen}
+  onClose={() => (rotateOpen = false)}
+>
+  <p class="rot-intro">
+    Pick what to replace. Each one breaks something different, so they are listed
+    with what stops working.
+  </p>
+  <label class="rot">
+    <input type="checkbox" bind:checked={rotateSub} data-testid="rotate-sub" />
+    <span>
+      <strong>Subscription token</strong>
+      <em>The old subscription URL stops resolving. Configs already imported into a
+        client keep working until that client next updates.</em>
+    </span>
+  </label>
+  <label class="rot">
+    <input type="checkbox" bind:checked={rotateUUID} data-testid="rotate-uuid" />
+    <span>
+      <strong>UUID</strong>
+      <em>Every VLESS/VMess config this user holds stops connecting immediately.</em>
+    </span>
+  </label>
+  <label class="rot">
+    <input type="checkbox" bind:checked={rotatePassword} data-testid="rotate-password" />
+    <span>
+      <strong>Password</strong>
+      <em>Every Trojan/Shadowsocks/Hysteria config this user holds stops
+        connecting immediately.</em>
+    </span>
+  </label>
+  <div class="rot-actions">
+    <button class="sm" onclick={() => (rotateOpen = false)}>Cancel</button>
+    <button
+      class="sm danger"
+      disabled={rotateNothing || rotating}
+      data-testid="rotate-confirm"
+      onclick={doRotate}
+    >
+      {rotating ? 'Rotating…' : 'Rotate'}
+    </button>
+  </div>
+</Modal>
+
 <Modal title={'Manage · ' + (mUser?.username || '')} isOpen={manageOpen} onClose={() => manageOpen = false}>
   <div class="mgrid">
     <label>Status<select bind:value={mStatus}><option value="active">active</option><option value="disabled">disabled</option></select></label>
@@ -443,6 +533,14 @@
 </Modal>
 
 <style>
+  .rot-intro { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0 0 14px; }
+  .rot { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .rot span { display: flex; flex-direction: column; gap: 3px; }
+  .rot strong { font-size: 13px; }
+  .rot em { font-style: normal; font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+  .rot-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .rot-actions button:disabled { opacity: 0.4; cursor: default; }
+
   .view-header h2 { margin: 0 0 20px; font-size: 20px; }
   .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .card h3 { margin: 0 0 14px; font-size: 14px; }
