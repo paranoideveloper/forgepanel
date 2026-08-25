@@ -49,6 +49,17 @@ type Controller struct {
 	registry *adapter.Registry
 	regErr   error
 
+	// sing-box per-user metering depends on how the installed binary was built,
+	// so it is detected once from the binary itself rather than assumed.
+	sbStatsOnce sync.Once
+	sbStats     SingboxStatsSupport
+	// sbAPIPort is the loopback port the generated sing-box config exposes its
+	// v2ray stats API on. Zero disables it, which is what happens when the
+	// binary cannot report counters anyway.
+	sbAPIPort    int
+	sbStatsErrMu sync.Mutex
+	sbStatsErr   string
+
 	mu      sync.Mutex
 	brook   *BrookManager
 	awg     *AWGManager
@@ -76,6 +87,15 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	}
 	// Built once. A failure here is stored rather than panicked on: the panel
 	// still has to start so an operator can reach the UI and see why.
+	// Per-user metering for the sing-box protocols is only possible when the
+	// installed binary was built with with_v2ray_api. Enabling the config
+	// section on a binary that cannot serve it is a STARTUP failure, which would
+	// take every sing-box inbound down rather than merely leaving them
+	// unmetered — so the port is only published when the capability is real.
+	if c.SingboxStatsSupported().Supported {
+		c.sbAPIPort = xrayAPIPort + 1
+	}
+	engine.SingboxAPIPort = c.sbAPIPort
 	c.registry, c.regErr = c.buildRegistry()
 	return c
 }

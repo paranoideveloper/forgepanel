@@ -1,12 +1,14 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 )
@@ -78,7 +80,87 @@ func (c *Controller) QueryUserStats(reset bool) (map[string]*UserTraffic, error)
 		// which is exactly the condition that stops quota enforcement working.
 		c.mMalformedStats.Add(int64(skipped))
 	}
+	c.mergeSingboxStats(res, reset)
 	return res, nil
+}
+
+// mergeSingboxStats folds in the counters for the protocols only sing-box
+// serves: hysteria2, tuic, anytls, shadowtls and wireguard.
+//
+// Those were metered by NOTHING. A user could exhaust their plan entirely on
+// them and stay active forever, because the quota system was guarding traffic it
+// could never see — a failure that is silent and always in the customer's
+// favour, which is why it lasted.
+//
+// The two cores are summed into one number per user rather than reported
+// separately: a user's quota is one allowance regardless of which core happened
+// to carry the bytes, and two half-counts nobody reconciles is how the panel
+// would end up under-billing again.
+//
+// A failure here is recorded and never fatal. Losing sing-box counters must not
+// also lose the xray ones that were read successfully.
+func (c *Controller) mergeSingboxStats(into map[string]*UserTraffic, reset bool) {
+	if c.sbAPIPort <= 0 || !c.SingboxStatsSupported().Supported {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := querySingboxStats(ctx, "127.0.0.1:"+strconv.Itoa(c.sbAPIPort), "user>>>", reset)
+	if err != nil {
+		c.setSingboxStatsErr(err.Error())
+		return
+	}
+	c.setSingboxStatsErr("")
+	for name, value := range raw {
+		email, dir, ok := parseUserCounterName(name)
+		if !ok {
+			c.mMalformedStats.Add(1)
+			continue
+		}
+		ut := into[email]
+		if ut == nil {
+			ut = &UserTraffic{}
+			into[email] = ut
+		}
+		switch dir {
+		case "uplink":
+			ut.Uplink += value
+		case "downlink":
+			ut.Downlink += value
+		}
+	}
+}
+
+// parseUserCounterName splits "user>>><email>>>>traffic>>>uplink".
+//
+// sing-box emits the identical grammar to xray, which is what lets one
+// accounting path serve both cores.
+func parseUserCounterName(name string) (email, direction string, ok bool) {
+	parts := strings.Split(name, ">>>")
+	if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
+		return "", "", false
+	}
+	if parts[3] != "uplink" && parts[3] != "downlink" {
+		return "", "", false
+	}
+	if strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return parts[1], parts[3], true
+}
+
+func (c *Controller) setSingboxStatsErr(msg string) {
+	c.sbStatsErrMu.Lock()
+	c.sbStatsErr = msg
+	c.sbStatsErrMu.Unlock()
+}
+
+// SingboxStatsError reports the most recent sing-box stats failure, so degraded
+// accounting is visible rather than looking like users who stopped transferring.
+func (c *Controller) SingboxStatsError() string {
+	c.sbStatsErrMu.Lock()
+	defer c.sbStatsErrMu.Unlock()
+	return c.sbStatsErr
 }
 
 // MalformedStatsTotal is the number of engine stat counters that could not be

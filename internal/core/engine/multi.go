@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/forgepanel/forgepanel/internal/protocol/parse"
+	"sort"
 	"strings"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -43,6 +44,13 @@ type InboundSpec struct {
 // inbounds get a users array likewise. An inbound without assigned users gets
 // an empty Xray allow-list, so a template credential can never bypass access
 // assignment.
+// SingboxAPIPort is the loopback port the generated sing-box config exposes its
+// v2ray stats API on. Zero disables it entirely, which is correct when the
+// installed sing-box was built without with_v2ray_api: enabling the section on a
+// binary that cannot serve it is a startup failure, and it would take every
+// sing-box inbound down rather than merely leaving them unmetered.
+var SingboxAPIPort int
+
 func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) (*Bundle, error) {
 	b := &Bundle{}
 	var xin, sin, sep []any
@@ -226,6 +234,24 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 		"log":       jobj{"level": "warn"},
 		"inbounds":  orEmpty(sin),
 		"outbounds": append([]any{jobj{"type": "direct", "tag": "direct"}}, sbEgressOutbounds...),
+	}
+	// Per-user counters for the protocols only sing-box serves — hysteria2,
+	// tuic, anytls, shadowtls, wireguard — which were metered by nothing at all,
+	// so their users' quotas were never enforced.
+	//
+	// The lists are NOT optional: with `stats: {enabled: true}` alone, sing-box
+	// collects nothing and the API returns an empty response, which is
+	// indistinguishable from "no traffic yet". Every tracked name has to be
+	// enumerated, which is why this is built from the specs rather than a flag.
+	if SingboxAPIPort > 0 && len(sin) > 0 {
+		if stats := singboxStatsSection(specs, sin, sbEgressOutbounds); stats != nil {
+			singboxCfg["experimental"] = jobj{
+				"v2ray_api": jobj{
+					"listen": fmt.Sprintf("127.0.0.1:%d", SingboxAPIPort),
+					"stats":  stats,
+				},
+			}
+		}
 	}
 	if len(sbEgressRules) > 0 {
 		// "final" keeps every unchained inbound on the direct outbound, so
@@ -467,4 +493,58 @@ func egressOutbound(uri string, index int) (jobj, error) {
 		return nil, fmt.Errorf("cannot render the upstream hop: %w", err)
 	}
 	return out, nil
+}
+
+// singboxStatsSection enumerates what the v2ray stats collector must track.
+//
+// sing-box will not infer the list: with stats merely enabled it collects
+// nothing and reports an empty result, which reads exactly like an idle server.
+// Returning nil when there are no users is deliberate — a stats section that
+// tracks nothing is the same silent hole in a different place.
+func singboxStatsSection(specs []InboundSpec, inbounds []any, egress []any) jobj {
+	seenUser := map[string]bool{}
+	var users []string
+	for _, sp := range specs {
+		if sp.Node == nil || render.EngineFor(sp.Node.Protocol) != model.EngineSingBox {
+			continue
+		}
+		for _, cl := range sp.Clients {
+			name := strings.TrimSpace(cl.Email)
+			if name == "" || seenUser[name] {
+				continue
+			}
+			seenUser[name] = true
+			users = append(users, name)
+		}
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	sort.Strings(users) // deterministic, so a reload with no change produces no diff
+
+	tags := func(list []any) []string {
+		out := make([]string, 0, len(list))
+		for _, e := range list {
+			if m, ok := e.(jobj); ok {
+				if t, _ := m["tag"].(string); t != "" {
+					out = append(out, t)
+				}
+				continue
+			}
+			if m, ok := e.(map[string]any); ok {
+				if t, _ := m["tag"].(string); t != "" {
+					out = append(out, t)
+				}
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	return jobj{
+		"enabled":   true,
+		"users":     users,
+		"inbounds":  tags(inbounds),
+		"outbounds": append([]string{"direct"}, tags(egress)...),
+	}
 }

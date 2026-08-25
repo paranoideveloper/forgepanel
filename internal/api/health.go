@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
 
 // This file backs the panel's status indicator.
@@ -106,6 +108,7 @@ func (s *Server) healthReport() HealthReport {
 		s.healthNodes(),
 		s.healthCerts(),
 		s.healthDNS(),
+		s.healthMetering(),
 	}
 
 	worst := HealthOK
@@ -203,6 +206,62 @@ func (s *Server) healthEngine() Subsystem {
 		sub.Summary = "Running, but some traffic counters could not be parsed."
 		sub.Detail = fmt.Sprintf("%d malformed stat entries since start; per-user "+
 			"accounting may be incomplete.", s.engine.MalformedStatsTotal())
+	}
+	return sub
+}
+
+// healthMetering reports whether every protocol the panel serves is actually
+// having its traffic counted.
+//
+// The sing-box protocols — hysteria2, tuic, anytls, shadowtls, wireguard — can
+// only be metered by a sing-box built with with_v2ray_api, which the official
+// release archives are not. Without it a user can exhaust their plan entirely on
+// those protocols and stay active forever, because the quota system is guarding
+// traffic it cannot see. That failure is silent and always in the customer's
+// favour, so it has to be stated somewhere an operator looks rather than left to
+// be discovered from the billing.
+func (s *Server) healthMetering() Subsystem {
+	sub := Subsystem{Key: "metering", Label: "Traffic metering"}
+	if s.engine == nil {
+		sub.State = HealthOK
+		sub.Summary = "No local engine; nodes report their own usage."
+		return sub
+	}
+	sup := s.engine.SingboxStatsSupported()
+
+	// Only a concern if sing-box is actually serving something.
+	unmetered := 0
+	if ins, err := s.db.ListInbounds(); err == nil {
+		for _, in := range ins {
+			n, nodeErr := in.Node()
+			if nodeErr != nil || n == nil || !in.Enabled {
+				continue
+			}
+			if model.EngineFor(n.Protocol) == model.EngineSingBox {
+				unmetered++
+			}
+		}
+	}
+
+	switch {
+	case sup.Supported:
+		sub.State = HealthOK
+		sub.Summary = "Every protocol is metered."
+		sub.Detail = "sing-box " + sup.Version + " reports per-user traffic."
+		if e := s.engine.SingboxStatsError(); e != "" {
+			sub.State = HealthWarning
+			sub.Summary = "sing-box counters are not readable right now."
+			sub.Detail = e
+		}
+	case unmetered == 0:
+		// Nothing sing-box serves, so nothing goes uncounted.
+		sub.State = HealthOK
+		sub.Summary = "Every protocol in use is metered."
+		sub.Detail = sup.Reason
+	default:
+		sub.State = HealthWarning
+		sub.Summary = fmt.Sprintf("%d inbound(s) are NOT metered; their users' quotas cannot be enforced.", unmetered)
+		sub.Detail = sup.Reason
 	}
 	return sub
 }
