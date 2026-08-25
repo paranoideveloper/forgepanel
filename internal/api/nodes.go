@@ -166,26 +166,99 @@ func (s *Server) handleDeleteNode(c *gin.Context) {
 // handleNodeInstallScript serves the one-line node bootstrap (spec §10).
 func (s *Server) handleNodeInstallScript(c *gin.Context) {
 	script := `#!/usr/bin/env bash
+# ForgePanel node enrollment.
+#
+# Downloads the agent FROM THE PANEL, verifies it, installs a systemd unit and
+# starts it. The agent comes from the panel rather than a release URL so its
+# version always matches the panel that will drive it, and so this works with a
+# private release repo or a node that cannot reach GitHub.
 set -euo pipefail
 : "${PANEL:?set PANEL}" ; : "${TOKEN:?set TOKEN}"
-# Download the forgenode agent for this platform (placeholder URL — point at your
-# release), install a systemd unit, and start it.
-echo "forgenode: enrolling with $PANEL"
+# The enroll command exports PANEL_FINGERPRINT, and the agent's own unit reads
+# the same name, so the script uses it too: one name end to end. A mismatch here
+# would leave the pin empty and the node would refuse to trust a self-signed
+# panel for what looks like an interception.
+PANEL_FINGERPRINT="${PANEL_FINGERPRINT:-}"
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|amd64)  ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "forgenode: unsupported architecture $ARCH" >&2 ; exit 1 ;;
+esac
+
+# The panel may serve a self-signed certificate, in which case the node pins it
+# by fingerprint instead of trusting a CA. Pinning is what makes -k safe here:
+# without a pin an intercepted download would be accepted silently.
+CURL=(curl -fsSL --proto "=https" --max-time 120)
+if [ -n "$PANEL_FINGERPRINT" ]; then
+  CURL+=(-k)
+fi
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "forgenode: downloading the agent from $PANEL"
+if ! "${CURL[@]}" "$PANEL/api/node/agent?arch=$ARCH" -o "$TMP/forgenode"; then
+  echo "forgenode: could not download the agent from $PANEL." >&2
+  echo "forgenode: the panel reported why at $PANEL/api/node/agent?arch=$ARCH" >&2
+  exit 1
+fi
+
+# Verify before installing. A truncated or tampered download that reaches
+# /usr/local/bin becomes a crash-looping service whose logs say nothing useful.
+if WANT="$("${CURL[@]}" "$PANEL/api/node/agent/sha256" | sed -n 's/.*"sha256":"\([a-f0-9]*\)".*/\1/p')" && [ -n "$WANT" ]; then
+  GOT="$(sha256sum "$TMP/forgenode" | cut -d" " -f1)"
+  if [ "$WANT" != "$GOT" ]; then
+    echo "forgenode: checksum mismatch (expected $WANT, got $GOT) — refusing to install" >&2
+    exit 1
+  fi
+  echo "forgenode: checksum verified"
+else
+  echo "forgenode: WARNING — the panel did not report a checksum; installing unverified" >&2
+fi
+
+chmod 0755 "$TMP/forgenode"
+# Prove it runs on this host before making it a service, so a wrong-architecture
+# or corrupt binary fails here with a clear message rather than as a systemd
+# restart loop.
+if ! "$TMP/forgenode" --version >/dev/null 2>&1 && ! "$TMP/forgenode" -h >/dev/null 2>&1; then
+  echo "forgenode: the downloaded agent will not execute on this host" >&2
+  exit 1
+fi
+
 install -d /etc/forgenode
+install -m 0755 "$TMP/forgenode" /usr/local/bin/forgenode
+
 cat > /etc/systemd/system/forgenode.service <<UNIT
 [Unit]
 Description=ForgePanel node agent
 After=network-online.target
+Wants=network-online.target
 [Service]
 Environment=PANEL=$PANEL
 Environment=TOKEN=$TOKEN
+Environment=PANEL_FINGERPRINT=$PANEL_FINGERPRINT
 ExecStart=/usr/local/bin/forgenode
 Restart=always
+RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload && systemctl enable --now forgenode
-echo "forgenode: started"
+
+systemctl daemon-reload
+systemctl enable --now forgenode
+
+# Report the truth about whether it actually came up. "enable --now" succeeding
+# only means systemd accepted the unit.
+sleep 2
+if systemctl is-active --quiet forgenode; then
+  echo "forgenode: started and enrolled with $PANEL"
+else
+  echo "forgenode: the service did not stay up. Recent log:" >&2
+  journalctl -u forgenode -n 20 --no-pager >&2 || true
+  exit 1
+fi
 `
 	c.Data(200, "text/x-shellscript; charset=utf-8", []byte(script))
 }

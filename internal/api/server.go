@@ -575,6 +575,11 @@ func (s *Server) routes() {
 		// Alias: the Node Cluster UI hands out /api/node/install.sh, so serve the
 		// enrollment script there too (the bare /node-install.sh stays as well).
 		r.GET("/api/node/install.sh", s.handleNodeInstallScript)
+		// The agent binary itself. The enrollment script downloads it from here
+		// rather than a release URL so the agent always matches the panel that
+		// will drive it — the two speak a private heartbeat and config schema.
+		r.GET("/api/node/agent", s.handleNodeAgent)
+		r.GET("/api/node/agent/sha256", s.handleNodeAgentDigest)
 	}
 
 	// The full admin panel at root + the randomized admin path; the Config Studio
