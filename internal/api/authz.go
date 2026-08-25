@@ -150,6 +150,14 @@ var adminAuthzRules = []authzRule{
 	// cosmetic leak.
 	{methods: get, path: "/api/admin/online", exact: true, roles: tenantMgmt},
 
+	// --- routing ----------------------------------------------------------
+	//
+	// A routing rule can send any user's traffic anywhere, or stop it entirely,
+	// and it applies across every tenant on the panel — so it is not a
+	// reseller's to write. It also decides whether traffic leaves a relay chain,
+	// which makes a bad rule a deanonymisation rather than a misconfiguration.
+	{path: "/api/admin/routing", roles: ownerAdmin},
+
 	// --- the audit trail --------------------------------------------------
 	//
 	// Entries name the actor, their IP and what they did, across every admin.

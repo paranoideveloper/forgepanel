@@ -35,6 +35,7 @@ const (
 	migVNodeMetrics   uint64 = 5
 	migVRollups       uint64 = 6
 	migVIPLimit       uint64 = 7
+	migVRouting       uint64 = 8
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -118,6 +119,21 @@ func migrations() []migrate.Migration {
 			// before, but now with errors in the log.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&User{}})
+				return err
+			},
+		},
+		{
+			Version: migVRouting,
+			Name:    "outbounds_and_routing_rules",
+			Rollback: "safe to drop, but READ THIS FIRST: dropping the tables removes every routing " +
+				"decision an operator configured, so traffic that was being blocked or sent through a " +
+				"particular exit falls through to the default direct outbound. Take a backup first.",
+			// Named outbounds and the ordered rules that select between them.
+			// Without the tables the panel can only send an inbound's entire
+			// traffic through one relay chain: no blocking, no geo-split, no
+			// per-user exit.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Outbound{}, &RoutingRule{}})
 				return err
 			},
 		},

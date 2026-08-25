@@ -426,7 +426,7 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // table's writer (internal/service) was never linked into any binary, so the
 // baselines it modelled were never written, and the replacement is scoped and
 // updates atomically with the usage it accounts for.
-const modelSchemaFingerprintPinned = "19bc88b64348902558a6d9023fa7a0906922a04515e25140817190eece8b5307"
+const modelSchemaFingerprintPinned = "9723ec27b9576073b0a6d78a7a6aeed596efbf72add1b0a0d17d64fc74f0b59d"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

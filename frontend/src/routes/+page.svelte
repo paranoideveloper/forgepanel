@@ -46,6 +46,7 @@
     inbounds: () => import('$lib/views/InboundsView.svelte'),
     users: () => import('$lib/views/UsersView.svelte'),
     admins: () => import('$lib/views/AdminsView.svelte'),
+    routing: () => import('$lib/views/RoutingView.svelte'),
     online: () => import('$lib/views/OnlineView.svelte'),
     usage: () => import('$lib/views/UsageView.svelte'),
     audit: () => import('$lib/views/AuditView.svelte'),

@@ -13,6 +13,7 @@
     { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
     { id: 'admins', label: 'Admins & Resellers', icon: '🛡️' },
+    { id: 'routing', label: 'Routing', icon: '🧭' },
     { id: 'online', label: 'Online', icon: '🟢' },
     { id: 'usage', label: 'Usage', icon: '📈' },
     { id: 'audit', label: 'Audit Trail', icon: '📜' },

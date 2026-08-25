@@ -52,6 +52,16 @@ type InboundSpec struct {
 var SingboxAPIPort int
 
 func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) (*Bundle, error) {
+	return BuildMultiWithRouting(specs, xrayAPIPort, certPath, keyPath, nil, nil)
+}
+
+// BuildMultiWithRouting is BuildMulti plus the operator's own outbounds and
+// routing rules.
+//
+// See routing.go for why the rules are placed AFTER the per-inbound egress
+// rules: it is a safety decision, not an ordering detail.
+func BuildMultiWithRouting(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string,
+	outbounds []OutboundSpec, rules []RuleSpec) (*Bundle, error) {
 	b := &Bundle{}
 	var xin, sin, sep []any
 	statsUsed := false
@@ -191,6 +201,27 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 		}
 	}
 
+	// Operator outbounds and rules. A failure here fails the whole build: a
+	// routing table that renders "mostly" is a routing table sending some
+	// traffic somewhere nobody chose.
+	userOutbounds, err := RenderOutbounds(outbounds)
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]bool{"direct": true, "block": true}
+	for _, sp := range outbounds {
+		known[strings.TrimSpace(sp.Tag)] = true
+	}
+	// Egress tags count as known so a rule may deliberately target a relay
+	// chain, which is the one way an operator can route INTO one.
+	for _, t := range egressTag {
+		known[t] = true
+	}
+	userRules, err := RenderRules(rules, known)
+	if err != nil {
+		return nil, err
+	}
+
 	xrayCfg := jobj{
 		// access:"" sends the access log to STDOUT, which the supervisor already
 		// reads. That is what feeds the presence tracker: who is connected, from
@@ -203,17 +234,25 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 		"stats":    jobj{},
 		"policy":   jobj{"levels": jobj{"0": jobj{"statsUserUplink": statsUsed, "statsUserDownlink": statsUsed}}, "system": jobj{"statsInboundUplink": true, "statsInboundDownlink": true}},
 		"inbounds": append([]any{jobj{"tag": "api", "listen": "127.0.0.1", "port": xrayAPIPort, "protocol": "dokodemo-door", "settings": jobj{"address": "127.0.0.1"}}}, xin...),
-		"outbounds": append([]any{
+		// "direct" stays FIRST: Xray uses the first outbound for anything no rule
+		// matched, and demoting it would silently change where unmatched traffic
+		// goes for every existing installation.
+		"outbounds": append(append([]any{
 			jobj{"tag": "direct", "protocol": "freedom"},
 			jobj{"tag": "block", "protocol": "blackhole"},
-		}, egressOutbounds...),
-		// The api rule must stay FIRST: it keeps the local gRPC listener talking
-		// to the api outbound. Egress rules follow, and anything unmatched falls
-		// through to the default direct outbound, so an inbound without an
-		// egress is completely unaffected.
-		"routing": jobj{"rules": append([]any{
+		}, egressOutbounds...), userOutbounds...),
+		// ORDER MATTERS AND IS DELIBERATE (see routing.go):
+		//  1. api      — keeps the local gRPC listener reachable.
+		//  2. egress   — an inbound with a relay chain sends ALL of its traffic
+		//                through it. Placing operator rules above this would let
+		//                an ordinary "send this domain direct" rule pull traffic
+		//                out of a chain and expose the server's real address.
+		//  3. operator rules.
+		//  4. unmatched falls through to the default direct outbound, so an
+		//     installation with no rules behaves exactly as before.
+		"routing": jobj{"rules": append(append([]any{
 			jobj{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
-		}, egressRules...)},
+		}, egressRules...), userRules...)},
 	}
 	raw, err := json.MarshalIndent(xrayCfg, "", "  ")
 	if err != nil {

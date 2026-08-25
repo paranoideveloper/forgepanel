@@ -138,6 +138,12 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		subs:    newLoginLimiter(),
 		stop:    cancel,
 	}
+	// The routing definition is read at BUILD time rather than pushed in, so an
+	// operator's edit takes effect on the very next reload without anything
+	// having to remember to tell the controller about it. That "remember to
+	// notify" pattern is how a stale copy of a config lingers.
+	s.engine.SetRoutingSource(s.routingSpecs)
+
 	// Restore certificates the operator imported in an earlier run. Without
 	// this they lived in memory only: the upload succeeded, the panel served
 	// them, and after the next restart every TLS surface silently fell back to
@@ -537,6 +543,19 @@ func (s *Server) routes() {
 
 			// Usage history, from the rollups written alongside billing.
 			admin.GET("/online", s.handleOnlineUsers)
+
+			// Routing: named outbounds and the ordered rules that select between
+			// them. Owner/admin only — a rule can send any user's traffic
+			// anywhere, or stop it entirely.
+			admin.GET("/routing/outbounds", s.handleListOutbounds)
+			admin.POST("/routing/outbounds", s.handleSaveOutbound)
+			admin.PUT("/routing/outbounds/:id", s.handleSaveOutbound)
+			admin.DELETE("/routing/outbounds/:id", s.handleDeleteOutbound)
+			admin.GET("/routing/rules", s.handleListRoutingRules)
+			admin.POST("/routing/rules", s.handleSaveRoutingRule)
+			admin.PUT("/routing/rules/:id", s.handleSaveRoutingRule)
+			admin.DELETE("/routing/rules/:id", s.handleDeleteRoutingRule)
+			admin.POST("/routing/rules/reorder", s.handleReorderRoutingRules)
 			admin.GET("/traffic/series", s.handleTrafficSeries)
 			admin.GET("/traffic/top", s.handleTopConsumers)
 			admin.GET("/audit", s.handleListAudit)

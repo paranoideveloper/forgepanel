@@ -67,6 +67,12 @@ type Controller struct {
 	// compromise into a history of everyone's activity.
 	presence *online.Tracker
 
+	// routingSource supplies the operator's outbounds and rules at build time.
+	// A function rather than stored state so an edit takes effect on the next
+	// reload without the controller having to be told about it — the pattern
+	// that let a stale copy of the config linger before.
+	routingSource func() ([]engine.OutboundSpec, []engine.RuleSpec)
+
 	mu      sync.Mutex
 	brook   *BrookManager
 	awg     *AWGManager
@@ -223,7 +229,8 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 	}
 	cp, kp, _ := cert.EnsureSelfSigned(filepath.Join(c.dataDir, "certs"))
 	c.applyCerts(specs)
-	bundle, err := engine.BuildMulti(specs, c.xrayAPIPort, cp, kp)
+	outbounds, rules := c.routing()
+	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +287,8 @@ func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]s
 	c.mu.Lock()
 	c.applyCerts(specs)
 	c.mu.Unlock()
-	bundle, err := engine.BuildMulti(specs, c.xrayAPIPort, cp, kp)
+	outbounds, rules := c.routing()
+	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules)
 	results := map[string]string{}
 	if err != nil {
 		results["build"] = err.Error()
@@ -405,6 +413,23 @@ func validateResult(err error) string {
 		return err.Error()
 	}
 	return "valid"
+}
+
+// SetRoutingSource installs the supplier of operator-defined outbounds and
+// routing rules. Nil (the default) renders a config identical to one from before
+// the feature existed.
+func (c *Controller) SetRoutingSource(fn func() ([]engine.OutboundSpec, []engine.RuleSpec)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.routingSource = fn
+}
+
+// routing reads the current routing definition. Callers hold c.mu.
+func (c *Controller) routing() ([]engine.OutboundSpec, []engine.RuleSpec) {
+	if c.routingSource == nil {
+		return nil, nil
+	}
+	return c.routingSource()
 }
 
 // LocalNodeName labels sessions served by the cores this panel runs itself, so
