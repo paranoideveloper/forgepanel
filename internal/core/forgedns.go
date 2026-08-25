@@ -35,6 +35,19 @@ type ForgeDNSController struct {
 	started  bool
 	lastErr  string
 	upErr    string
+
+	// Front router: one public port in front of several supervised upstream
+	// zones. Each upstream zone binds its own UDP port, and real resolvers only
+	// query 53, so without this exactly one zone was ever reachable.
+	front     *frontRunner
+	frontSig  string // route table signature, so an unchanged table is not rebound
+	frontNote string // human-readable state for the API
+
+	// frontErr has its own lock: OnError fires from the serving goroutines,
+	// including while they wind down inside stopFrontLocked, which runs with
+	// c.mu held.
+	frontErrMu sync.Mutex
+	frontErr   string
 }
 
 // NewForgeDNSController builds a controller that will listen on addr (e.g.
@@ -65,6 +78,10 @@ func (c *ForgeDNSController) Stop() {
 	c.server = nil
 	c.started = false
 	up := c.up
+	// The router holds the public UDP and TCP sockets. Leaving it up would keep
+	// port 53 bound after shutdown, so the next start fails with "address
+	// already in use" — which reads as a foreign process holding the port.
+	c.stopFrontLocked()
 	c.mu.Unlock()
 	if srv != nil {
 		_ = srv.Shutdown()
@@ -126,8 +143,12 @@ func (c *ForgeDNSController) SyncZones(specs []ZoneSpec) ([]string, error) {
 			_ = old.Shutdown()
 			c.started = false
 		}
+		// With the native listener down, the port is free for the router to
+		// multiplex the upstream zones across.
+		c.frontNote = c.syncFrontRouter(0)
 		return served, nil
 	}
+	c.frontNote = c.syncFrontRouter(len(native))
 	if !c.started {
 		go func() {
 			if err := srv.ListenAndServe(c.addr); err != nil {
