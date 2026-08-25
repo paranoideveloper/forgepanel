@@ -489,6 +489,11 @@ func (s *Server) routes() {
 			admin.PUT("/users/:id/inbounds", s.handleSetUserInbounds)
 			admin.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
 			admin.GET("/quota", s.handleQuota)
+			// Admin/reseller provisioning. Owner-only: see internal/api/authz.go.
+			admin.GET("/admins", s.handleListAdmins)
+			admin.POST("/admins", s.handleCreateAdmin)
+			admin.PATCH("/admins/:id", s.handleUpdateAdmin)
+			admin.DELETE("/admins/:id", s.handleDeleteAdmin)
 			admin.DELETE("/users/:id", s.handleDeleteUser)
 			// Backing state for the panel's status indicator: per-subsystem
 			// health with human-readable text, replacing the unexplained dot.

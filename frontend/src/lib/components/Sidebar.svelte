@@ -12,6 +12,7 @@
     { id: 'wizard', label: 'Setup Wizard', icon: '✨' },
     { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
+    { id: 'admins', label: 'Admins & Resellers', icon: '🛡️' },
     { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
     { id: 'studio', label: 'Config Studio', icon: '⚙️' },
     { id: 'domains', label: 'Domains', icon: '🌍' },

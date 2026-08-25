@@ -124,6 +124,14 @@ var adminAuthzRules = []authzRule{
 	{path: "/api/admin/edge/feed-token", roles: ownerAdmin},
 	{path: "/api/admin/dns/credentials", roles: ownerAdmin},
 
+	// --- admin provisioning: owner only -----------------------------------
+	//
+	// A reseller able to mint another reseller, or to raise its own quota, is a
+	// privilege escalation that looks identical to legitimate use in the audit
+	// log. These routes create, re-role, disable and delete accounts, so they
+	// belong to the one role that already has full authority.
+	{path: "/api/admin/admins", roles: ownerOnly},
+
 	// --- customer management: the reseller's job --------------------------
 	{path: "/api/admin/users", roles: tenantMgmt},
 	{path: "/api/admin/groups", roles: tenantMgmt},

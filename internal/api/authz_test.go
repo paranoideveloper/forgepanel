@@ -207,3 +207,22 @@ func TestAuthzMiddlewareEnforcesOverHTTP(t *testing.T) {
 		t.Errorf("unknown role GET /overview = %d, want 403", got)
 	}
 }
+
+// Admin provisioning is owner-only. A reseller that can mint another reseller,
+// or raise its own quota, is a privilege escalation that looks identical to
+// legitimate use in the audit log — and every one of these routes creates,
+// re-roles, disables or deletes an account.
+func TestAuthzAdminProvisioningIsOwnerOnly(t *testing.T) {
+	for _, m := range []string{http.MethodGet, http.MethodPost} {
+		roles := rolesForRoute(m, "/api/admin/admins")
+		if len(roles) != 1 || roles[0] != string(store.RoleOwner) {
+			t.Errorf("%s /api/admin/admins allows %v, want owner only", m, roles)
+		}
+	}
+	for _, m := range []string{http.MethodPatch, http.MethodDelete} {
+		roles := rolesForRoute(m, "/api/admin/admins/:id")
+		if len(roles) != 1 || roles[0] != string(store.RoleOwner) {
+			t.Errorf("%s /api/admin/admins/:id allows %v, want owner only", m, roles)
+		}
+	}
+}

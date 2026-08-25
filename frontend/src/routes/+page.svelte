@@ -44,6 +44,7 @@
     wizard: () => import('$lib/views/SetupWizardView.svelte'),
     inbounds: () => import('$lib/views/InboundsView.svelte'),
     users: () => import('$lib/views/UsersView.svelte'),
+    admins: () => import('$lib/views/AdminsView.svelte'),
     nodes: () => import('$lib/views/NodesView.svelte'),
     studio: () => import('../routes/studio/StudioView.svelte'),
     domains: () => import('$lib/views/DomainsView.svelte'),
