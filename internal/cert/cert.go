@@ -321,6 +321,24 @@ func (s *Store) ACMEManager() *autocert.Manager { return s.acme }
 // Import parses and stores a PEM certificate+key, validating the pair and
 // extracting its domains and validity window.
 func (s *Store) Import(certPEM, keyPEM []byte) (*Imported, error) {
+	imp, err := s.importParsed(certPEM, keyPEM)
+	if err != nil {
+		return nil, err
+	}
+	// Persist it. An imported certificate that lives only in memory is gone at
+	// the next restart, and the panel silently falls back to self-signed -- a
+	// failure with no error anywhere, which is why this is not best-effort: the
+	// operator is told if the certificate will not survive.
+	if err := s.persistImport(imp, certPEM, keyPEM); err != nil {
+		return nil, fmt.Errorf("cert: imported but could not be saved, so it would be lost on restart: %w", err)
+	}
+	return imp, nil
+}
+
+// importParsed validates and registers a pair in memory without persisting it.
+// LoadImported reuses it to restore from disk, which is what keeps the two paths
+// from disagreeing about what a valid certificate is.
+func (s *Store) importParsed(certPEM, keyPEM []byte) (*Imported, error) {
 	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("cert: invalid key pair: %w", err)

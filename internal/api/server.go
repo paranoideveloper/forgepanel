@@ -138,6 +138,19 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		subs:    newLoginLimiter(),
 		stop:    cancel,
 	}
+	// Restore certificates the operator imported in an earlier run. Without
+	// this they lived in memory only: the upload succeeded, the panel served
+	// them, and after the next restart every TLS surface silently fell back to
+	// self-signed with no error to explain it.
+	for _, err := range s.certs.LoadImported() {
+		fmt.Fprintln(os.Stderr, "forgepanel: cert:", err)
+	}
+	// Bridge the certificate store to the proxy engines. ReloadSpecs previously
+	// handed BuildMulti the self-signed pair unconditionally, so an inbound on a
+	// domain with a valid Let's Encrypt certificate was still served a
+	// self-signed one and every client had to skip verification.
+	s.engine.SetCertResolver(s.certs.Materialize)
+
 	// Honour session revocation: a token whose epoch is behind the account's
 	// current one was invalidated by a recovery-code login, a 2FA disable or a
 	// password change. Fail closed — if the epoch cannot be read, reject.

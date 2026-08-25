@@ -32,6 +32,13 @@ type Controller struct {
 	// degraded accounting is visible rather than looking like flat usage.
 	mMalformedStats atomic.Int64
 
+	// certFor resolves a real certificate for an inbound's SNI. Nil means "no
+	// certificate store wired", and every TLS inbound then falls back to the
+	// self-signed pair -- which is exactly what happened for every inbound
+	// before this existed, even when the panel held a valid Let's Encrypt
+	// certificate for the same name.
+	certFor func(sni string) (certPath, keyPath string, ok bool)
+
 	mu             sync.Mutex
 	xray           *supervisor.Process
 	singbox        *supervisor.Process
@@ -52,6 +59,44 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	// running yet, so anything under our bin dir is a stray.
 	reapStrayEngines(bins.BinDir)
 	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New()}
+}
+
+// SetCertResolver wires the certificate store into config generation, so an
+// inbound whose SNI the panel holds a real certificate for is served with that
+// certificate instead of the self-signed fallback.
+//
+// It is a function rather than a store handle to keep internal/core from
+// depending on internal/cert's shape, and so a build can never block on
+// issuance: the resolver is a pure cache read.
+func (c *Controller) SetCertResolver(fn func(sni string) (string, string, bool)) {
+	c.mu.Lock()
+	c.certFor = fn
+	c.mu.Unlock()
+}
+
+// applyCerts fills in each spec's real certificate where one exists. Specs with
+// no match keep empty paths and fall through to the self-signed pair.
+//
+// Callers hold c.mu, so this reads c.certFor directly.
+func (c *Controller) applyCerts(specs []engine.InboundSpec) {
+	if c.certFor == nil {
+		return
+	}
+	for i := range specs {
+		n := specs[i].Node
+		if n == nil {
+			continue
+		}
+		// Only a TLS-terminating inbound has a certificate to serve. REALITY
+		// deliberately has none -- it borrows another site's -- and handing it
+		// one would be meaningless.
+		if !(n.Security.Type == model.SecTLS || n.Protocol.IsQUICBased() || n.Protocol == model.ProtoAnyTLS) {
+			continue
+		}
+		if cp, kp, ok := c.certFor(n.SNI()); ok {
+			specs[i].CertPath, specs[i].KeyPath = cp, kp
+		}
+	}
 }
 
 // reapStrayEngines SIGKILLs any process whose executable lives under binDir.
@@ -145,6 +190,7 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 		return nil, err
 	}
 	cp, kp, _ := cert.EnsureSelfSigned(filepath.Join(c.dataDir, "certs"))
+	c.applyCerts(specs)
 	bundle, err := engine.BuildMulti(specs, c.xrayAPIPort, cp, kp)
 	if err != nil {
 		return nil, err
@@ -221,6 +267,12 @@ func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]s
 	for _, n := range nodes {
 		specs = append(specs, engine.InboundSpec{Node: n})
 	}
+	// The preview must show the certificate the inbound would actually be served
+	// with. Skipping this made Config Doctor and the "generated config" drawer
+	// display a self-signed path for an inbound that runs with a real one.
+	c.mu.Lock()
+	c.applyCerts(specs)
+	c.mu.Unlock()
 	bundle, err := engine.BuildMulti(specs, c.xrayAPIPort, cp, kp)
 	results := map[string]string{}
 	if err != nil {

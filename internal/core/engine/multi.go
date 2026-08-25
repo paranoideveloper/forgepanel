@@ -30,6 +30,12 @@ type ClientCred struct {
 type InboundSpec struct {
 	Node    *model.Node
 	Clients []ClientCred
+	// CertPath/KeyPath override the build-wide self-signed fallback for THIS
+	// inbound, and are how a real Let's Encrypt certificate reaches the engines.
+	// The resolver lives in the caller (which owns the certificate store); the
+	// builder stays a pure function of what it is handed.
+	CertPath string
+	KeyPath  string
 }
 
 // BuildMulti aggregates inbound specs into engine configs, expanding each xray
@@ -55,7 +61,15 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	var sbEgressOutbounds []any
 	var sbEgressRules []any
 	for _, sp := range specs {
-		n := sp.Node
+		// Work on a COPY. injectCert and the tag assignment below both write to
+		// the node, and specs carry pointers straight out of the store, so
+		// building a config used to mutate the caller's objects -- stamping a
+		// self-signed certificate path onto an inbound that had none, which a
+		// later save would then persist as though the operator had chosen it.
+		n := sp.Node.Clone()
+		if sp.CertPath != "" {
+			injectCert(n, sp.CertPath, sp.KeyPath)
+		}
 		injectCert(n, certPath, keyPath)
 		if n.Tag == "" {
 			n.Tag = fmt.Sprintf("in-%d", n.Port) // ports are unique -> tags are unique
