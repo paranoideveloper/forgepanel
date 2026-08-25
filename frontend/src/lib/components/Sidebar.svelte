@@ -13,6 +13,7 @@
     { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
     { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
     { id: 'admins', label: 'Admins & Resellers', icon: '🛡️' },
+    { id: 'usage', label: 'Usage', icon: '📈' },
     { id: 'audit', label: 'Audit Trail', icon: '📜' },
     { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
     { id: 'studio', label: 'Config Studio', icon: '⚙️' },
