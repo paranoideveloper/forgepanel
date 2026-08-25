@@ -238,6 +238,9 @@ func xrayStream(t model.Transport, sec model.Security, sni string, inbound bool)
 		if t.InitialWindows > 0 {
 			g["initial_windows_size"] = t.InitialWindows
 		}
+		if t.HealthCheckTimeout > 0 {
+			g["health_check_timeout"] = t.HealthCheckTimeout
+		}
 		if t.PermitWithout {
 			g["permit_without_stream"] = true
 		}

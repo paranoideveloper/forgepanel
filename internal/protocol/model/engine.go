@@ -95,3 +95,36 @@ func ProtocolsForEngine(engine string) []Protocol {
 	}
 	return out
 }
+
+// SupportsEgress reports whether an inbound of this protocol can actually be
+// chained through an upstream hop.
+//
+// This exists because "accepted and ignored" was the real behaviour for most of
+// the protocol list. Egress is implemented by writing an extra outbound plus a
+// per-inbound routing rule into the engine's own config, so only the two engines
+// that HAVE a routing table can honour it:
+//
+//	xray       yes — outbounds[] + routing.rules[].inboundTag
+//	sing-box   yes — outbounds[] + route.rules[].inbound  (except endpoints)
+//	amneziawg  no  — a kernel WireGuard device; routing is the peer's allowed-ips
+//	brook      no  — one process per inbound, no routing table at all
+//	forgedns   no  — a DNS server, not a traffic path
+//
+// WireGuard is the subtle one: it is a sing-box protocol, but it renders as an
+// ENDPOINT rather than an inbound, and an endpoint has no tag for a route rule
+// to match. A chain set on it could never apply.
+//
+// Returning false here is what turns a silent leak into a refusal the operator
+// can see: the traffic an operator asked to relay would otherwise have left the
+// machine directly, which is the one outcome a chain exists to prevent.
+func SupportsEgress(p Protocol) bool {
+	if p == ProtoWireGuard {
+		return false
+	}
+	switch EngineFor(p) {
+	case EngineXray, EngineSingBox:
+		return true
+	default:
+		return false
+	}
+}

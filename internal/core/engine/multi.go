@@ -48,6 +48,12 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	egressTag := map[string]string{}
 	var egressOutbounds []any
 	var egressRules []any
+	// The same three, for sing-box. Kept separate because the tag namespaces and
+	// the config documents are separate; a shared counter would let one engine's
+	// index gap confuse the other's logs.
+	sbEgressTag := map[string]string{}
+	var sbEgressOutbounds []any
+	var sbEgressRules []any
 	for _, sp := range specs {
 		n := sp.Node
 		injectCert(n, certPath, keyPath)
@@ -88,6 +94,16 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			b.XrayN++
 		case "sing-box":
 			if render.IsSingboxEndpoint(n) { // WireGuard -> endpoints[]
+				if strings.TrimSpace(n.Egress) != "" {
+					// A WireGuard endpoint is a kernel/userspace tunnel device,
+					// not a routed inbound: sing-box has nowhere to attach a
+					// per-inbound detour. Accepting the chain and ignoring it
+					// would leak exactly the traffic the chain exists to hide.
+					b.Skipped = append(b.Skipped, SkippedInbound{n.Remark,
+						"egress: a WireGuard endpoint cannot be chained through an upstream hop; " +
+							"chain the peer's own allowed-ips upstream instead"})
+					continue
+				}
 				ep, err := render.SingboxEndpoint(n)
 				if err != nil {
 					b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, err.Error()})
@@ -104,6 +120,37 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			}
 			if len(sp.Clients) > 0 {
 				applySingboxUsers(ins[0], n, sp.Clients)
+			}
+			if uri := strings.TrimSpace(n.Egress); uri != "" {
+				tag, ok := sbEgressTag[uri]
+				if !ok {
+					out, err := singboxEgressOutbound(uri, len(sbEgressTag))
+					if err != nil {
+						b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "egress: " + err.Error()})
+						continue
+					}
+					tag, _ = out["tag"].(string)
+					sbEgressTag[uri] = tag
+					sbEgressOutbounds = append(sbEgressOutbounds, out)
+				}
+				// A protocol may render as SEVERAL inbounds (ShadowTLS is a
+				// handshake listener plus the detour it fronts). Every one of
+				// them has to be routed, or the chain applies to part of the
+				// traffic and the rest exits directly.
+				inTags := make([]string, 0, len(ins))
+				for _, in := range ins {
+					if t, _ := in["tag"].(string); t != "" {
+						inTags = append(inTags, t)
+					}
+				}
+				if len(inTags) == 0 {
+					b.Skipped = append(b.Skipped, SkippedInbound{n.Remark,
+						"egress: the inbound has no tag to route from"})
+					continue
+				}
+				sbEgressRules = append(sbEgressRules, jobj{
+					"inbound": inTags, "action": "route", "outbound": tag,
+				})
 			}
 			for _, in := range ins {
 				sin = append(sin, in)
@@ -153,7 +200,16 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	// attributes traffic to them internally and in its own logs. What is missing
 	// is panel-side COLLECTION, so quota enforcement currently covers Xray-served
 	// protocols only. See docs/PROTOCOLS.md.
-	singboxCfg := jobj{"log": jobj{"level": "warn"}, "inbounds": orEmpty(sin), "outbounds": []any{jobj{"type": "direct", "tag": "direct"}}}
+	singboxCfg := jobj{
+		"log":       jobj{"level": "warn"},
+		"inbounds":  orEmpty(sin),
+		"outbounds": append([]any{jobj{"type": "direct", "tag": "direct"}}, sbEgressOutbounds...),
+	}
+	if len(sbEgressRules) > 0 {
+		// "final" keeps every unchained inbound on the direct outbound, so
+		// adding a chain to one inbound cannot alter any other.
+		singboxCfg["route"] = jobj{"rules": sbEgressRules, "final": "direct"}
+	}
 	if len(sep) > 0 {
 		singboxCfg["endpoints"] = sep
 	}
@@ -333,15 +389,10 @@ func injectCert(n *model.Node, certPath, keyPath string) {
 	}
 }
 
-// egressOutbound turns an upstream-hop URI into an Xray outbound.
-//
-// The URI is parsed with the panel's own link parser and rendered with its own
-// outbound renderer, so a chain hop supports exactly the protocols and
-// transports the panel already understands — including REALITY, XHTTP and the
-// full TLS surface. Writing a second, chain-specific renderer here is how the
-// two would drift and a hop would quietly lose its uTLS fingerprint or its
-// REALITY short id.
-func egressOutbound(uri string, index int) (jobj, error) {
+// egressHop parses and validates an upstream-hop URI, returning the node with
+// its chain tag already set. Both engines share it so a hop means the same thing
+// whichever core happens to serve the inbound that uses it.
+func egressHop(uri string, index int) (*model.Node, error) {
 	hop, err := parse.URI(uri)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse the upstream hop: %w", err)
@@ -352,6 +403,43 @@ func egressOutbound(uri string, index int) (jobj, error) {
 	}
 	// A distinct tag per upstream so several chains can coexist.
 	hop.Tag = fmt.Sprintf("egress-%d", index)
+	return hop, nil
+}
+
+// singboxEgressOutbound turns an upstream-hop URI into a sing-box outbound.
+//
+// Without this, an Egress set on a sing-box inbound (Hysteria2, TUIC, AnyTLS,
+// ShadowTLS, Trojan-on-sing-box) was accepted by the API, stored, shown in the
+// UI and then IGNORED by the builder: the inbound exited directly, with nothing
+// logged. That is the precise leak the Xray branch refuses to allow, so the two
+// branches now behave identically — the hop is honoured, or the inbound is
+// skipped and the operator is told why.
+func singboxEgressOutbound(uri string, index int) (jobj, error) {
+	hop, err := egressHop(uri, index)
+	if err != nil {
+		return nil, err
+	}
+	out, err := render.SingboxOutbound(hop)
+	if err != nil {
+		return nil, fmt.Errorf("cannot render the upstream hop for sing-box: %w", err)
+	}
+	out["tag"] = hop.Tag
+	return jobj(out), nil
+}
+
+// egressOutbound turns an upstream-hop URI into an Xray outbound.
+//
+// The URI is parsed with the panel's own link parser and rendered with its own
+// outbound renderer, so a chain hop supports exactly the protocols and
+// transports the panel already understands — including REALITY, XHTTP and the
+// full TLS surface. Writing a second, chain-specific renderer here is how the
+// two would drift and a hop would quietly lose its uTLS fingerprint or its
+// REALITY short id.
+func egressOutbound(uri string, index int) (jobj, error) {
+	hop, err := egressHop(uri, index)
+	if err != nil {
+		return nil, err
+	}
 	out, err := render.XrayOutbound(hop)
 	if err != nil {
 		return nil, fmt.Errorf("cannot render the upstream hop: %w", err)

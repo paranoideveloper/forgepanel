@@ -165,12 +165,17 @@ type Transport struct {
 	EDHeader  string            `json:"ed_header,omitempty"`  // early data header name
 
 	// grpc
-	ServiceName    string `json:"service_name,omitempty"`
-	MultiMode      bool   `json:"multi_mode,omitempty"`
-	IdleTimeout    int    `json:"idle_timeout,omitempty"`
-	HealthCheck    bool   `json:"health_check,omitempty"`
-	InitialWindows int    `json:"initial_windows,omitempty"`
-	PermitWithout  bool   `json:"permit_without_stream,omitempty"`
+	ServiceName string `json:"service_name,omitempty"`
+	MultiMode   bool   `json:"multi_mode,omitempty"`
+	IdleTimeout int    `json:"idle_timeout,omitempty"`
+	// HealthCheckTimeout is the seconds Xray waits for a gRPC health-check
+	// response. It was a bool ("health_check") that nothing ever rendered: it
+	// could be set through the API, survived a clone, and reached no engine. The
+	// core takes a TIMEOUT, so a bool could not express it in the first place —
+	// verified with `xray run -test` against Xray 26.2.6.
+	HealthCheckTimeout int  `json:"health_check_timeout,omitempty"`
+	InitialWindows     int  `json:"initial_windows,omitempty"`
+	PermitWithout      bool `json:"permit_without_stream,omitempty"`
 
 	// xhttp / splithttp -- see xhttp.go for the enum tables and the rules the
 	// core enforces on these. Path/Host/Headers above are shared with ws.
@@ -646,6 +651,15 @@ func (n *Node) Validate() error {
 	if n.Port < 1 || n.Port > 65535 {
 		return fmt.Errorf("%w: got %d", ErrBadPort, n.Port)
 	}
+	// Refuse a chain the builders cannot honour. Storing one on, say, a Brook or
+	// AmneziaWG inbound used to succeed and then do nothing: the operator saw a
+	// configured upstream hop while the traffic left the machine directly. See
+	// SupportsEgress for which engines have a routing table to attach it to.
+	if strings.TrimSpace(n.Egress) != "" && !SupportsEgress(n.Protocol) {
+		return fmt.Errorf("%s: cannot relay through an upstream hop — %s has no per-inbound "+
+			"routing table, so the chain would be stored and then ignored while traffic exits directly",
+			n.Protocol, EngineFor(n.Protocol))
+	}
 	switch n.Protocol {
 	case ProtoVLESS:
 		if n.UUID == "" {
@@ -1011,7 +1025,7 @@ func (t *Transport) clearIrrelevant() {
 	case NetGRPC:
 		*t = Transport{
 			Network: t.Network, ServiceName: t.ServiceName, MultiMode: t.MultiMode,
-			IdleTimeout: t.IdleTimeout, HealthCheck: t.HealthCheck,
+			IdleTimeout: t.IdleTimeout, HealthCheckTimeout: t.HealthCheckTimeout,
 			InitialWindows: t.InitialWindows, PermitWithout: t.PermitWithout,
 			Host: t.Host,
 		}

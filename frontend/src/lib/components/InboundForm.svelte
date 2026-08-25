@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
-  import { buildNode, fieldsFor, getPath, type Schema, type Field } from '$lib/nodebuild';
+  import { buildNode, fieldsFor, getPath, formatKV, type Schema, type Field } from '$lib/nodebuild';
 
   let { onSaved = () => {}, initialProto = 'vless', initial = null, editId = 0 } = $props<{
     onSaved?: () => void;
@@ -42,8 +42,15 @@
 
   // prefillFrom decomposes an existing node back into the flat form model, so an
   // inbound can be edited with every field pre-populated.
+  let originalNode: Record<string, any> | null = null;
+
   function prefillFrom(node: Record<string, any>) {
     if (!schema) return;
+    // Keep the node exactly as the server returned it. buildNode starts from
+    // this on save so fields the studio schema does not describe (Egress, xmux,
+    // download_settings, ECH, peer keys) survive an edit instead of being
+    // replaced with nothing.
+    originalNode = structuredClone(node);
     proto = node.protocol || proto;
     transport = node.transport?.network || 'tcp';
     security = node.security?.type || 'none';
@@ -54,7 +61,11 @@
     for (const sec of fieldsFor(schema, proto, transport, security)) {
       for (const f of sec.fields) {
         const v = getPath(node, f.key);
-        if (v !== undefined) values[f.key] = Array.isArray(v) ? v.join(',') : v;
+        if (v === undefined) continue;
+        // A kv map must go back to "Name: value" lines; assigning the object
+        // straight into a textarea renders "[object Object]" and then saves
+        // that string as the header set.
+        values[f.key] = f.type === 'kv' ? formatKV(v) : Array.isArray(v) ? v.join(',') : v;
       }
     }
   }
@@ -97,7 +108,7 @@
     if (!schema) return;
     previewing = true;
     try {
-      const node = buildNode(schema, proto, transport, security, values);
+      const node = buildNode(schema, proto, transport, security, values, editId ? originalNode : null);
       preview = await apiFetch('/studio/preview', { method: 'POST', body: JSON.stringify(node) });
     } catch (e: any) {
       preview = { errors: [{ severity: 'error', message: e.message || 'preview failed' }] };
@@ -158,7 +169,7 @@
     if (!schema) return;
     saving = true;
     try {
-      const node = buildNode(schema, proto, transport, security, values);
+      const node = buildNode(schema, proto, transport, security, values, editId ? originalNode : null);
       if (editId) {
         // confirm=true accepts breaking changes (port/proto/transport/security)
         // the safe-edit guard would otherwise refuse.
@@ -246,7 +257,7 @@
           <h4>{sec.section}</h4>
           <div class="fields">
             {#each sec.fields as f}
-              <div class="fg" class:wide={f.type === 'textarea'}>
+              <div class="fg" class:wide={f.type === 'textarea' || f.type === 'kv'}>
                 <label for={f.key}>{f.label}</label>
                 {#if f.type === 'bool'}
                   <label class="chk"><input type="checkbox" bind:checked={values[f.key]} onchange={schedulePreview} /> enabled</label>
@@ -254,7 +265,7 @@
                   <select id={f.key} bind:value={values[f.key]} onchange={schedulePreview}>
                     {#each f.options || [] as o}<option value={o}>{o === '' ? '(none)' : o}</option>{/each}
                   </select>
-                {:else if f.type === 'textarea'}
+                {:else if f.type === 'textarea' || f.type === 'kv'}
                   <textarea id={f.key} bind:value={values[f.key]} oninput={schedulePreview} placeholder={f.placeholder}></textarea>
                 {:else}
                   <div class="with-gen">

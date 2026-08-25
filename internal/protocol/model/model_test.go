@@ -229,7 +229,7 @@ func TestNormalizeClearsIrrelevantTransportFields(t *testing.T) {
 		return Transport{
 			Network: net, Path: "/p", Host: "h.example.com", Headers: map[string]string{"X": "1"},
 			EarlyData: 2048, EDHeader: "Sec-WebSocket-Protocol",
-			ServiceName: "svc", MultiMode: true, IdleTimeout: 30, HealthCheck: true,
+			ServiceName: "svc", MultiMode: true, IdleTimeout: 30, HealthCheckTimeout: 20,
 			InitialWindows: 65536, PermitWithout: true,
 			XHTTPMode: "stream-up", XPaddingB: "100-1000", XMux: &XMux{MaxConcurrency: "16"},
 			H2Hosts:    []string{"a", "b"},
@@ -248,7 +248,7 @@ func TestNormalizeClearsIrrelevantTransportFields(t *testing.T) {
 			[]string{"ServiceName", "XHTTPMode", "Seed", "QUICSecurity", "HeaderObfs", "H2Hosts"}},
 		{NetHTTPUpgrade, map[string]bool{"Path": true, "Host": true, "Headers": true},
 			[]string{"ServiceName", "XHTTPMode", "Seed", "HeaderObfs"}},
-		{NetGRPC, map[string]bool{"ServiceName": true, "MultiMode": true, "IdleTimeout": true, "HealthCheck": true, "InitialWindows": true, "PermitWithout": true, "Host": true},
+		{NetGRPC, map[string]bool{"ServiceName": true, "MultiMode": true, "IdleTimeout": true, "HealthCheckTimeout": true, "InitialWindows": true, "PermitWithout": true, "Host": true},
 			[]string{"Path", "Headers", "XHTTPMode", "Seed", "HeaderObfs"}},
 		{NetXHTTP, map[string]bool{"Path": true, "Host": true, "Headers": true, "XHTTPMode": true, "XPaddingB": true, "XMux": true},
 			[]string{"ServiceName", "Seed", "HeaderObfs", "H2Hosts"}},

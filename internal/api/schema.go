@@ -12,7 +12,7 @@ import (
 type Field struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
-	Type    string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int)
+	Type    string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int), kv (map[string]string)
 	Options []string `json:"options,omitempty"` // for select
 	Default any      `json:"default,omitempty"`
 	Keygen  string   `json:"keygen,omitempty"` // reality|uuid|shortid|ss2022|wireguard|password
@@ -28,6 +28,11 @@ type ProtoSchema struct {
 	Fields     []Field  `json:"fields"`     // credentials + protocol options
 	Transports []string `json:"transports"` // empty => no transport layer
 	Securities []string `json:"securities"`
+	// Chainable reports whether this protocol's engine can honour an upstream
+	// hop. The form uses it to decide whether to offer the chain control at all:
+	// showing it for a protocol whose builder ignores it is how an operator ends
+	// up believing traffic is relayed when it leaves the machine directly.
+	Chainable bool `json:"chainable"`
 }
 
 // handleSchema returns the full field schema so the UI can render every option
@@ -42,13 +47,42 @@ func (s *Server) handleSchema(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"protocols":    protocolSchemas(transports, securities),
+		"common":       commonFields(),
 		"transports":   transportFields(),
 		"securities":   securityFields(fps),
 		"fingerprints": fps,
 	})
 }
 
+// commonFields returns node-level fields that belong to no single protocol,
+// transport or security layer.
+//
+// Egress lived in the model, in the builder and in the API for a whole release
+// with no control anywhere in the panel: a multi-hop chain could only be set by
+// hand against the API, and — worse — opening such an inbound in the form and
+// pressing Update silently erased it, because the form rebuilt the node from
+// fields it knew about and the chain was not one of them.
+func commonFields() []Field {
+	return []Field{
+		{Key: "egress", Label: "Relay through upstream hop", Type: "text",
+			Ph: "vless://…  ss://…  trojan://…",
+			Help: "paste a share link; this inbound's traffic leaves through that server " +
+				"instead of this one. Empty = exit directly. A hop that cannot be parsed " +
+				"stops the inbound rather than letting it exit directly."},
+	}
+}
+
 func protocolSchemas(transports, securities []string) []ProtoSchema {
+	out := protocolSchemaList(transports, securities)
+	// Chainability comes from the one authority that decides it, so a protocol
+	// can never advertise a chain the builder would ignore.
+	for i := range out {
+		out[i].Chainable = model.SupportsEgress(model.Protocol(out[i].Proto))
+	}
+	return out
+}
+
+func protocolSchemaList(transports, securities []string) []ProtoSchema {
 	ss := []string{model.SS2022AES256, model.SS2022AES128, model.SS2022ChaCha20,
 		model.SSAES256GCM, model.SSAES128GCM, model.SSChaCha20Poly, model.SSXChaCha20Poly, model.SSNone}
 	return []ProtoSchema{
@@ -164,16 +198,20 @@ func transportFields() map[string][]Field {
 		"grpc": {
 			{Key: "transport.service_name", Label: "Service name", Type: "text", Ph: "grpcsvc"},
 			{Key: "transport.multi_mode", Label: "Multi mode", Type: "bool"},
-			{Key: "transport.idle_timeout", Label: "Idle timeout (s)", Type: "number", Help: "gRPC health/idle timeout"},
+			{Key: "transport.idle_timeout", Label: "Idle timeout (s)", Type: "number", Help: "send a health ping after this many idle seconds"},
+			{Key: "transport.health_check_timeout", Label: "Health-check timeout (s)", Type: "number", Help: "how long to wait for the health ping response"},
 			{Key: "transport.initial_windows", Label: "Initial windows size", Type: "number"},
 			{Key: "transport.permit_without_stream", Label: "Permit without stream", Type: "bool"},
 		},
-		"xhttp": {
-			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
-			{Key: "transport.host", Label: "Host", Type: "text"},
-			{Key: "transport.xhttp_mode", Label: "Mode", Type: "select", Options: []string{"auto", "packet-up", "stream-up", "stream-one"}, Default: "auto"},
-			{Key: "transport.x_padding_bytes", Label: "Padding bytes", Type: "text", Ph: "100-1000"},
-		},
+		// XHTTP is the one transport an operator genuinely tunes per deployment,
+		// and for a long time the form exposed FOUR of its knobs while the model
+		// carried the full set. Everything else — the padding shape, session and
+		// sequence carriage, uplink shaping, the sc* flow-control limits, xmux
+		// and the whole split download leg — could be set through the API and
+		// through an imported share link, but never seen or changed in the panel
+		// that owns the inbound. The options come from the model's own enum
+		// tables so this list cannot drift from what the core accepts.
+		"xhttp": xhttpFields(),
 		"h2": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
 			{Key: "transport.host", Label: "Host", Type: "text"},
@@ -183,6 +221,106 @@ func transportFields() map[string][]Field {
 		},
 		"quic": {},
 	}
+}
+
+// xhttpFields returns the complete XHTTP surface.
+//
+// Grouped in the order an operator reasons about them: where it listens, how it
+// is shaped, where the session rides, how the uplink behaves, connection reuse,
+// and finally the separate download leg.
+func xhttpFields() []Field {
+	// Optional enums get a leading "" so the form can express "unset". The core
+	// treats an empty value as its own default; offering only real values would
+	// make a field impossible to clear once set.
+	opt := func(vals []string) []string { return append([]string{""}, vals...) }
+
+	f := []Field{
+		{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
+		{Key: "transport.host", Label: "Host", Type: "text"},
+		{Key: "transport.headers", Label: "Extra headers", Type: "kv",
+			Ph: "X-Forwarded-Proto: https", Help: "one Name: value per line"},
+		{Key: "transport.xhttp_mode", Label: "Mode", Type: "select", Options: model.AllXHTTPModes(), Default: "auto",
+			Help: "packet-up survives CDNs that buffer; stream-one is lowest latency"},
+		{Key: "transport.server_max_header_bytes", Label: "Max request header bytes", Type: "number",
+			Help: "server-side cap on inbound headers; 0 = core default"},
+
+		// Padding shape.
+		{Key: "transport.x_padding_bytes", Label: "Padding bytes", Type: "text", Ph: "100-1000",
+			Help: "single number or a low-high range"},
+		{Key: "transport.x_padding_obfs_mode", Label: "Obfuscated padding", Type: "bool",
+			Help: "derive the padding token from a key instead of sending raw filler"},
+		{Key: "transport.x_padding_key", Label: "Padding key", Type: "text", Help: "used when obfuscated padding is on"},
+		{Key: "transport.x_padding_header", Label: "Padding header name", Type: "text", Ph: "X-Padding"},
+		{Key: "transport.x_padding_placement", Label: "Padding placement", Type: "select",
+			Options: opt(model.AllXHTTPPaddingPlacements()), Help: "the core rejects \"path\" here"},
+		{Key: "transport.x_padding_method", Label: "Padding method", Type: "select",
+			Options: opt(model.AllXHTTPPaddingMethods())},
+
+		// Response shape. Both strip a layer of camouflage a fronting CDN may
+		// otherwise mangle.
+		{Key: "transport.no_grpc_header", Label: "No gRPC header", Type: "bool"},
+		{Key: "transport.no_sse_header", Label: "No SSE header", Type: "bool"},
+
+		// Session and sequence carriage — moving these out of the path is what
+		// defeats path-pattern DPI.
+		{Key: "transport.session_placement", Label: "Session placement", Type: "select", Options: opt(model.AllXHTTPPlacements())},
+		{Key: "transport.session_key", Label: "Session key", Type: "text", Help: "header/cookie/query name carrying the session id"},
+		{Key: "transport.seq_placement", Label: "Sequence placement", Type: "select", Options: opt(model.AllXHTTPPlacements())},
+		{Key: "transport.seq_key", Label: "Sequence key", Type: "text"},
+
+		// Uplink shaping. The core restricts two of these to packet-up; the
+		// help text says so rather than letting the save fail with a core error.
+		{Key: "transport.uplink_data_placement", Label: "Uplink data placement", Type: "select",
+			Options: opt(model.AllXHTTPUplinkDataPlacements()), Help: "header and cookie require packet-up mode"},
+		{Key: "transport.uplink_data_key", Label: "Uplink data key", Type: "text"},
+		{Key: "transport.uplink_http_method", Label: "Uplink HTTP method", Type: "select",
+			Options: opt(model.AllXHTTPUplinkMethods()), Help: "GET requires packet-up mode"},
+		{Key: "transport.uplink_chunk_size", Label: "Uplink chunk size", Type: "number"},
+
+		// packet-up / stream-up flow control. The sc* values are Int32Range
+		// literals: "1000000" or "500000-1000000".
+		{Key: "transport.sc_max_each_post_bytes", Label: "Max bytes per POST", Type: "text", Ph: "1000000"},
+		{Key: "transport.sc_min_posts_interval_ms", Label: "Min interval between POSTs (ms)", Type: "text", Ph: "30-50"},
+		{Key: "transport.sc_max_buffered_posts", Label: "Max buffered POSTs", Type: "number"},
+		{Key: "transport.sc_stream_up_server_secs", Label: "stream-up server seconds", Type: "text", Ph: "20-80"},
+
+		// Connection reuse (xmux).
+		{Key: "transport.xmux.max_concurrency", Label: "xmux max concurrency", Type: "text", Ph: "16-32",
+			Help: "streams per connection — an ALTERNATIVE to max connections, not a companion"},
+		{Key: "transport.xmux.max_connections", Label: "xmux max connections", Type: "text", Ph: "8",
+			Help: "the core rejects this combined with max concurrency; set one or the other"},
+		{Key: "transport.xmux.c_max_reuse_times", Label: "xmux connection reuse times", Type: "text", Ph: "64-128"},
+		{Key: "transport.xmux.h_max_request_times", Label: "xmux requests per connection", Type: "text", Ph: "600-900"},
+		{Key: "transport.xmux.h_max_reusable_secs", Label: "xmux reusable seconds", Type: "text", Ph: "1800-3000"},
+		{Key: "transport.xmux.h_keep_alive_period", Label: "xmux keep-alive period (s)", Type: "number"},
+	}
+
+	// The split download leg: a COMPLETE second stream with its own address,
+	// transport and TLS/REALITY layer. This is what makes "upload through the
+	// CDN, download direct" expressible, and it is the single most useful XHTTP
+	// feature for operators fighting asymmetric throttling — which is why
+	// leaving it out of the form was the costliest omission of the set.
+	dl := "transport.download_settings."
+	f = append(f,
+		Field{Key: dl + "address", Label: "Download leg · address", Type: "text",
+			Help: "leave every download field empty to use a single stream"},
+		Field{Key: dl + "port", Label: "Download leg · port", Type: "number"},
+		Field{Key: dl + "transport.network", Label: "Download leg · transport", Type: "select",
+			Options: []string{"", "tcp", "ws", "grpc", "httpupgrade", "xhttp"}},
+		Field{Key: dl + "transport.path", Label: "Download leg · path", Type: "text"},
+		Field{Key: dl + "transport.host", Label: "Download leg · host", Type: "text"},
+		Field{Key: dl + "transport.xhttp_mode", Label: "Download leg · mode", Type: "select", Options: opt(model.AllXHTTPModes())},
+		Field{Key: dl + "security.type", Label: "Download leg · security", Type: "select", Options: []string{"", "none", "tls", "reality"}},
+		Field{Key: dl + "security.server_name", Label: "Download leg · SNI", Type: "text"},
+		Field{Key: dl + "security.fingerprint", Label: "Download leg · uTLS fingerprint", Type: "select", Options: opt(model.ValidFingerprints())},
+		Field{Key: dl + "security.alpn", Label: "Download leg · ALPN", Type: "csv", Ph: "h2,http/1.1"},
+		Field{Key: dl + "security.reality.dest", Label: "Download leg · REALITY dest", Type: "text", Ph: "www.cloudflare.com:443"},
+		Field{Key: dl + "security.reality.server_names", Label: "Download leg · REALITY SNIs", Type: "csv"},
+		Field{Key: dl + "security.reality.public_key", Label: "Download leg · REALITY public key", Type: "text"},
+		Field{Key: dl + "security.reality.short_ids", Label: "Download leg · REALITY short ids", Type: "csv"},
+		Field{Key: dl + "security.reality.spider_x", Label: "Download leg · REALITY spiderX", Type: "text"},
+	)
+	return f
 }
 
 // securityFields returns the fields each security layer needs.
@@ -197,6 +335,16 @@ func securityFields(fps []string) map[string][]Field {
 			{Key: "security.max_version", Label: "Max TLS version", Type: "select", Options: []string{"", "1.2", "1.3"}},
 			{Key: "security.cipher_suites", Label: "Cipher suites", Type: "text", Ph: "TLS_AES_128_GCM_SHA256:..."},
 			{Key: "security.allow_insecure", Label: "Allow insecure (auto for self-signed)", Type: "bool"},
+			{Key: "security.pin_sha256", Label: "Pinned certificate SHA-256", Type: "csv",
+				Help: "clients accept only these certificate fingerprints"},
+			// ECH is rendered by the sing-box path (render/singbox.go). It was a
+			// live feature with no control anywhere in the panel.
+			{Key: "security.ech.enabled", Label: "Encrypted Client Hello", Type: "bool",
+				Help: "sing-box protocols only"},
+			{Key: "security.ech.config_list", Label: "ECH config list", Type: "textarea",
+				Help: "base64 ECHConfigList; leave empty and use auto-fetch to resolve it from DNS"},
+			{Key: "security.ech.auto_fetch", Label: "Fetch ECH config from DNS", Type: "bool",
+				Help: "resolve the ECHConfigList from the HTTPS resource record"},
 		},
 		"reality": {
 			{Key: "security.reality.dest", Label: "Dest / steal-site", Type: "text", Default: "www.cloudflare.com:443", Help: "avoid microsoft.com; use cloudflare/apple/google"},
@@ -204,7 +352,18 @@ func securityFields(fps []string) map[string][]Field {
 			{Key: "security.fingerprint", Label: "uTLS fingerprint", Type: "select", Options: fps, Default: "chrome"},
 			{Key: "security.reality.private_key", Label: "Private key", Type: "text", Keygen: "reality", Help: "auto-generated if empty"},
 			{Key: "security.reality.public_key", Label: "Public key", Type: "text"},
-			{Key: "security.reality.short_id", Label: "Short ID", Type: "text", Keygen: "shortid"},
+			{Key: "security.reality.short_id", Label: "Short ID", Type: "text", Keygen: "shortid",
+				Help: "the one written into client links"},
+			{Key: "security.reality.short_ids", Label: "Accepted short IDs", Type: "csv",
+				Help: "every short ID this inbound accepts; lets each client carry its own"},
+			// Multi-SNI is the whole basis of SNI rotation, and the form offered
+			// exactly one. The rule below is not theory: measured across 34 live
+			// REALITY variants, every failure was an SNI its dest does not serve.
+			{Key: "security.reality.server_names", Label: "Accepted SNIs", Type: "csv",
+				Ph: "www.cloudflare.com,discord.com",
+				Help: "each MUST be hosted by the dest above — REALITY relays the ClientHello to dest, " +
+					"so an SNI dest cannot serve fails the handshake even though the config is correct"},
+			{Key: "security.reality.spider_x", Label: "SpiderX", Type: "text", Ph: "/"},
 			{Key: "security.reality.xver", Label: "Proxy protocol (xver)", Type: "iselect", Options: []string{"0", "1", "2"}, Default: 0},
 		},
 	}

@@ -185,3 +185,145 @@ func TestBrokenUpstreamSkipsTheInboundRatherThanExitingDirectly(t *testing.T) {
 		t.Fatalf("the unusable inbound must not be served; inbounds = %d", len(ins))
 	}
 }
+
+// --- sing-box chains -------------------------------------------------------
+//
+// Egress was originally honoured on the Xray branch ONLY. A chain set on a
+// sing-box inbound (Hysteria2, TUIC, AnyTLS, ShadowTLS) was accepted by the
+// API, stored, rendered in the UI and then dropped on the floor by the builder:
+// the inbound exited directly with nothing logged. These tests pin the fix.
+
+func sbChainNode(proto model.Protocol, remark string, port int, egress string) *model.Node {
+	n := &model.Node{
+		Protocol: proto,
+		Address:  "0.0.0.0",
+		Port:     port,
+		Remark:   remark,
+		Egress:   egress,
+		Password: "hunter2hunter2",
+		UUID:     "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Security: model.Security{Type: "tls", ServerName: "example.com"},
+	}
+	n.Normalize()
+	return n
+}
+
+func singboxObj(t *testing.T, b *Bundle) map[string]any {
+	t.Helper()
+	var cfg map[string]any
+	if err := json.Unmarshal(b.Singbox, &cfg); err != nil {
+		t.Fatalf("sing-box config is not JSON: %v", err)
+	}
+	return cfg
+}
+
+// The regression that mattered: a chained sing-box inbound must actually route
+// through the hop, not exit directly.
+func TestSingboxEgressRoutesThroughTheHop(t *testing.T) {
+	b, err := BuildMulti([]InboundSpec{
+		{Node: sbChainNode(model.ProtoHysteria2, "hy2", 20501, upstreamVLESS)},
+	}, 10099, "", "")
+	if err != nil {
+		t.Fatalf("BuildMulti: %v", err)
+	}
+	if len(b.Skipped) != 0 {
+		t.Fatalf("inbound was skipped: %+v", b.Skipped)
+	}
+	cfg := singboxObj(t, b)
+
+	outs := tagsOf(t, cfg, "outbounds")
+	var egressTagName string
+	for _, tag := range outs {
+		if strings.HasPrefix(tag, "egress-") {
+			egressTagName = tag
+		}
+	}
+	if egressTagName == "" {
+		t.Fatalf("no egress outbound in the sing-box config; outbounds = %v", outs)
+	}
+
+	route, ok := cfg["route"].(map[string]any)
+	if !ok {
+		t.Fatalf("a chained sing-box inbound produced no route block, so the hop is unreachable")
+	}
+	if final, _ := route["final"].(string); final != "direct" {
+		t.Fatalf(`route.final must stay "direct" so unchained inbounds are unaffected, got %q`, final)
+	}
+	rules, _ := route["rules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("expected one egress rule, got %d", len(rules))
+	}
+	r, _ := rules[0].(map[string]any)
+	if got, _ := r["outbound"].(string); got != egressTagName {
+		t.Fatalf("rule points at %q, want %q", got, egressTagName)
+	}
+	in, _ := r["inbound"].([]any)
+	if len(in) == 0 {
+		t.Fatalf("rule names no inbound, so it can never match")
+	}
+}
+
+// An unchained sing-box inbound must produce no route block at all — every
+// existing deployment is this case.
+func TestSingboxWithoutEgressIsUnchanged(t *testing.T) {
+	b, err := BuildMulti([]InboundSpec{
+		{Node: sbChainNode(model.ProtoHysteria2, "plain", 20502, "")},
+	}, 10099, "", "")
+	if err != nil {
+		t.Fatalf("BuildMulti: %v", err)
+	}
+	cfg := singboxObj(t, b)
+	if _, present := cfg["route"]; present {
+		t.Fatalf("an inbound with no egress produced a route block")
+	}
+	for _, tag := range tagsOf(t, cfg, "outbounds") {
+		if strings.HasPrefix(tag, "egress-") {
+			t.Fatalf("an inbound with no egress produced an egress outbound (%s)", tag)
+		}
+	}
+}
+
+// A broken hop must skip the sing-box inbound, exactly as it does for Xray.
+// Falling through to direct is the one outcome a chain exists to prevent.
+func TestSingboxBrokenUpstreamSkipsRatherThanExitingDirectly(t *testing.T) {
+	b, err := BuildMulti([]InboundSpec{
+		{Node: sbChainNode(model.ProtoTUIC, "bad", 20503, "not-a-uri://nonsense")},
+	}, 10099, "", "")
+	if err != nil {
+		t.Fatalf("BuildMulti: %v", err)
+	}
+	if len(b.Skipped) != 1 {
+		t.Fatalf("expected the inbound to be skipped, got %+v", b.Skipped)
+	}
+	if !strings.Contains(b.Skipped[0].Reason, "egress") {
+		t.Fatalf("skip reason should name the egress, got %q", b.Skipped[0].Reason)
+	}
+	cfg := singboxObj(t, b)
+	if ins, _ := cfg["inbounds"].([]any); len(ins) != 0 {
+		t.Fatalf("the unusable inbound must not be served; inbounds = %d", len(ins))
+	}
+}
+
+// A WireGuard endpoint has nowhere to attach a per-inbound detour. Silently
+// ignoring the chain would leak precisely the traffic it exists to hide, so the
+// builder refuses and says why.
+func TestWireGuardEndpointRefusesAnEgressInsteadOfIgnoringIt(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoWireGuard,
+		Address:  "0.0.0.0",
+		Port:     20504,
+		Remark:   "wg",
+		Egress:   upstreamVLESS,
+	}
+	n.Normalize()
+	b, err := BuildMulti([]InboundSpec{{Node: n}}, 10099, "", "")
+	if err != nil {
+		t.Fatalf("BuildMulti: %v", err)
+	}
+	if len(b.Skipped) != 1 {
+		t.Fatalf("expected the endpoint to be skipped, got %+v", b.Skipped)
+	}
+	if !strings.Contains(b.Skipped[0].Reason, "egress") {
+		t.Fatalf("skip reason should name the egress, got %q", b.Skipped[0].Reason)
+	}
+}
