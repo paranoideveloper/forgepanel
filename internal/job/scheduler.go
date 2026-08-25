@@ -405,7 +405,7 @@ func (s *Scheduler) sweepAt(now time.Time) {
 		}
 
 		// 3. Periodic usage reset, idempotent + multi-instance-safe.
-		if ps, ok := periodStart(now, u.ResetStrategy); ok {
+		if ps, ok := resetPeriodStart(now, u); ok {
 			if applied, _ := s.db.ResetUserUsageCAS(u.ID, ps, now); applied {
 				changed = true
 			}
@@ -421,6 +421,35 @@ func (s *Scheduler) sweepAt(now time.Time) {
 	if changed && s.reloadHook != nil {
 		s.reloadHook()
 	}
+}
+
+// resetPeriodStart returns the compare-and-set marker for a user's reset
+// strategy, and whether the strategy resets at all.
+//
+// "on_expire" needed its own case. The API validator has always ACCEPTED it as a
+// legal strategy while periodStart had no branch for it, so it returned
+// ok=false and the reset never happened — an operator chose "reset when the
+// subscription expires", the panel took the setting, and usage simply never
+// reset. There was nothing to see: no error, no log, just a counter that kept
+// climbing across renewals.
+//
+// The expiry date IS the period boundary here, which makes the existing
+// compare-and-set machinery fit exactly: it fires once per expiry date, catches
+// up after downtime, and cannot double-reset. The reset does not revive the
+// account — ResetUserUsageCAS reactivates only a StatusLimited user whose expiry
+// has not passed — so an expired user's usage is zeroed while they stay expired,
+// and a renewal starts from zero.
+func resetPeriodStart(now time.Time, u *store.User) (time.Time, bool) {
+	if u.ResetStrategy == store.ResetOnExpire {
+		if u.ExpireAt == nil || now.Before(*u.ExpireAt) {
+			// No expiry set, or not reached yet. A user with this strategy and no
+			// expiry date never resets, which is the honest reading of "reset on
+			// expire" rather than a guess at some other cadence.
+			return time.Time{}, false
+		}
+		return u.ExpireAt.UTC(), true
+	}
+	return periodStart(now, u.ResetStrategy)
 }
 
 // periodStart returns the UTC start of the current reset period for a strategy,

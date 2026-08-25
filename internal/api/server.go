@@ -611,6 +611,11 @@ func (s *Server) routes() {
 			admin.GET("/stats", s.handleStats)
 			admin.GET("/overview", s.handleOverview)
 			admin.GET("/engines", s.handleEngines)
+			// Brook and AmneziaWG are not supervised subprocesses, so they do
+			// not appear in /engines. Their status functions existed with no
+			// route at all, which is why an operator running either of them saw
+			// an engines list that did not mention them.
+			admin.GET("/engines/aux", s.handleAuxEngineStatus)
 			admin.GET("/engines/config", s.handleEngineConfig)
 			admin.POST("/engines/validate", s.handleEngineValidate)
 			admin.POST("/engines/reload", func(c *gin.Context) {
