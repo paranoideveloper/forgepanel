@@ -65,6 +65,26 @@ MIT requires that the copyright notice and permission notice accompany
 substantial portions of the software. This section is that notice; the package
 doc comment in `qname.go` carries the same attribution at the point of use.
 
+## Project Nayuki — QR code generator (MIT)
+
+`frontend/src/lib/vendor/qrcodegen.ts` and
+`deploy/cloudflare/forgeedge/src/vendor/qrcodegen.ts` are Project Nayuki's QR
+Code generator library, vendored unmodified under the MIT licence. The full
+copyright and permission notice is retained verbatim at the top of each file, as
+MIT requires.
+
+Both copies exist because the panel frontend and the Cloudflare Worker are
+separate build roots with no shared module path. `TestVendoredQREncoderCopies-
+AreIdentical` asserts they are byte-identical, so the two cannot drift into
+different behaviour — or into a state where only one of them has a security fix
+from upstream.
+
+It replaced a hand-written function that was not a QR encoder at all: it drew
+finder patterns and filled the data area from a string hash, producing an image
+that looked like a QR code and decoded to nothing. `tools/qrverify/verify_qr.py`
+re-establishes the property that matters by decoding the panel's output back to
+its input with an independent decoder.
+
 ## Reference material used for behaviour only
 
 The platform programme studies a corpus of proxy-panel projects to identify
