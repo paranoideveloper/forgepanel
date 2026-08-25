@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiFetch, setAuthToken } from '$lib/api';
-  import type { HealthDetail, TwoFASetup, AuditLog } from '$lib/types';
+  import type { HealthDetail, TwoFASetup } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
   import { showToast } from '$lib/components/Toast.svelte';
 
   let healthDetail = $state<HealthDetail | null>(null);
-  let auditLogs = $state<AuditLog[]>([]);
   let loading = $state(true);
 
   // Panel Doctor
@@ -52,7 +51,6 @@
     try {
       healthDetail = await apiFetch<HealthDetail>('/admin/health/detail');
       await runDoctor();
-      auditLogs = await apiFetch<AuditLog[]>('/admin/stats');
       const user = await apiFetch<{ two_factor_enabled?: boolean; recovery_codes_remaining?: number }>('/admin/me');
       twoFAEnabled = !!user.two_factor_enabled;
       recoveryRemaining = user.recovery_codes_remaining ?? null;

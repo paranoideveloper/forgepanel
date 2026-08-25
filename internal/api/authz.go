@@ -124,6 +124,13 @@ var adminAuthzRules = []authzRule{
 	{path: "/api/admin/edge/feed-token", roles: ownerAdmin},
 	{path: "/api/admin/dns/credentials", roles: ownerAdmin},
 
+	// --- the audit trail --------------------------------------------------
+	//
+	// Entries name the actor, their IP and what they did, across every admin.
+	// That is precisely what one reseller must not learn about another tenant,
+	// and what a viewer has no business with at all.
+	{methods: get, path: "/api/admin/audit", roles: ownerAdmin},
+
 	// --- admin provisioning: owner only -----------------------------------
 	//
 	// A reseller able to mint another reseller, or to raise its own quota, is a

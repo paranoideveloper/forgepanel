@@ -176,6 +176,10 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	s.sched = job.New(job.Config{
 		DB:         db,
 		ReloadHook: s.reloadEngines,
+		// Ninety days of trail by default: long enough to investigate an
+		// incident found weeks later, short enough that the table does not
+		// become the largest thing in the database on a busy panel.
+		AuditRetention: 90 * 24 * time.Hour,
 		PollTraffic: func(reset bool) (map[string]int64, error) {
 			if s.engine == nil {
 				return nil, nil
@@ -489,6 +493,10 @@ func (s *Server) routes() {
 			admin.PUT("/users/:id/inbounds", s.handleSetUserInbounds)
 			admin.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
 			admin.GET("/quota", s.handleQuota)
+			// The audit trail. Entries carry the actor, their IP and what they
+			// did across every admin, so this is owner/admin only.
+			admin.GET("/audit", s.handleListAudit)
+			admin.GET("/audit/actions", s.handleAuditActions)
 			// Admin/reseller provisioning. Owner-only: see internal/api/authz.go.
 			admin.GET("/admins", s.handleListAdmins)
 			admin.POST("/admins", s.handleCreateAdmin)

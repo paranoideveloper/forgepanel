@@ -134,10 +134,23 @@ export interface TwoFASetup {
   qr_svg?: string;
 }
 
+// Mirrors store.AuditLog. It previously declared `timestamp` and `details`,
+// neither of which the Go model has, so every field the UI read was undefined
+// and every field the server sent was invisible.
 export interface AuditLog {
   id: number;
-  timestamp: string;
+  created_at: string;
+  admin_id: number;
   actor: string;
+  ip: string;
   action: string;
-  details: string;
+  target: string;
+  diff: string;
+}
+
+export interface AuditPage {
+  items: AuditLog[];
+  total: number;
+  limit: number;
+  offset: number;
 }

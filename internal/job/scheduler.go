@@ -28,14 +28,18 @@ type UserTrafficDelta struct {
 
 // Scheduler runs the recurring panel jobs.
 type Scheduler struct {
-	db          *store.Store
-	pollEvery   time.Duration
-	sweepEvery  time.Duration
-	reloadHook  func()                                     // called after a mutation to reapply engine configs
-	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	now         func() time.Time // injectable clock (tests use a controllable one)
+	db         *store.Store
+	pollEvery  time.Duration
+	sweepEvery time.Duration
+	// auditRetention is how long audit entries are kept. Zero disables pruning,
+	// which is a deliberate choice an operator can make (some need an unbounded
+	// trail for compliance) rather than a default that quietly fills a disk.
+	auditRetention time.Duration
+	reloadHook     func()                                     // called after a mutation to reapply engine configs
+	pollTraffic    func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	now            func() time.Time // injectable clock (tests use a controllable one)
 }
 
 // Config configures a Scheduler.
@@ -44,6 +48,11 @@ type Config struct {
 	PollEvery  time.Duration
 	SweepEvery time.Duration
 	ReloadHook func()
+	// AuditRetention bounds the audit trail. Zero keeps everything, which is a
+	// choice an operator can legitimately make; it is not a default that
+	// quietly fills a disk, because the pruner treats zero as "keep" rather
+	// than as a cutoff of now.
+	AuditRetention time.Duration
 	// PollTraffic returns the engine's per-user counters. The scheduler always
 	// calls it with reset=false and accounts by subtraction against a stored
 	// snapshot: a destructive read makes the in-flight value the only copy of
@@ -66,7 +75,8 @@ func New(cfg Config) *Scheduler {
 	return &Scheduler{
 		db: cfg.DB, pollEvery: cfg.PollEvery, sweepEvery: cfg.SweepEvery,
 		reloadHook: cfg.ReloadHook, pollTraffic: cfg.PollTraffic,
-		now: time.Now,
+		auditRetention: cfg.AuditRetention,
+		now:            time.Now,
 	}
 }
 
@@ -74,7 +84,7 @@ func New(cfg Config) *Scheduler {
 func (s *Scheduler) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
 		s.loop(ctx, s.pollEvery, s.pollAndAccount)
@@ -83,6 +93,30 @@ func (s *Scheduler) Start() {
 		defer s.wg.Done()
 		s.loop(ctx, s.sweepEvery, s.sweep)
 	}()
+	go func() {
+		defer s.wg.Done()
+		// Hourly is often enough: retention is measured in days, and a tighter
+		// cadence would delete a handful of rows over and over for no benefit.
+		s.loop(ctx, time.Hour, s.pruneAudit)
+	}()
+}
+
+// pruneAudit enforces the audit retention window.
+//
+// The trail had no reader and no bound, so on a busy panel it becomes the
+// largest thing in the database and the only sign is disk usage. Pruning is a
+// deletion, so a zero or negative window is treated as "keep everything" rather
+// than as a cutoff of now — the reading that would erase the entire trail.
+func (s *Scheduler) pruneAudit() {
+	if s.db == nil || s.auditRetention <= 0 {
+		return
+	}
+	cutoff := s.now().Add(-s.auditRetention)
+	if _, err := s.db.PruneAuditLogs(cutoff); err != nil {
+		// Nothing to escalate to: failing to prune costs disk, not correctness,
+		// and the next hour tries again.
+		return
+	}
 }
 
 // Stop halts the scheduler.

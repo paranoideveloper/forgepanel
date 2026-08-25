@@ -1,0 +1,226 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
+  import type { AuditLog, AuditPage } from '$lib/types';
+  import { showToast } from '$lib/components/Toast.svelte';
+
+  // The panel wrote audit rows from the day the feature landed and nothing ever
+  // read them: no store method, no route, no view. An audit log nobody can read
+  // is not an audit log — it is a table that grows forever.
+
+  let entries = $state<AuditLog[]>([]);
+  let total = $state(0);
+  let limit = $state(50);
+  let offset = $state(0);
+  let loading = $state(true);
+  let loadError = $state('');
+
+  let actions = $state<string[]>([]);
+  let fActor = $state('');
+  let fAction = $state('');
+  let fSince = $state('');
+  let fUntil = $state('');
+
+  const page = $derived(Math.floor(offset / limit) + 1);
+  const pages = $derived(Math.max(1, Math.ceil(total / limit)));
+
+  function query(): string {
+    const p = new URLSearchParams();
+    if (fActor.trim()) p.set('actor', fActor.trim());
+    if (fAction) p.set('action', fAction);
+    // <input type="datetime-local"> yields a local wall time with no zone. The
+    // API takes RFC3339, so it is converted rather than sent as-is — pasting a
+    // zoneless string would be interpreted as UTC and silently shift the window
+    // by the operator's offset.
+    if (fSince) p.set('since', new Date(fSince).toISOString());
+    if (fUntil) p.set('until', new Date(fUntil).toISOString());
+    p.set('limit', String(limit));
+    p.set('offset', String(offset));
+    return p.toString();
+  }
+
+  async function load() {
+    loading = true;
+    loadError = '';
+    try {
+      const res = await apiFetch<AuditPage>(`/admin/audit?${query()}`);
+      entries = res.items ?? [];
+      total = res.total ?? 0;
+      limit = res.limit || limit;
+    } catch (err: any) {
+      loadError = err.message || 'Failed to load the audit trail';
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function loadActions() {
+    try {
+      const res = await apiFetch<{ actions: string[] }>('/admin/audit/actions');
+      actions = res.actions ?? [];
+    } catch {
+      // A missing filter list is not worth an error banner; the trail still
+      // loads and can be filtered by hand.
+      actions = [];
+    }
+  }
+
+  function applyFilters() {
+    offset = 0;
+    load();
+  }
+
+  function clearFilters() {
+    fActor = '';
+    fAction = '';
+    fSince = '';
+    fUntil = '';
+    offset = 0;
+    load();
+  }
+
+  function prev() {
+    if (offset <= 0) return;
+    offset = Math.max(0, offset - limit);
+    load();
+  }
+
+  function next() {
+    if (offset + limit >= total) return;
+    offset += limit;
+    load();
+  }
+
+  function when(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+
+  // Security-relevant events deserve to stand out in a wall of routine changes.
+  function severity(action: string): string {
+    if (/^(login|2fa\.|sessions\.|admin\.|password)/.test(action)) return 'sec';
+    if (/delete|revoke|disable|reset/.test(action)) return 'destructive';
+    return '';
+  }
+
+  function copyRow(e: AuditLog) {
+    const line = `${e.created_at}\t${e.actor}\t${e.ip}\t${e.action}\t${e.target}`;
+    navigator.clipboard
+      .writeText(line)
+      .then(() => showToast('Entry copied', 'success'))
+      .catch(() => showToast('Could not copy', 'error'));
+  }
+
+  onMount(() => {
+    loadActions();
+    load();
+  });
+</script>
+
+<div class="view-header">
+  <h2>Audit Trail</h2>
+  <button class="btn-primary" onclick={load}>Refresh</button>
+</div>
+
+<div class="card">
+  <div class="filters">
+    <label class="fg">
+      <span>Actor</span>
+      <input bind:value={fActor} placeholder="username" data-testid="filter-actor" />
+    </label>
+    <label class="fg">
+      <span>Action</span>
+      <select bind:value={fAction} data-testid="filter-action">
+        <option value="">any</option>
+        {#each actions as a}<option value={a}>{a}</option>{/each}
+      </select>
+    </label>
+    <label class="fg">
+      <span>From</span>
+      <input type="datetime-local" bind:value={fSince} />
+    </label>
+    <label class="fg">
+      <span>To</span>
+      <input type="datetime-local" bind:value={fUntil} />
+    </label>
+    <button class="btn-primary" onclick={applyFilters}>Apply</button>
+    <button class="btn-secondary" onclick={clearFilters}>Clear</button>
+  </div>
+</div>
+
+<div class="card table-card">
+  {#if loading}
+    <p class="muted">Loading the audit trail…</p>
+  {:else if loadError}
+    <p class="err-text">{loadError}</p>
+  {:else if entries.length === 0}
+    <p class="muted" data-testid="empty">
+      {total === 0 && !fActor && !fAction && !fSince && !fUntil
+        ? 'Nothing recorded yet.'
+        : 'No entries match these filters.'}
+    </p>
+  {:else}
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Actor</th>
+          <th>IP</th>
+          <th>Action</th>
+          <th>Target</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each entries as e}
+          <tr class={severity(e.action)}>
+            <td class="mono">{when(e.created_at)}</td>
+            <td><strong>{e.actor || '—'}</strong></td>
+            <td class="mono">{e.ip || '—'}</td>
+            <td><span class="badge">{e.action}</span></td>
+            <td class="target" title={e.diff || e.target}>{e.target || '—'}</td>
+            <td><button class="btn-sm" onclick={() => copyRow(e)}>Copy</button></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+
+    <div class="pager">
+      <button class="btn-secondary" onclick={prev} disabled={offset <= 0}>Previous</button>
+      <!-- The total is what makes a page meaningful: "50 shown" says nothing
+           about whether that is the whole story. -->
+      <span class="muted" data-testid="pager">
+        Page {page} of {pages} · {total} {total === 1 ? 'entry' : 'entries'}
+      </span>
+      <button class="btn-secondary" onclick={next} disabled={offset + limit >= total}>Next</button>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
+  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.7); }
+  input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px; border-radius: 8px; font: inherit; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(255,255,255,0.75); }
+  .target { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Security-relevant events stand out from routine changes; the left border
+     carries the signal so it is not colour alone. */
+  tr.sec td:first-child { border-left: 3px solid #d99b2b; }
+  tr.destructive td:first-child { border-left: 3px solid #f85149; }
+  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.08); }
+  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
+  .err-text { color: #f85149; font-size: 13px; }
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+  .btn-primary, .btn-secondary, .btn-sm { border-radius: 8px; border: 1px solid transparent; cursor: pointer; font: inherit; }
+  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; }
+  .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; padding: 9px 16px; }
+  .btn-secondary:disabled { opacity: 0.4; cursor: default; }
+  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; }
+</style>
