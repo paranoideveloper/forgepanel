@@ -89,9 +89,17 @@ export interface XMux {
   max_concurrency?: string;
   max_connections?: string;
   c_max_reuse_times?: string;
-  c_max_lifetime_ms?: string;
   h_max_request_times?: string;
   h_keep_alive_period?: number;
+  /**
+   * Xray 26 parses hMaxReusableSecs; it does NOT parse cMaxLifetimeMs, which
+   * this mirror used to carry. Verified against the pinned core by feeding each
+   * key a wrong-typed value: a key the core knows is rejected on type, a key it
+   * does not know is ignored and the config still validates. cMaxLifetimeMs was
+   * ignored, so an operator who set a connection-lifetime cap got no cap and no
+   * warning. The Go model dropped it for the same reason.
+   */
+  h_max_reusable_secs?: string;
 }
 
 /** `model.Transport` — every transport knob, orthogonal to protocol. */
@@ -117,6 +125,29 @@ export interface Transport {
   xhttp_mode?: string;
   x_padding_bytes?: string;
   xmux?: XMux;
+
+  // The rest of the modern XHTTP surface. These ride in the link's `extra=`
+  // payload rather than as individual query parameters, which is the shape the
+  // clients and the other panels already read. The Go model is the source of
+  // truth (internal/protocol/model/xhttp.go); every field here exists because
+  // Go emits it, and testdata/golden.json proves the two agree byte for byte.
+  x_padding_obfs_mode?: boolean;
+  x_padding_key?: string;
+  x_padding_header?: string;
+  x_padding_placement?: string;
+  x_padding_method?: string;
+  no_grpc_header?: boolean;
+  no_sse_header?: boolean;
+  sc_max_each_post_bytes?: string;
+  sc_min_posts_interval_ms?: string;
+  session_placement?: string;
+  session_key?: string;
+  seq_placement?: string;
+  seq_key?: string;
+  uplink_data_placement?: string;
+  uplink_data_key?: string;
+  uplink_http_method?: string;
+  uplink_chunk_size?: number;
 
   // h2
   h2_hosts?: string[];

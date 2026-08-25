@@ -139,8 +139,8 @@ export function xrayStreamSettings(n: Node): JObj | null {
         if (x.max_concurrency) xm.maxConcurrency = x.max_concurrency;
         if (x.max_connections) xm.maxConnections = x.max_connections;
         if (x.c_max_reuse_times) xm.cMaxReuseTimes = x.c_max_reuse_times;
-        if (x.c_max_lifetime_ms) xm.cMaxLifetimeMs = x.c_max_lifetime_ms;
         if (x.h_max_request_times) xm.hMaxRequestTimes = x.h_max_request_times;
+        if (x.h_max_reusable_secs) xm.hMaxReusableSecs = x.h_max_reusable_secs;
         if ((x.h_keep_alive_period ?? 0) > 0) xm.hKeepAlivePeriod = x.h_keep_alive_period!;
         if (Object.keys(xm).length > 0) xh.xmux = xm;
       }

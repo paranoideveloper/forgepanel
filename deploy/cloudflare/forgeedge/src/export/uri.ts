@@ -8,6 +8,7 @@ import { type Node, type Network } from '../model/node';
 import { normalized } from '../model/normalize';
 import { Values, b64Std, b64RawURL, goPathEscape, goQueryEscape } from '../common/encoding';
 import { hostPort } from '../common/net';
+import { xhttpExtra } from './xhttpextra';
 import { goMarshal, type JSONValue } from './gojson';
 
 const TE = new TextEncoder();
@@ -35,11 +36,16 @@ export function transportSecurityParams(n: Node, v: Values): void {
       if (t.service_name) v.set('serviceName', t.service_name);
       v.set('mode', t.multi_mode ? 'multi' : 'gun');
       break;
-    case 'xhttp':
+    case 'xhttp': {
       if (t.path) v.set('path', t.path);
       if (t.host) v.set('host', t.host);
       if (t.xhttp_mode && t.xhttp_mode !== 'auto') v.set('mode', t.xhttp_mode);
+      // Everything modern XHTTP supports beyond path/host/mode rides here, so
+      // the link survives a round trip instead of losing its CDN tuning.
+      const extra = xhttpExtra(t);
+      if (extra) v.set('extra', extra);
       break;
+    }
     case 'h2':
       if (t.path) v.set('path', t.path);
       if (t.host) v.set('host', t.host);
