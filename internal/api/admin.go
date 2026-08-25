@@ -264,7 +264,12 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	s.audit(c, "inbound.update", strconv.FormatUint(uint64(id), 10))
+	// PrevNodeJSON is captured above for one-level undo, and it is exactly the
+	// "before" an audit entry needs. Without a diff the trail says someone
+	// edited an inbound and nothing about what — which is not an answer to
+	// "who opened this port".
+	s.auditWithDiff(c, "inbound.update", strconv.FormatUint(uint64(id), 10),
+		[]byte(in.PrevNodeJSON), []byte(in.NodeJSON))
 	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port})
 }

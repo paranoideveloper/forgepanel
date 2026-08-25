@@ -102,4 +102,45 @@ describe('AuditView', () => {
     expect(prev.disabled).toBe(true);
     expect(next.disabled).toBe(true);
   });
+
+  // AuditLog.Diff was stored and served and never written, so entries said that
+  // someone changed something and nothing about what. Now it is populated, the
+  // view has to surface it — collapsed, because a diff is detail for the one
+  // entry being investigated.
+  it('shows what changed on demand', async () => {
+    (globalThis as any).fetch = async (url: string) => {
+      if (url.includes('/audit/actions')) return { ok: true, json: async () => ({ actions: [] }) } as Response;
+      return {
+        ok: true,
+        json: async () => ({
+          items: [entry({ diff: 'port: 443 → 8443; security.reality.private_key: changed' })],
+          total: 1, limit: 50, offset: 0
+        })
+      } as Response;
+    };
+
+    render(AuditView);
+    // Collapsed by default.
+    await screen.findByTestId('toggle-diff');
+    expect(screen.queryByTestId('diff')).toBeNull();
+
+    await fireEvent.click(screen.getByTestId('toggle-diff'));
+    const diff = await screen.findByTestId('diff');
+    expect(diff.textContent).toContain('port: 443 → 8443');
+    // The credential is named, never valued.
+    expect(diff.textContent).toContain('private_key: changed');
+  });
+
+  it('offers no diff control for an entry that has none', async () => {
+    (globalThis as any).fetch = async (url: string) => {
+      if (url.includes('/audit/actions')) return { ok: true, json: async () => ({ actions: [] }) } as Response;
+      return {
+        ok: true,
+        json: async () => ({ items: [entry({ diff: '' })], total: 1, limit: 50, offset: 0 })
+      } as Response;
+    };
+    render(AuditView);
+    await screen.findByText('owner');
+    expect(screen.queryByTestId('toggle-diff')).toBeNull();
+  });
 });

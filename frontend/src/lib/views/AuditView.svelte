@@ -104,6 +104,14 @@
     return '';
   }
 
+  // Which entries have their diff expanded. Collapsed by default: a diff is
+  // detail for the one entry being investigated, and showing every one turns
+  // the trail into a wall of text.
+  let expanded = $state<Record<number, boolean>>({});
+  function toggle(id: number) {
+    expanded = { ...expanded, [id]: !expanded[id] };
+  }
+
   function copyRow(e: AuditLog) {
     const line = `${e.created_at}\t${e.actor}\t${e.ip}\t${e.action}\t${e.target}`;
     navigator.clipboard
@@ -179,9 +187,23 @@
             <td><strong>{e.actor || '—'}</strong></td>
             <td class="mono">{e.ip || '—'}</td>
             <td><span class="badge">{e.action}</span></td>
-            <td class="target" title={e.diff || e.target}>{e.target || '—'}</td>
-            <td><button class="btn-sm" onclick={() => copyRow(e)}>Copy</button></td>
+            <td class="target" title={e.target}>{e.target || '—'}</td>
+            <td class="row-actions">
+              {#if e.diff}
+                <button class="btn-sm" onclick={() => toggle(e.id)} data-testid="toggle-diff">
+                  {expanded[e.id] ? 'Hide' : 'What changed'}
+                </button>
+              {/if}
+              <button class="btn-sm" onclick={() => copyRow(e)}>Copy</button>
+            </td>
           </tr>
+          {#if e.diff && expanded[e.id]}
+            <tr class="diff-row">
+              <!-- Credentials are recorded as "changed" without their values, so
+                   this is safe to render in full. -->
+              <td colspan="6"><pre data-testid="diff">{e.diff.split('; ').join('\n')}</pre></td>
+            </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -223,4 +245,18 @@
   .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; padding: 9px 16px; }
   .btn-secondary:disabled { opacity: 0.4; cursor: default; }
   .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; }
+  .row-actions { display: flex; gap: 6px; }
+  .diff-row td { padding-top: 0; }
+  .diff-row pre {
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    background: #0F1420;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: rgba(255,255,255,0.8);
+  }
 </style>
