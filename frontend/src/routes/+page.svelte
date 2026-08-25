@@ -2,6 +2,7 @@
   import { onMount, type Component } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
+  import { watchIdle } from '$lib/idle';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toast, { showToast } from '$lib/components/Toast.svelte';
 
@@ -99,6 +100,29 @@
     showToast('Logged out', 'info');
   }
 
+  // An unattended dashboard is full control of every server for whoever walks
+  // past it, and refresh tokens mean an idle tab no longer breaks on its own.
+  // The warning is shown rather than toasted: a toast disappears, and the whole
+  // point is that it is still on screen when someone comes back to the desk.
+  let idleWarning = $state(0);
+
+  $effect(() => {
+    if (!token) {
+      idleWarning = 0;
+      return;
+    }
+    return watchIdle({
+      onWarn: (secondsLeft) => { idleWarning = secondsLeft; },
+      onResume: () => { idleWarning = 0; },
+      onTimeout: () => {
+        idleWarning = 0;
+        token = '';
+        clearSession();
+        authError = 'You were signed out after a period of inactivity.';
+      }
+    });
+  });
+
   // When the refresh finally fails the session is genuinely over. Say so once,
   // and drop to the sign-in screen — rather than letting every in-flight call
   // surface its own unexplained failure.
@@ -188,6 +212,17 @@
   </div>
 {:else}
   <div class="app-layout" in:fade={{ duration: 150 }}>
+    {#if idleWarning > 0}
+      <div class="idle-banner" role="alert" data-testid="idle-warning">
+        Signing you out in {idleWarning}s — no activity detected.
+        <!-- The click itself is the activity: the capture-phase mousedown
+             listener rearms the timer and clears this banner through onResume.
+             Setting idleWarning to 0 here instead would hide the banner even in
+             the case where the timer did NOT rearm, which is the one case where
+             the operator most needs to see it. -->
+        <button onclick={() => {}}>I'm still here</button>
+      </div>
+    {/if}
     <Sidebar 
       {activeTab} 
       bind:mobileOpen={mobileMenuOpen}
@@ -228,6 +263,32 @@
 {/if}
 
 <style>
+  .idle-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #d99b2b;
+    color: #10141c;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .idle-banner button {
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    cursor: pointer;
+  }
+
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
