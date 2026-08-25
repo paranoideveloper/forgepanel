@@ -24,8 +24,9 @@ type Store struct {
 	closeErr  error
 }
 
-// Open opens (pure-Go) SQLite at path and auto-migrates. A dsn of ":memory:"
-// yields an ephemeral DB, used by tests.
+// Open opens (pure-Go) SQLite at path and brings it up to the current schema
+// version through the ordered migration registry in migrations.go. A dsn of
+// ":memory:" yields an ephemeral DB, used by tests.
 func Open(path string) (*Store, error) {
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -33,7 +34,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	if err := db.AutoMigrate(AllModels()...); err != nil {
+	if _, err := Migrate(db); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Store{db: db}, nil
@@ -104,9 +105,6 @@ func (s *Store) InboundByID(id uint) (*Inbound, error) {
 	var in Inbound
 	return &in, s.db.First(&in, id).Error
 }
-
-// DeleteInbound removes an inbound.
-func (s *Store) DeleteInbound(id uint) error { return s.db.Delete(&Inbound{}, id).Error }
 
 // SaveInbound updates an inbound.
 func (s *Store) SaveInbound(in *Inbound) error { return s.db.Save(in).Error }
@@ -243,9 +241,6 @@ func (s *Store) UserByID(id uint) (*User, error) {
 	return &u, s.db.First(&u, id).Error
 }
 
-// DeleteUser removes a user.
-func (s *Store) DeleteUser(id uint) error { return s.db.Delete(&User{}, id).Error }
-
 // SaveUser persists changes to a user.
 func (s *Store) SaveUser(u *User) error { return s.db.Save(u).Error }
 
@@ -359,9 +354,6 @@ func (s *Store) NodeByToken(token string) (*Node, error) {
 
 // SaveNode persists node changes.
 func (s *Store) SaveNode(n *Node) error { return s.db.Save(n).Error }
-
-// DeleteNode removes a node.
-func (s *Store) DeleteNode(id uint) error { return s.db.Delete(&Node{}, id).Error }
 
 // --- forgedns zones -------------------------------------------------------
 
