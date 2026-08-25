@@ -24,6 +24,17 @@
   let previewTab = $state<'uri' | 'xray' | 'singbox' | 'clash'>('uri');
   let previewing = $state(false);
 
+  // Port hopping installs nftables/iptables redirects, which needs
+  // CAP_NET_ADMIN from the HOST. The capability check existed and nothing ever
+  // called it, so an operator typed a hop range, the panel accepted it, and the
+  // rules were never installed — the inbound served only its base port and the
+  // range did nothing at all.
+  let hopCap = $state<{ supported: boolean; reason?: string; remediation?: string } | null>(null);
+  const hopRange = $derived(String(values['hysteria2.port_hopping'] ?? '').trim());
+  const hopWontWork = $derived(
+    proto === 'hysteria2' && hopRange !== '' && hopCap !== null && !hopCap.supported
+  );
+
   const current = $derived(schema?.protocols.find((p) => p.proto === proto) || null);
   const hasTransport = $derived(!!current?.transports?.length);
   const securities = $derived(current?.securities || []);
@@ -32,6 +43,14 @@
   onMount(async () => {
     try {
       schema = await apiFetch<Schema>('/protocols/schema');
+      try {
+        const caps = await apiFetch<{ port_hopping?: typeof hopCap }>('/capabilities');
+        hopCap = caps.port_hopping ?? null;
+      } catch {
+        // A missing capability report must not block the form. Unknown is shown
+        // as nothing rather than as a false reassurance.
+        hopCap = null;
+      }
       if (initial) prefillFrom(initial);
       else applyDefaults();
       schedulePreview();
@@ -296,6 +315,17 @@
         </div>
       {/each}
 
+      <!-- Shown, not blocking. The inbound is still perfectly usable on its
+           base port, and refusing to save would take a working configuration
+           away over a host permission the operator may be about to grant. -->
+      {#if hopWontWork}
+        <div class="hop-warning" data-testid="hop-warning">
+          <strong>Port hopping will not take effect on this host.</strong>
+          <span>{hopCap?.reason}</span>
+          {#if hopCap?.remediation}<span>{hopCap.remediation}</span>{/if}
+        </div>
+      {/if}
+
       <button class="save" data-testid="save-inbound" onclick={save} disabled={saving}>
         {saving ? 'Saving…' : editId ? 'Update Inbound' : 'Save Inbound'}
       </button>
@@ -321,6 +351,21 @@
 {/if}
 
 <style>
+  .hop-warning {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(217, 155, 43, 0.4);
+    background: rgba(217, 155, 43, 0.1);
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #d99b2b;
+  }
+  .hop-warning strong { font-size: 13px; }
+
   .builder { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
   @media (max-width: 900px) { .builder { grid-template-columns: 1fr; } }
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }

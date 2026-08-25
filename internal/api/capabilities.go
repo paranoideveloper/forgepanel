@@ -22,6 +22,36 @@ type TransportCap struct {
 // real vs removed. In particular it distinguishes protocol-native QUIC
 // (Hysteria2/TUIC/Brook quicserver) from the LEGACY Xray "quic" stream transport,
 // which was removed and is never silently offered.
+// portHoppingCapability reports whether this host lets the panel install the
+// firewall redirects port hopping needs.
+//
+// Published from /capabilities rather than from an inbound-scoped route because
+// the answer is a property of the MACHINE: it is the same before the first
+// inbound exists, which is exactly when someone is deciding whether to configure
+// a hop range.
+func (s *Server) portHoppingCapability() gin.H {
+	if s.engine == nil {
+		return gin.H{"supported": false, "reason": "no proxy-core controller is running"}
+	}
+	st := s.engine.PortHopStatus(0, "")
+	can, _ := st["can_manage"].(bool)
+	out := gin.H{"supported": can, "backend": st["backend"], "net_admin": st["net_admin"]}
+	if !can {
+		// Say WHICH of the two reasons it is. "No firewall backend" and "no
+		// permission" have completely different fixes, and a single vague
+		// message sends people to the wrong one.
+		if na, _ := st["net_admin"].(bool); !na {
+			out["reason"] = "the panel does not hold CAP_NET_ADMIN, so it cannot install the redirect rules " +
+				"(systemd: AmbientCapabilities=CAP_NET_ADMIN, or run as root)"
+		} else {
+			out["reason"] = "no usable firewall backend was found on this host (nftables or iptables is required)"
+		}
+		out["remediation"] = "the inbound still serves on its base port; the panel can print the exact " +
+			"commands to install the range by hand from the inbound's port-hopping panel"
+	}
+	return out
+}
+
 func (s *Server) handleCapabilities(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"engines": gin.H{
@@ -57,7 +87,14 @@ func (s *Server) handleCapabilities(c *gin.Context) {
 				"tuic":      []string{"congestion_control", "udp_relay_mode", "zero_rtt_handshake", "heartbeat"},
 			},
 		},
-		"securities": []string{"none", "tls", "reality"},
-		"note":       "REALITY only wraps tcp/xhttp/grpc; normal HTTP CDNs only front ws/xhttp/httpupgrade (and gRPC on capable accounts).",
+		// Port hopping needs the panel to install nftables/iptables redirects, so
+		// it depends on the HOST's grant of CAP_NET_ADMIN, not on any setting.
+		// The capability check existed and NOTHING called it, so an operator
+		// typed a hop range into the form, the panel accepted it, and the rules
+		// were never installed — the inbound served only its base port and the
+		// range silently did nothing.
+		"port_hopping": s.portHoppingCapability(),
+		"securities":   []string{"none", "tls", "reality"},
+		"note":         "REALITY only wraps tcp/xhttp/grpc; normal HTTP CDNs only front ws/xhttp/httpupgrade (and gRPC on capable accounts).",
 	})
 }

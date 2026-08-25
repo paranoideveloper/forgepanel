@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -72,4 +73,40 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// Port hopping installs nftables/iptables redirects, which needs CAP_NET_ADMIN
+// from the HOST. The capability check existed and NOTHING called it: an operator
+// typed a hop range into the form, the panel accepted it, and the rules were
+// never installed — the inbound served only its base port and the range did
+// nothing at all.
+func TestPortHoppingCapabilityIsPublished(t *testing.T) {
+	s, token := adminAPI(t)
+	code, body := doGET(t, s, "/api/capabilities", token)
+	if code != 200 {
+		t.Fatalf("%d: %s", code, body)
+	}
+	var res struct {
+		PortHopping struct {
+			Supported   bool   `json:"supported"`
+			Reason      string `json:"reason"`
+			Remediation string `json:"remediation"`
+			NetAdmin    bool   `json:"net_admin"`
+		} `json:"port_hopping"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatalf("capabilities is not the documented shape: %v", err)
+	}
+	if !res.PortHopping.Supported {
+		// When it is NOT supported the report has to say which of the two
+		// reasons applies and what to do: "no firewall backend" and "no
+		// permission" have completely different fixes, and a vague message
+		// sends people to the wrong one.
+		if res.PortHopping.Reason == "" {
+			t.Error("port hopping is unsupported and the report does not say why")
+		}
+		if res.PortHopping.Remediation == "" {
+			t.Error("no remediation offered")
+		}
+	}
 }
