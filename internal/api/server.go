@@ -417,7 +417,10 @@ func (s *Server) routes() {
 
 		// Authenticated admin endpoints — only when a DB is attached.
 		if s.db != nil {
-			admin := api.Group("/admin", s.signer.Middleware())
+			// s.authz() enforces the RBAC the panel already modelled but never
+			// mounted: authentication proves who you are, this proves you may
+			// perform the action. See internal/api/authz.go.
+			admin := api.Group("/admin", s.signer.Middleware(), s.authz())
 			admin.GET("/me", s.handleMe)
 			admin.GET("/inbounds", s.handleListInbounds)
 			admin.POST("/inbounds", s.handleCreateInbound)
