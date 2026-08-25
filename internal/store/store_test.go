@@ -106,19 +106,16 @@ func TestStore_NodeAndZoneOperations(t *testing.T) {
 		t.Fatalf("SaveNode: %v", err)
 	}
 
-	// Traffic purging tests
-	if err := s.SaveNodeClientTraffic(&NodeClientTraffic{NodeID: n.ID, Username: "bob", LastRecorded: 100}); err != nil {
-		t.Fatalf("SaveNodeClientTraffic: %v", err)
+	// Traffic baselines round-trip and are scoped to their node.
+	if err := s.SetTrafficSnapshot(NodeScope(n.ID), UserCounterKey(42), 100); err != nil {
+		t.Fatalf("SetTrafficSnapshot: %v", err)
 	}
-	tr, err := s.GetNodeClientTraffic(n.ID, "bob")
-	if err != nil || tr.LastRecorded != 100 {
-		t.Fatalf("GetNodeClientTraffic: %v", err)
+	snaps, err := s.TrafficSnapshots(NodeScope(n.ID))
+	if err != nil || snaps[UserCounterKey(42)] != 100 {
+		t.Fatalf("TrafficSnapshots: %v %v", snaps, err)
 	}
-	if err := s.PurgeUserNodeClientTraffic("bob"); err != nil {
-		t.Fatalf("PurgeUserNodeClientTraffic: %v", err)
-	}
-	if err := s.PurgeNodeClientTraffic(n.ID); err != nil {
-		t.Fatalf("PurgeNodeClientTraffic: %v", err)
+	if err := s.ClearTrafficSnapshots(NodeScope(n.ID)); err != nil {
+		t.Fatalf("ClearTrafficSnapshots: %v", err)
 	}
 
 	if err := s.DeleteNode(n.ID); err != nil {

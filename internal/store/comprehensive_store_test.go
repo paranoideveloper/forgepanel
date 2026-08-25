@@ -307,29 +307,46 @@ func TestStore_SettingsAndAudit(t *testing.T) {
 	s.Audit(&AuditLog{Actor: "admin", Action: "user.create", IP: "1.2.3.4", Target: "bob"})
 }
 
-func TestDeleteUserCascadePurgesNodeClientTraffic(t *testing.T) {
+// A deleted user's traffic baselines must go with them, on EVERY scope. SQLite
+// hands out the lowest free rowid, so the next user created can be given this
+// id — and inheriting a large stale baseline means their first real traffic
+// computes a delta of zero and they transfer free until their own usage passes
+// the dead account's total.
+func TestDeleteUserCascadePurgesTrafficBaselines(t *testing.T) {
 	s := newTestStore(t)
 	u := &User{Username: "purge_test_user"}
 	if err := s.CreateUser(u); err != nil {
 		t.Fatal(err)
 	}
-
-	nt := &NodeClientTraffic{NodeID: 10, Username: "purge_test_user", LastRecorded: 5000}
-	if err := s.SaveNodeClientTraffic(nt); err != nil {
+	other := &User{Username: "keeper", SubToken: "kt"}
+	if err := s.CreateUser(other); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := s.GetNodeClientTraffic(10, "purge_test_user")
-	if err != nil || got.LastRecorded != 5000 {
-		t.Fatalf("failed to retrieve stored node traffic baseline: %v, got %v", err, got)
+	// One baseline on the local engine, one on a node, plus a bystander.
+	for _, scope := range []string{ScopeLocalEngine, NodeScope(10)} {
+		if err := s.SetTrafficSnapshot(scope, UserCounterKey(u.ID), 5000); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetTrafficSnapshot(scope, UserCounterKey(other.ID), 7000); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := s.DeleteUserCascade(u.ID); err != nil {
 		t.Fatalf("DeleteUserCascade failed: %v", err)
 	}
 
-	gotAfter, _ := s.GetNodeClientTraffic(10, "purge_test_user")
-	if gotAfter != nil && gotAfter.LastRecorded != 0 {
-		t.Fatalf("expected node client traffic baseline to be purged, got %v", gotAfter.LastRecorded)
+	for _, scope := range []string{ScopeLocalEngine, NodeScope(10)} {
+		snaps, err := s.TrafficSnapshots(scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, still := snaps[UserCounterKey(u.ID)]; still {
+			t.Errorf("scope %s kept the deleted user's baseline; a reused id would transfer free", scope)
+		}
+		if snaps[UserCounterKey(other.ID)] != 7000 {
+			t.Errorf("scope %s lost another user's baseline: %v", scope, snaps)
+		}
 	}
 }

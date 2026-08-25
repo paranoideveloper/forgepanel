@@ -1,11 +1,16 @@
 package job
 
 import (
-	"strconv"
+	"github.com/forgepanel/forgepanel/internal/store"
 )
 
 // UserEmail is the stats email tag for a user id: "u<ID>". Stable and parseable.
-func UserEmail(userID uint) string { return "u" + strconv.FormatUint(uint64(userID), 10) }
+//
+// The encoding itself lives in internal/store, which is the lowest layer that
+// needs it: the traffic-snapshot table is keyed by this tag and the cascade has
+// to find those rows when a user is deleted. These wrappers keep the name the
+// engine-facing code uses while there stays exactly ONE definition.
+func UserEmail(userID uint) string { return store.UserCounterKey(userID) }
 
 // parseUserEmail is the package-local form of UserIDFromEmail, returning 0 for
 // anything that is not a user tag. It delegates rather than re-implementing the
@@ -31,13 +36,4 @@ func parseUserEmail(email string) uint {
 // xray also emits counters for internal identities (an inbound's placeholder
 // client, for instance), and attributing those to a user id would bill traffic
 // to whoever happens to hold that number.
-func UserIDFromEmail(email string) (uint, bool) {
-	if len(email) < 2 || email[0] != 'u' {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(email[1:], 10, 64)
-	if err != nil || n == 0 {
-		return 0, false
-	}
-	return uint(n), true
-}
+func UserIDFromEmail(email string) (uint, bool) { return store.UserIDFromCounterKey(email) }

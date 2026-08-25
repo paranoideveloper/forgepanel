@@ -154,6 +154,18 @@ type legacyInbound struct {
 
 func (legacyInbound) TableName() string { return "inbounds" }
 
+// legacyNodeClientTraffic is the per-(node,user) baseline table shipped before
+// traffic_snapshots replaced it. Real databases in the field still carry it, so
+// the fixture keeps it: migrating must step over a table the panel no longer
+// models rather than tripping on it.
+type legacyNodeClientTraffic struct {
+	NodeID       uint   `gorm:"primaryKey"`
+	Username     string `gorm:"primaryKey"`
+	LastRecorded int64
+}
+
+func (legacyNodeClientTraffic) TableName() string { return "node_client_traffic" }
+
 type legacyNode struct {
 	ID          uint `gorm:"primaryKey"`
 	CreatedAt   time.Time
@@ -193,7 +205,7 @@ func seedLegacyDatabase(t *testing.T) *gorm.DB {
 	// Note the missing tables: user_inbounds, domains and edge_deployments did
 	// not exist in this build, so adoption has to create them.
 	if err := db.Migrator().CreateTable(&legacyAdmin{}, &legacyGroup{}, &legacyUser{},
-		&legacyInbound{}, &Setting{}, &AuditLog{}, &legacyNode{}, &NodeClientTraffic{},
+		&legacyInbound{}, &Setting{}, &AuditLog{}, &legacyNode{}, &legacyNodeClientTraffic{},
 		&legacyZone{}); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +230,7 @@ func seedLegacyDatabase(t *testing.T) *gorm.DB {
 		&legacyUser{ID: 2, Username: "bob", Status: "limited", SubToken: "tok-bob", UUID: "u-bob",
 			DataLimit: 1 << 20, UsedTraffic: 1 << 21},
 		&legacyZone{ID: 1, Zone: "tunnel.example", Adapter: "cottendns", Enabled: true},
-		&NodeClientTraffic{NodeID: 1, Username: "alice", LastRecorded: 512},
+		&legacyNodeClientTraffic{NodeID: 1, Username: "alice", LastRecorded: 512},
 		&Setting{Key: "panel.title", Value: "legacy panel"},
 	}
 	for _, row := range seed {
@@ -339,8 +351,13 @@ func TestLegacyDatabaseIsAdoptedWithoutLosingData(t *testing.T) {
 	if v := s.GetSetting("panel.title"); v != "legacy panel" {
 		t.Fatalf("settings lost: %q", v)
 	}
-	if tr, err := s.GetNodeClientTraffic(1, "alice"); err != nil || tr.LastRecorded != 512 {
-		t.Fatalf("traffic baseline lost: %+v %v", tr, err)
+	// node_client_traffic is no longer modelled — traffic_snapshots replaced it,
+	// atomically and scoped. The rows are left in place rather than dropped
+	// (a destructive migration for data nothing reads), so all that matters here
+	// is that migrating a database containing it succeeds and creates the new
+	// table alongside.
+	if _, err := s.TrafficSnapshots(ScopeLocalEngine); err != nil {
+		t.Fatalf("traffic_snapshots not usable after migrating a legacy database: %v", err)
 	}
 	// The subscription still resolves to the same inbounds it did before.
 	eff, err := s.InboundsForUser(alice.ID)
@@ -398,7 +415,18 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // the change up from the baseline, but a database already at the current version
 // only ever gets it from a migration. When this test fails, add the migration
 // that carries the change to existing databases, then update this constant.
-const modelSchemaFingerprintPinned = "2e4feddbe36e12752ef944960b0696639d1068c7b3e909467c0d40aa2a3ac202"
+//
+// REMOVING a model is the one case that needs no migration: alignSchema only
+// ever adds tables, columns and indexes, so a model that goes away simply leaves
+// its table behind, unread. That is deliberate — dropping a table is destructive
+// and irreversible, and the rows cost nothing where they sit. Update the pin,
+// and say here what was removed and why.
+//
+// node_client_traffic was removed when traffic_snapshots replaced it: the old
+// table's writer (internal/service) was never linked into any binary, so the
+// baselines it modelled were never written, and the replacement is scoped and
+// updates atomically with the usage it accounts for.
+const modelSchemaFingerprintPinned = "f4911729680bb72ed3b992980776fbc7624115b1be15bfc727e033e52eea97c3"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

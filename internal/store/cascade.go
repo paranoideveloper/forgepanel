@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -94,21 +93,15 @@ func deleteUserTx(tx *gorm.DB, userID uint) error {
 	if userID == 0 {
 		return nil
 	}
-	var u User
-	switch err := tx.First(&u, userID).Error; {
-	case err == nil:
-		// The traffic baseline is keyed by username, not by id: leaving it behind
-		// would make a later account with the same name inherit a stale counter
-		// and under-report every byte it transfers until the counter caught up.
-		if u.Username != "" {
-			if e := tx.Where("username = ?", u.Username).Delete(&NodeClientTraffic{}).Error; e != nil {
-				return fmt.Errorf("delete user %d traffic baselines: %w", userID, e)
-			}
-		}
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		// Already gone; still sweep anything that referenced the id.
-	default:
-		return err
+	// The traffic baselines are keyed by the user's counter tag ("u<ID>"), and
+	// SQLite hands out the LOWEST free rowid — so a user created after this one
+	// is deleted can be given the same id. Leaving the baseline behind would
+	// make that new account inherit a large stale counter: its first real
+	// traffic computes a delta of zero, and it transfers free until its own
+	// usage passes the dead account's total. Sweeping across every scope also
+	// covers the per-node baselines, which are separate rows.
+	if e := tx.Where("key = ?", UserCounterKey(userID)).Delete(&TrafficSnapshot{}).Error; e != nil {
+		return fmt.Errorf("delete user %d traffic baselines: %w", userID, e)
 	}
 	if err := tx.Where("user_id = ?", userID).Delete(&UserInbound{}).Error; err != nil {
 		return fmt.Errorf("delete user %d assignments: %w", userID, err)
@@ -133,7 +126,10 @@ func deleteNodeTx(tx *gorm.DB, id uint) error {
 	if id == 0 {
 		return nil
 	}
-	if err := tx.Where("node_id = ?", id).Delete(&NodeClientTraffic{}).Error; err != nil {
+	// Every baseline this node reported against. A node re-enrolled onto the
+	// same id would otherwise be measured from the dead node's totals, and its
+	// first heartbeats would count as nothing.
+	if err := tx.Where("scope = ?", NodeScope(id)).Delete(&TrafficSnapshot{}).Error; err != nil {
 		return fmt.Errorf("delete node %d traffic baselines: %w", id, err)
 	}
 	if err := tx.Model(&Inbound{}).Where("node_id = ?", id).
@@ -184,8 +180,14 @@ func repairOrphans(tx *gorm.DB) (OrphanReport, error) {
 	}
 	rep.Assignments = res.RowsAffected
 
-	res = tx.Where("node_id NOT IN (?)", fresh().Model(&Node{}).Select("id")).
-		Delete(&NodeClientTraffic{})
+	// Baselines whose user no longer exists. The scope side (a deleted node) is
+	// swept by deleteNodeTx; this catches rows left by any path that removed a
+	// user without going through the cascade — an older release, or a manual
+	// delete — because the consequence is silent: a reused id inherits the
+	// stale counter and transfers free.
+	res = tx.Where("key LIKE ?", "u%").
+		Where("CAST(SUBSTR(key, 2) AS INTEGER) NOT IN (?)", fresh().Model(&User{}).Select("id")).
+		Delete(&TrafficSnapshot{})
 	if res.Error != nil {
 		return rep, fmt.Errorf("sweep orphaned traffic baselines: %w", res.Error)
 	}

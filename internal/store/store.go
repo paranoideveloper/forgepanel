@@ -463,28 +463,3 @@ func (s *Store) ConsumeRecoveryCode(adminID uint, matches func(hash string) bool
 	})
 	return used, remaining, err
 }
-
-// GetNodeClientTraffic retrieves baseline traffic for (nodeID, username).
-func (s *Store) GetNodeClientTraffic(nodeID uint, username string) (*NodeClientTraffic, error) {
-	var nt NodeClientTraffic
-	err := s.db.Where("node_id = ? AND username = ?", nodeID, username).First(&nt).Error
-	if err != nil {
-		return nil, err
-	}
-	return &nt, nil
-}
-
-// SaveNodeClientTraffic saves baseline traffic for (nodeID, username).
-func (s *Store) SaveNodeClientTraffic(nt *NodeClientTraffic) error {
-	return s.db.Save(nt).Error
-}
-
-// PurgeUserNodeClientTraffic deletes baseline records for a user across all nodes.
-func (s *Store) PurgeUserNodeClientTraffic(username string) error {
-	return s.db.Where("username = ?", username).Delete(&NodeClientTraffic{}).Error
-}
-
-// PurgeNodeClientTraffic deletes baseline records for a node across all users.
-func (s *Store) PurgeNodeClientTraffic(nodeID uint) error {
-	return s.db.Where("node_id = ?", nodeID).Delete(&NodeClientTraffic{}).Error
-}

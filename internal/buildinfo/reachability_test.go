@@ -18,7 +18,9 @@ package buildinfo_test
 //	internal/core/adapter       1,353 lines: a CoreAdapter interface, four real
 //	                            adapters and a conformance suite. Zero non-test
 //	                            importers — now wired into Controller.dispatch.
-//	internal/service            404 lines of service layer. Same.
+//	internal/service            404 lines of service layer. Same — and a
+//	                            duplicate of the API's own handlers, so it was
+//	                            deleted rather than wired.
 //
 // TestEveryHandlerIsReachableFromTheRouter covers HTTP handlers. This covers the
 // level above it: a whole package that nothing links.
@@ -39,11 +41,11 @@ import (
 // design decisions, and folding them into the same map is how a guard stops
 // meaning anything. The test reports them on every run so the count cannot
 // quietly grow.
-var knownUnlinked = map[string]string{
-	"github.com/forgepanel/forgepanel/internal/service": "FP-TRAF-003: 404 lines of service layer, including the " +
-		"NodeClientTraffic rollup machinery. Its only importer is its own test, so the rollup tables it " +
-		"maintains are never written and no dashboard can read them.",
-}
+//
+// Currently EMPTY, and that is the point: both original entries were resolved
+// rather than accepted. internal/core/adapter is now the live reload dispatch;
+// internal/service was deleted as a duplicate of what the API already did.
+var knownUnlinked = map[string]string{}
 
 // notLinked documents internal packages that no shipped binary links, with the
 // reason. An entry without a reason is how this guard gets quietly neutered.

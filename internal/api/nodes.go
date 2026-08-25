@@ -119,11 +119,16 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// heartbeat, keyed by the stats email the panel stamped into its config.
 		// Without it a node's traffic was counted nowhere and a user assigned to
 		// a node had no enforceable quota at all.
-		Traffic       map[string]int64 `json:"traffic"`
-		DiskUsedMB    int              `json:"disk_used_mb"`
-		DiskTotalMB   int              `json:"disk_total_mb"`
-		TCPConns      int              `json:"tcp_conns"`
-		CoreUptimeSec int              `json:"core_uptime_sec"`
+		Traffic map[string]int64 `json:"traffic"`
+		// TrafficCumulative marks the counters as running totals rather than
+		// per-heartbeat deltas. Agents from before that change omit it, and are
+		// accounted the old way so a panel upgraded ahead of its fleet does not
+		// silently mis-count either generation.
+		TrafficCumulative bool `json:"traffic_cumulative"`
+		DiskUsedMB        int  `json:"disk_used_mb"`
+		DiskTotalMB       int  `json:"disk_total_mb"`
+		TCPConns          int  `json:"tcp_conns"`
+		CoreUptimeSec     int  `json:"core_uptime_sec"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -144,7 +149,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.CoreUptimeSec = req.CoreUptimeSec
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
-	s.accountNodeTraffic(req.Traffic)
+	s.accountNodeTraffic(n.ID, req.Traffic, req.TrafficCumulative)
 	// Return the current xray config bundle so the node runs the same inbounds.
 	// A control-plane-only panel has no local engine; the heartbeat still
 	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
@@ -303,55 +308,125 @@ func (s *Server) panelCertFingerprint() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// accountNodeTraffic adds a node's reported per-user deltas to those users and
-// enforces their data limit, so traffic served remotely counts exactly like
-// traffic the panel served itself.
+// accountNodeTraffic records a node's reported per-user usage and enforces the
+// data limit, so traffic served remotely counts exactly like traffic the panel
+// served itself.
 //
-// The node reports deltas keyed by the stats email the panel stamped into the
-// config it handed that node (job.UserEmail), which is the same key the local
-// poller uses — so both planes converge on one number per user rather than two
-// half-counts nobody can reconcile.
+// Counters are keyed by the stats email the panel stamped into the config it
+// handed that node (job.UserEmail), which is the same key the local poller uses,
+// so both planes converge on one number per user rather than two half-counts
+// nobody can reconcile.
 //
-// Enforcement is applied here as well as in the local poller. A user who blows
+// CUMULATIVE vs DELTA. A current agent reports running totals and never resets
+// them, and the delta is computed here against a snapshot scoped to that node.
+// That makes a heartbeat idempotent, which matters because the previous design
+// was not: the agent posted deltas and reset only after a successful response,
+// so a response lost AFTER the panel had already accounted them left the agent
+// unreset, the same bytes arrived again, and the user was charged twice. A
+// flaky link inflated usage and cut people off early, silently.
+//
+// An older agent omits the flag and is still accounted as deltas, so a panel
+// upgraded ahead of its fleet mis-counts neither generation.
+//
+// Enforcement runs here as well as in the local poller: a user who exhausts
 // their quota entirely on remote nodes would otherwise stay active until the
 // local poller happened to see traffic that, by definition, is not passing
 // through the panel.
-func (s *Server) accountNodeTraffic(deltas map[string]int64) {
-	if s.db == nil || len(deltas) == 0 {
+func (s *Server) accountNodeTraffic(nodeID uint, counters map[string]int64, cumulative bool) {
+	if s.db == nil || len(counters) == 0 {
 		return
 	}
+	scope := fmt.Sprintf("node:%d", nodeID)
+	var prev map[string]int64
+	if cumulative {
+		var err error
+		prev, err = s.db.TrafficSnapshots(scope)
+		if err != nil {
+			// Without the baseline every total would read as a fresh delta and
+			// inflate usage by the node's whole lifetime. Skipping the cycle
+			// keeps the numbers right; nothing was reset, so the next heartbeat
+			// recovers it.
+			return
+		}
+	}
+
 	changed := false
-	for email, bytes := range deltas {
-		if bytes <= 0 {
-			continue
+	for email, reported := range counters {
+		delta := reported
+		if cumulative {
+			if _, known := prev[email]; !known {
+				// FIRST contact for this counter: record the baseline and bill
+				// nothing. An unknown baseline cannot distinguish "this node has
+				// been serving for a month" from "it just started", and the
+				// panel does not control when a remote core was launched.
+				// Billing the whole counter would charge a month of traffic in
+				// one heartbeat and could exhaust a user's quota instantly;
+				// starting from here costs at most one heartbeat interval. The
+				// local poller differs on purpose — the panel starts that engine
+				// itself, so zero really is zero.
+				_ = s.db.SetTrafficSnapshot(scope, email, reported)
+				continue
+			}
+			delta = store.TrafficDelta(prev[email], reported)
 		}
 		id, ok := job.UserIDFromEmail(email)
 		if !ok {
+			if cumulative {
+				// Remember it anyway: a key that later resolves to a real user
+				// must not hand them the counter's entire history at once.
+				_ = s.db.SetTrafficSnapshot(scope, email, reported)
+			}
 			continue
 		}
-		u, err := s.db.UserByID(id)
-		if err != nil || u == nil {
+		if delta <= 0 {
+			if cumulative && reported != prev[email] {
+				// No usage, but a counter that restarted lower still has to move
+				// the baseline, or the next real delta is measured from one that
+				// no longer exists.
+				_ = s.db.SetTrafficSnapshot(scope, email, reported)
+			}
 			continue
 		}
-		if math.MaxInt64-bytes < u.UsedTraffic {
-			u.UsedTraffic = math.MaxInt64
+
+		tripped := false
+		stamp := func(u *store.User) {
+			now := time.Now()
+			u.LastSeenAt = &now
+			// First use starts an on-hold user's clock on this plane too: a user
+			// whose only traffic is remote must not stay on hold forever.
+			if u.Status == store.StatusOnHold && u.FirstConnectAt == nil {
+				first := now
+				u.FirstConnectAt = &first
+			}
+			if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
+				u.Status = store.StatusLimited
+				tripped = true
+			}
+		}
+
+		if cumulative {
+			// The usage and the snapshot move in ONE transaction. Saving one
+			// without the other either double-counts on the next heartbeat or
+			// drops the bytes entirely, and both are invisible.
+			if _, _, err := s.db.ApplyTrafficDelta(scope, email, id, delta, reported, stamp); err != nil {
+				continue // snapshot did not move either; recomputed next heartbeat
+			}
 		} else {
-			u.UsedTraffic += bytes
+			u, err := s.db.UserByID(id)
+			if err != nil || u == nil {
+				continue
+			}
+			if math.MaxInt64-delta < u.UsedTraffic {
+				u.UsedTraffic = math.MaxInt64
+			} else {
+				u.UsedTraffic += delta
+			}
+			stamp(u)
+			_ = s.db.SaveUser(u)
 		}
-		now := time.Now()
-		u.LastSeenAt = &now
-		// First use starts an on-hold user's clock, on this plane too. A user
-		// whose only traffic is remote must not stay on hold forever just
-		// because the panel never served them directly.
-		if u.Status == store.StatusOnHold && u.FirstConnectAt == nil {
-			first := now
-			u.FirstConnectAt = &first
-		}
-		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
-			u.Status = store.StatusLimited
+		if tripped {
 			changed = true
 		}
-		_ = s.db.SaveUser(u)
 	}
 	// A user who just went over now has to stop being served, on every plane.
 	if changed {

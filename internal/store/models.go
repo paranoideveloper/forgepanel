@@ -238,7 +238,7 @@ func (e *EdgeDeployment) StatusURL() string {
 
 // AllModels is the migration set.
 func AllModels() []any {
-	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &NodeClientTraffic{},
+	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}}
 }
 
@@ -336,12 +336,4 @@ type ForgeDNSZone struct {
 	// text columns, so an existing database picks them up empty.
 	OverrideTOML       string `gorm:"type:text" json:"-"`
 	ClientOverrideTOML string `gorm:"type:text" json:"-"`
-}
-
-// NodeClientTraffic tracks per-node cumulative traffic baselines per user tag
-// to prevent double-counting across heartbeat cycles or node restarts.
-type NodeClientTraffic struct {
-	NodeID       uint   `gorm:"primaryKey;index:idx_node_client" json:"node_id"`
-	Username     string `gorm:"primaryKey;index:idx_node_client" json:"username"`
-	LastRecorded int64  `json:"last_recorded"`
 }

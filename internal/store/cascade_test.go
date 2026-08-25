@@ -119,9 +119,9 @@ func TestDeleteUserLeavesNoOrphans(t *testing.T) {
 	if err := s.CreateNode(node); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"bob", "carol"} {
-		if err := s.SaveNodeClientTraffic(&NodeClientTraffic{
-			NodeID: node.ID, Username: name, LastRecorded: 100}); err != nil {
+	// Traffic baselines for both users, on this node's scope.
+	for _, id := range []uint{u.ID, keeper.ID} {
+		if err := s.SetTrafficSnapshot(NodeScope(node.ID), UserCounterKey(id), 100); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,11 +133,16 @@ func TestDeleteUserLeavesNoOrphans(t *testing.T) {
 	if n := countAssignments(t, s, "user_id", u.ID); n != 0 {
 		t.Fatalf("%d assignment rows outlived the user", n)
 	}
-	if _, err := s.GetNodeClientTraffic(node.ID, "bob"); err == nil {
-		t.Fatal("the deleted user's traffic baseline survived; a recreated account would inherit it")
+	snaps, err := s.TrafficSnapshots(NodeScope(node.ID))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.GetNodeClientTraffic(node.ID, "carol"); err != nil {
-		t.Fatalf("another user's traffic baseline was destroyed: %v", err)
+	if _, still := snaps[UserCounterKey(u.ID)]; still {
+		t.Fatal("the deleted user's traffic baseline survived; SQLite reuses the lowest free rowid, " +
+			"so a recreated account would inherit it and transfer free until it caught up")
+	}
+	if _, ok := snaps[UserCounterKey(keeper.ID)]; !ok {
+		t.Fatal("another user's traffic baseline was destroyed")
 	}
 	if n := countAssignments(t, s, "user_id", keeper.ID); n != 1 {
 		t.Fatalf("another user's assignments were destroyed: %d", n)
@@ -171,12 +176,12 @@ func TestDeleteNodeClearsEveryReference(t *testing.T) {
 	if err := s.SaveInbound(elsewhere); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveNodeClientTraffic(&NodeClientTraffic{
-		NodeID: node.ID, Username: "alice", LastRecorded: 10}); err != nil {
+	// One baseline per node for the same user, so the sweep must be scoped to
+	// the node being deleted and not to the user.
+	if err := s.SetTrafficSnapshot(NodeScope(node.ID), UserCounterKey(1), 10); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveNodeClientTraffic(&NodeClientTraffic{
-		NodeID: survivor.ID, Username: "alice", LastRecorded: 20}); err != nil {
+	if err := s.SetTrafficSnapshot(NodeScope(survivor.ID), UserCounterKey(1), 20); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,11 +200,19 @@ func TestDeleteNodeClearsEveryReference(t *testing.T) {
 	if err != nil || stillThere.NodeID != survivor.ID {
 		t.Fatalf("another node's inbound was detached: %+v %v", stillThere, err)
 	}
-	if _, err := s.GetNodeClientTraffic(node.ID, "alice"); err == nil {
-		t.Fatal("traffic baselines outlived their node")
+	dead, err := s.TrafficSnapshots(NodeScope(node.ID))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.GetNodeClientTraffic(survivor.ID, "alice"); err != nil {
-		t.Fatalf("another node's traffic baseline was destroyed: %v", err)
+	if len(dead) != 0 {
+		t.Fatalf("traffic baselines outlived their node: %v", dead)
+	}
+	alive, err := s.TrafficSnapshots(NodeScope(survivor.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alive[UserCounterKey(1)] != 20 {
+		t.Fatalf("another node's traffic baseline was destroyed: %v", alive)
 	}
 }
 
@@ -304,11 +317,11 @@ func TestRepairOrphansSweepsPreCascadeDamage(t *testing.T) {
 	// user and a gone inbound, a baseline for a gone node, and users/inbounds
 	// pointing at ids that were removed out from under them.
 	seed := []any{
-		&UserInbound{UserID: u.ID, InboundID: live.ID},                          // healthy, must survive
-		&UserInbound{UserID: 9001, InboundID: live.ID},                          // user is gone
-		&UserInbound{UserID: u.ID, InboundID: 9002},                             // inbound is gone
-		&NodeClientTraffic{NodeID: node.ID, Username: "alice", LastRecorded: 5}, // healthy
-		&NodeClientTraffic{NodeID: 9003, Username: "alice", LastRecorded: 5},    // node is gone
+		&UserInbound{UserID: u.ID, InboundID: live.ID},                                   // healthy, must survive
+		&UserInbound{UserID: 9001, InboundID: live.ID},                                   // user is gone
+		&UserInbound{UserID: u.ID, InboundID: 9002},                                      // inbound is gone
+		&TrafficSnapshot{Scope: NodeScope(node.ID), Key: UserCounterKey(u.ID), Value: 5}, // healthy
+		&TrafficSnapshot{Scope: NodeScope(node.ID), Key: UserCounterKey(9003), Value: 5}, // user is gone
 	}
 	for _, row := range seed {
 		if err := s.db.Create(row).Error; err != nil {
@@ -337,8 +350,15 @@ func TestRepairOrphansSweepsPreCascadeDamage(t *testing.T) {
 	if n := countAssignments(t, s, "inbound_id", live.ID); n != 1 {
 		t.Fatalf("healthy inbound assignment count is %d, want 1", n)
 	}
-	if _, err := s.GetNodeClientTraffic(node.ID, "alice"); err != nil {
-		t.Fatalf("a healthy traffic baseline was swept: %v", err)
+	snaps, err := s.TrafficSnapshots(NodeScope(node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snaps[UserCounterKey(u.ID)] != 5 {
+		t.Fatalf("a healthy traffic baseline was swept: %v", snaps)
+	}
+	if _, orphan := snaps[UserCounterKey(9003)]; orphan {
+		t.Fatalf("the orphaned baseline survived the sweep: %v", snaps)
 	}
 	gotGroup, err := s.GroupByID(g.ID)
 	if err != nil || len(gotGroup.InboundIDs) != 1 || gotGroup.InboundIDs[0] != live.ID {

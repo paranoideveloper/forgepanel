@@ -196,14 +196,27 @@ func (a *NodeAgent) heartbeat() (string, error) {
 	if !a.coreStartedAt.IsZero() && a.activeCmd != nil {
 		coreUptime = int(time.Since(a.coreStartedAt).Seconds())
 	}
-	// Read WITHOUT resetting first. If the post fails, the counters are still
-	// in xray and the next heartbeat picks them up; resetting before a
-	// successful delivery would drop that traffic on the floor, and traffic a
-	// quota system silently loses is worse than traffic it never saw.
+	// Report CUMULATIVE counters and never reset them.
+	//
+	// This agent used to post deltas and reset after a successful response, and
+	// that loses money in the customer's favour and then in ours: if the panel
+	// received the post and ACCOUNTED it but the response was lost — a dropped
+	// link, a panel restart mid-reply, a client timeout — the reset never ran,
+	// the next heartbeat reported the same bytes, and the panel added them a
+	// second time. A flaky link therefore inflated every user's usage and cut
+	// them off early, silently.
+	//
+	// Cumulative reporting makes a heartbeat idempotent: re-sending the same
+	// totals yields a zero delta on the panel, so a lost response costs nothing
+	// and no reset has to succeed for accounting to be correct.
 	traffic := a.collectTraffic(false)
 	body, _ := json.Marshal(map[string]any{
 		"token": a.token, "cpu": cpu, "mem_mb": mem, "traffic": traffic,
-		"disk_used_mb": diskUsed, "disk_total_mb": diskTotal,
+		// Tells the panel these are running totals rather than deltas. An older
+		// agent omits it and is accounted the old way, so a panel upgraded ahead
+		// of its nodes does not silently mis-count either fleet.
+		"traffic_cumulative": true,
+		"disk_used_mb":       diskUsed, "disk_total_mb": diskTotal,
 		"tcp_conns": conns, "core_uptime_sec": coreUptime,
 	})
 	var resp struct {
@@ -211,12 +224,6 @@ func (a *NodeAgent) heartbeat() (string, error) {
 	}
 	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
 		return "", err
-	}
-	// Delivered: now clear what we just reported so the next delta starts from
-	// zero. A counter that grew between the two reads is not lost — it simply
-	// arrives in the following heartbeat.
-	if len(traffic) > 0 {
-		a.collectTraffic(true)
 	}
 	return resp.XrayConfig, nil
 }
