@@ -14,6 +14,10 @@
 
   let scriptModalOpen = $state(false);
   let installScript = $state('');
+  // The enroll token is minted once and never returned again, so the command is
+  // held only for as long as this modal is open.
+  let enrolledName = $state('');
+  let enrollFingerprint = $state('');
 
   async function loadNodes() {
     loading = true;
@@ -28,18 +32,36 @@
 
   async function registerNode() {
     createErr = '';
-    if (!newName.trim() || !newAddress.trim()) {
-      createErr = 'Both Name and Address are required';
+    // Only the name is required. The handler deliberately treats the address as
+    // optional — a node behind NAT or on a dynamic IP reports its own address
+    // when it registers — so demanding one here blocked exactly the nodes that
+    // most need enrolling.
+    if (!newName.trim()) {
+      createErr = 'A node name is required';
       return;
     }
     try {
-      await apiFetch('/admin/nodes', {
+      // POST /admin/nodes does not exist; this used to 404 on every attempt, so
+      // registering a node from the panel could not work. /nodes/enroll is the
+      // real route: it creates the node AND mints the one-time enroll token,
+      // returning the exact command to run on it.
+      const res = await apiFetch<{
+        name: string;
+        enroll_command: string;
+        panel_fingerprint?: string;
+      }>('/admin/nodes/enroll', {
         method: 'POST',
         body: JSON.stringify({ name: newName.trim(), address: newAddress.trim() })
       });
+      enrolledName = res.name || newName.trim();
+      enrollFingerprint = res.panel_fingerprint || '';
+      // The REAL command, with the real token — not a placeholder the operator
+      // has to fill in from somewhere the panel never tells them.
+      installScript = res.enroll_command;
+      scriptModalOpen = true;
       newName = '';
       newAddress = '';
-      showToast('Node registered successfully', 'success');
+      showToast('Node registered — run the command on that server', 'success');
       await loadNodes();
     } catch (err: any) {
       createErr = err.message || 'Failed to register node';
@@ -57,9 +79,14 @@
     }
   }
 
+  // Registering a node is what mints its token, so there is no useful command to
+  // show outside that flow: the token is one-time and the panel cannot reissue
+  // it. This used to present a command containing the literal string
+  // YOUR_ENROLL_TOKEN, which looks copy-pasteable and cannot work.
   function showInstallModal() {
-    const origin = window.location.origin;
-    installScript = `curl -fsSL ${origin}/api/node/install.sh | PANEL="${origin}" TOKEN="YOUR_ENROLL_TOKEN" bash`;
+    enrolledName = '';
+    enrollFingerprint = '';
+    installScript = '';
     scriptModalOpen = true;
   }
 
@@ -89,7 +116,7 @@
   <h3>Register Remote Node Agent</h3>
   <div class="form-grid">
     <input type="text" bind:value={newName} placeholder="Node Name (e.g. EU-West-1)" />
-    <input type="text" bind:value={newAddress} placeholder="Public IP or Domain" />
+    <input type="text" bind:value={newAddress} placeholder="Public IP or Domain (optional)" />
     <button class="btn-primary" onclick={registerNode}>Register Node</button>
   </div>
   {#if createErr}<p class="err-text">{createErr}</p>{/if}
@@ -133,9 +160,30 @@
 </div>
 
 <Modal title="Deploy Node Agent (forgenode)" isOpen={scriptModalOpen} onClose={() => scriptModalOpen = false}>
-  <p class="muted">Run this command on your remote server to automatically install and launch <code>forgenode</code>:</p>
-  <pre><code>{installScript}</code></pre>
-  <button class="btn-primary" onclick={copyScript}>Copy Command</button>
+  {#if installScript}
+    <p class="muted">
+      Run this on <strong>{enrolledName}</strong> as root. It downloads the agent from this panel,
+      verifies its checksum, installs a systemd unit and starts it.
+    </p>
+    <pre><code data-testid="enroll-command">{installScript}</code></pre>
+    <p class="err-text">
+      The enrollment token appears once. If you lose this command, remove the node and register it
+      again — the panel cannot show the token a second time.
+    </p>
+    {#if enrollFingerprint}
+      <p class="muted">
+        This panel serves a self-signed certificate, so the command carries its fingerprint for the
+        agent to pin. Keep it intact: without it the agent has nothing to verify against and will
+        refuse to connect.
+      </p>
+    {/if}
+    <button class="btn-primary" onclick={copyScript}>Copy Command</button>
+  {:else}
+    <p class="muted">
+      Register a node above to get its enrollment command. The command contains a one-time token
+      minted for that specific node, so there is no generic version to copy.
+    </p>
+  {/if}
 </Modal>
 
 <style>
