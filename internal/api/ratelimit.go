@@ -39,6 +39,10 @@ const (
 	limiterMaxEntries = 50000
 	limiterEntryTTL   = 1 * time.Hour
 	limiterSweepEvery = 1 * time.Minute
+	// usernameLockout is how long a sprayed username is held. Short and FLAT:
+	// long enough to make a distributed guessing run expensive, short enough that
+	// an attacker cannot use it to keep the real owner out.
+	usernameLockout = 60 * time.Second
 )
 
 func newLoginLimiter() *loginLimiter {
@@ -183,4 +187,49 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// AllowedKey is Allowed for a non-IP key, with its own failure budget.
+//
+// Used for the per-USERNAME guard, which has to be far more forgiving than the
+// per-IP one: it is the counter an attacker can drive on somebody else's behalf,
+// so tripping it must be expensive.
+func (l *loginLimiter) AllowedKey(key string, budget int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.maybeSweepLocked()
+	e := l.entries[key]
+	if e == nil {
+		return true
+	}
+	e.lastSeen = l.now()
+	if e.fails < budget {
+		return true
+	}
+	if l.now().Before(e.lockedTill) {
+		l.mBlocked.Add(1)
+		return false
+	}
+	return true
+}
+
+// FailKey records a failure against a non-IP key.
+//
+// The lockout is FLAT rather than escalating, and short. An escalating username
+// lock would let an attacker extend a victim's lockout without bound simply by
+// continuing to fail — turning the guard into the attack.
+func (l *loginLimiter) FailKey(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.maybeSweepLocked()
+	e := l.entries[key]
+	if e == nil {
+		l.evictIfFullLocked()
+		e = &limEntry{}
+		l.entries[key] = e
+	}
+	now := l.now()
+	e.lastSeen = now
+	e.fails++
+	e.lockedTill = now.Add(usernameLockout)
 }

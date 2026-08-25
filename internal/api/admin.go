@@ -37,23 +37,22 @@ func (s *Server) handleLogin(c *gin.Context) {
 		return
 	}
 	ip := c.ClientIP()
-	if s.login != nil && !s.login.Allowed(ip) {
+	// Scoped on the source AND the target. IP alone stops one host hammering one
+	// account and does nothing about a credential list tried against one
+	// username from a thousand addresses — the attack that actually works.
+	if !s.loginAllowed(ip, req.Username) {
 		c.JSON(429, gin.H{"error": "too many attempts; try again later"})
 		return
 	}
 	admin, err := s.db.AdminByUsername(req.Username)
 	if err != nil || admin.Disabled {
-		if s.login != nil {
-			s.login.Fail(ip)
-		}
+		s.loginFailed(ip, req.Username)
 		c.JSON(401, gin.H{"error": "invalid credentials"})
 		return
 	}
 	ok, _ := auth.VerifyPassword(req.Password, admin.PasswordHash)
 	if !ok {
-		if s.login != nil {
-			s.login.Fail(ip)
-		}
+		s.loginFailed(ip, req.Username)
 		c.JSON(401, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -70,9 +69,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 				ok = cerr == nil && claimed
 			}
 			if !ok {
-				if s.login != nil {
-					s.login.Fail(ip)
-				}
+				s.loginFailed(ip, req.Username)
 				c.JSON(401, gin.H{"error": "invalid 2fa code", "totp_required": true})
 				return
 			}
@@ -81,9 +78,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 				return auth.RecoveryCodeMatches(h, req.RecoveryCode)
 			})
 			if err != nil || !used {
-				if s.login != nil {
-					s.login.Fail(ip)
-				}
+				s.loginFailed(ip, req.Username)
 				c.JSON(401, gin.H{"error": "invalid or already-used recovery code", "totp_required": true})
 				return
 			}
@@ -101,7 +96,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		}
 	}
 	if s.login != nil {
-		s.login.Success(ip)
+		s.loginSucceeded(ip, req.Username)
 	}
 	// Re-read the epoch: a recovery-code login just advanced it, and the new
 	// token must carry the new value or it would invalidate itself.
