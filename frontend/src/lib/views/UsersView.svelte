@@ -127,9 +127,15 @@
   }
 
   async function resetCreds(user: User) {
-    if (!confirm(`Reset ${user.username}'s credentials (UUID + sub token)? Existing configs stop working.`)) return;
+    if (!confirm(`Reset ${user.username}'s credentials (UUID, password and subscription token)? Existing configs stop working.`)) return;
     try {
-      await apiFetch(`/admin/users/${user.id}/reset-credentials`, { method: 'POST' });
+      // The handler refuses a request that names nothing to rotate
+      // ("specify at least one of uuid, password, sub_token"), so posting an
+      // empty body made credential rotation impossible from the panel.
+      await apiFetch(`/admin/users/${user.id}/reset-credentials`, {
+        method: 'POST',
+        body: JSON.stringify({ uuid: true, password: true, sub_token: true })
+      });
       showToast('Credentials reset', 'success');
       await loadData();
     } catch (err: any) { showToast(err.message || 'Failed to reset', 'error'); }

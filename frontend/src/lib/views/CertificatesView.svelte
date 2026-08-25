@@ -74,7 +74,9 @@
     try {
       await apiFetch('/admin/certs/import', {
         method: 'POST',
-        body: JSON.stringify({ cert_pem: certPem.trim(), key_pem: keyPem.trim() })
+        // handleCertImport binds {cert,key}; cert_pem/key_pem arrived empty and
+        // X509KeyPair failed every time, so no certificate could be imported.
+        body: JSON.stringify({ cert: certPem.trim(), key: keyPem.trim() })
       });
       certPem = '';
       keyPem = '';

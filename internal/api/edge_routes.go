@@ -296,6 +296,17 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		// APIBase redirects the Cloudflare API root, for an operator behind an
 		// egress proxy (and for the tests that exercise this handler).
 		APIBase string `json:"api_base"`
+		// ProxyIP is the relay a Worker dials when the destination is itself on
+		// Cloudflare. A Worker's connect() to a Cloudflare IP is refused (the
+		// CF->CF block), so without this every Cloudflare-hosted destination is
+		// simply unreachable through the edge.
+		//
+		// The deploy form has always had this input and always sent it, but the
+		// handler bound no such field, so the value was parsed and dropped: the
+		// operator set a proxy IP, saw "deployed", and got an edge that still
+		// could not reach Cloudflare-hosted sites. It is applied to the freshly
+		// deployed Worker's config below.
+		ProxyIP string `json:"proxy_ip"`
 	}
 	_ = c.ShouldBindJSON(&req)
 	if strings.TrimSpace(req.APIToken) == "" {
@@ -341,6 +352,17 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		Name: req.Name, Target: req.Target, SecurePath: req.SecurePath,
 		Bundle: []byte(req.Bundle), Force: req.Force,
 	})
+	if err == nil && strings.TrimSpace(req.ProxyIP) != "" {
+		// Best effort, and reported rather than fatal: the Worker IS deployed at
+		// this point, so failing the whole request would send the operator
+		// hunting for something that is actually running. The warning tells them
+		// the one thing that did not take.
+		if aerr := applyEdgeProxyIP(ctx, out, req.ProxyIP); aerr != nil {
+			out.Warnings = append(out.Warnings,
+				"deployed, but the proxy IP could not be applied: "+aerr.Error()+
+					" — set it from the Worker's own panel.")
+		}
+	}
 	if err != nil {
 		edgeFail(c, err)
 		return
@@ -470,4 +492,28 @@ func edgeFail(c *gin.Context, err error) {
 	}
 	c.JSON(status, gin.H{"error": e.Message, "kind": string(e.Kind), "op": e.Op,
 		"remediation": e.Remediation, "missing_scope": e.MissingScope})
+}
+
+// applyEdgeProxyIP writes the operator's proxy IP into a freshly deployed
+// Worker's configuration.
+//
+// It runs after the deploy rather than as a deploy binding because proxyIPs
+// lives in the Worker's KV-backed config, not in its script bindings. The
+// Worker authenticates this with the feed push token it was just given, so no
+// admin password is involved.
+//
+// Setting proxyIPMode alongside the address matters: the list alone does
+// nothing while the mode is "off", which would look exactly like the value
+// having been ignored — the bug this function exists to fix.
+func applyEdgeProxyIP(ctx context.Context, res *edge.DeployResult, proxyIP string) error {
+	wc := edge.NewWorkerClient(res.Origin, res.SecurePath)
+	wc.Bearer = res.FeedPushToken
+	cfg, err := wc.GetConfigRaw(ctx)
+	if err != nil {
+		return err
+	}
+	cfg["proxyIPs"] = []string{strings.TrimSpace(proxyIP)}
+	cfg["proxyIPMode"] = "proxyip"
+	_, err = wc.PutConfigRaw(ctx, cfg)
+	return err
 }

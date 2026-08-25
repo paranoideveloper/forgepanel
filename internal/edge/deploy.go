@@ -48,6 +48,11 @@ type DeployResult struct {
 	D1DatabaseID  string `json:"d1_database_id,omitempty"`
 	Hostname      string `json:"hostname,omitempty"`
 	Updated       bool   `json:"updated"`
+	// Warnings carry things that did not take even though the Worker itself
+	// deployed. Failing the whole request for these would send an operator
+	// hunting for something that is actually running; swallowing them would let
+	// a setting they chose be silently ignored.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Deploy uploads the Worker, wires its KV namespace, publishes it on

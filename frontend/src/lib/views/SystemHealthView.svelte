@@ -94,7 +94,10 @@
     try {
       await apiFetch('/admin/change-password', {
         method: 'POST',
-        body: JSON.stringify({ old_password: oldPass, new_password: newPass })
+        // The handler binds {old,new} (internal/api). Sending old_password/
+        // new_password left both empty, so every change 400'd with a
+        // misleading length error and the password could never be changed.
+        body: JSON.stringify({ old: oldPass, new: newPass })
       });
       oldPass = '';
       newPass = '';
