@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -61,6 +62,14 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		// the core refuses their traffic. Skipping only Disabled/Expired let an
 		// over-quota account keep transferring until the next engine reload.
 		if u.Status == store.StatusDisabled || u.Status == store.StatusExpired || u.Status == store.StatusLimited {
+			continue
+		}
+		// A user held for exceeding their concurrent-address limit is excluded
+		// for as long as the hold lasts. This is what makes User.IPLimit mean
+		// anything: it was stored and editable for its whole life while nothing
+		// read it, so an operator could cap an account at two devices and have
+		// the panel accept the number and do nothing with it.
+		if u.IPLimitedUntil != nil && u.IPLimitedUntil.After(time.Now()) {
 			continue
 		}
 		seen := map[uint]bool{}

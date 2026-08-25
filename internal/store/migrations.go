@@ -34,6 +34,7 @@ const (
 	migVTrafficSnaps  uint64 = 4
 	migVNodeMetrics   uint64 = 5
 	migVRollups       uint64 = 6
+	migVIPLimit       uint64 = 7
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -102,6 +103,21 @@ func migrations() []migrate.Migration {
 			// usage reports and no way to watch a quota being consumed.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&TrafficRollup{}})
+				return err
+			},
+		},
+		{
+			Version: migVIPLimit,
+			Name:    "user_ip_limit_cooldown",
+			Rollback: "safe to drop. The column holds a transient cooldown that expires on its own; " +
+				"losing it releases any user currently held by an IP limit, which the next sweep " +
+				"re-applies if they are still over it.",
+			// Adds users.ip_limited_until. Without the migration an existing
+			// database has no column to write, so enforcement would fail on
+			// every sweep — leaving IPLimit exactly as non-functional as it was
+			// before, but now with errors in the log.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&User{}})
 				return err
 			},
 		},

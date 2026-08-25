@@ -706,3 +706,59 @@ func TestUserListExposesLastSeen(t *testing.T) {
 		t.Fatalf("last_seen_at did not round-trip through the API: %s", rec.Body)
 	}
 }
+
+// TestIPHeldUserExcludedFromEngine is the enforcement half of the concurrent-
+// address limit. store.User.IPLimit was stored and editable from the day it was
+// added and NOTHING read it: an operator could cap an account at two devices,
+// the panel would accept the number, and the account stayed unlimited. Holding a
+// user in the database is worthless if their credential is still materialized —
+// the core would keep serving them regardless.
+func TestIPHeldUserExcludedFromEngine(t *testing.T) {
+	f := newUGFixture(t)
+	body := fmt.Sprintf(`{"inbound_ids":[%d]}`, f.inFree)
+	f.do(t, http.MethodPut, fmt.Sprintf("/api/admin/users/%d/inbounds", f.user.ID),
+		f.ownerTok, body)
+
+	present := func() bool {
+		for _, sp := range f.s.enabledInboundSpecs() {
+			for _, cl := range sp.Clients {
+				if cl.Email == job.UserEmail(f.user.ID) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !present() {
+		t.Fatal("setup: an active assigned user should be a client on the inbound")
+	}
+
+	until := time.Now().Add(5 * time.Minute)
+	if err := f.s.db.UpdateUserFields(f.user.ID, map[string]any{"ip_limited_until": until}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if present() {
+		t.Fatal("a user held for exceeding their address limit is still materialized into the engine config; the limit does nothing")
+	}
+
+	// The hold is transient and self-clearing: a PAST timestamp must serve
+	// again, or a user would stay locked out until something else noticed.
+	past := time.Now().Add(-time.Minute)
+	if err := f.s.db.UpdateUserFields(f.user.ID, map[string]any{"ip_limited_until": past}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if !present() {
+		t.Fatal("an expired hold still excludes the user; the cooldown would never end")
+	}
+
+	// The user's real Status must be untouched throughout. Folding the hold into
+	// Status would overwrite why the account is in whatever state it is in, and
+	// leave it wrong once the cooldown lifted.
+	got, err := f.s.db.UserByID(f.user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.StatusActive {
+		t.Errorf("status = %q, want active — an IP hold must not overwrite the account's real state", got.Status)
+	}
+}

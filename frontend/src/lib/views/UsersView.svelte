@@ -35,6 +35,7 @@
   let mUser = $state<User | null>(null);
   let mLimitGB = $state(0);
   let mExpireDays = $state(0);
+  let mIPLimit = $state(0);
   let mStatus = $state('active');
   let mGroupId = $state<number | undefined>(undefined);
   let mAssigned = $state<Set<number>>(new Set());
@@ -208,6 +209,7 @@
     mStatus = (user as any).status || 'active';
     mGroupId = user.group_id;
     mExpireDays = 0;
+    mIPLimit = (user as any).ip_limit || 0;
     mAssigned = new Set();
     mInherited = new Set();
     try {
@@ -216,6 +218,15 @@
       mInherited = new Set(res.assignments?.inherited || []);
     } catch (_) {}
     manageOpen = true;
+  }
+
+  // A held user is still "active": the hold is transient and self-clearing, and
+  // folding it into status would overwrite the account's real state.
+  function isIPHeld(u: User): boolean {
+    const until = (u as any).ip_limited_until;
+    if (!until) return false;
+    const t = new Date(until).getTime();
+    return !Number.isNaN(t) && t > Date.now();
   }
 
   function toggleAssign(id: number) {
@@ -227,7 +238,7 @@
   async function saveManage() {
     if (!mUser) return;
     try {
-      const patch: Record<string, any> = { status: mStatus, group_id: mGroupId, data_limit: mLimitGB * 1024 ** 3 };
+      const patch: Record<string, any> = { status: mStatus, group_id: mGroupId, data_limit: mLimitGB * 1024 ** 3, ip_limit: mIPLimit };
       if (mExpireDays > 0) patch.expire_at = new Date(Date.now() + mExpireDays * 86400_000).toISOString();
       await apiFetch(`/admin/users/${mUser.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
       await apiFetch(`/admin/users/${mUser.id}/inbounds`, { method: 'PUT', body: JSON.stringify({ inbound_ids: [...mAssigned] }) });
@@ -403,7 +414,17 @@
             <td>{groups.find(g => g.id === u.group_id)?.name || '—'}</td>
             <td>{fmtBytes((u as any).data_limit)}</td>
             <td>{fmtBytes((u as any).used_traffic)}</td>
-            <td><span class="badge {(u as any).status === 'active' ? 'ok' : 'off'}">{(u as any).status || 'active'}</span></td>
+            <td>
+              <span class="badge {(u as any).status === 'active' ? 'ok' : 'off'}">{(u as any).status || 'active'}</span>
+              <!-- The hold is separate from status on purpose, so it is shown
+                   separately too: an operator seeing "active" on an account the
+                   panel is deliberately refusing has no way to explain it. -->
+              {#if isIPHeld(u)}
+                <span class="badge held" data-testid="ip-held" title="Over the device limit; released automatically">
+                  device limit
+                </span>
+              {/if}
+            </td>
             <td><code>{u.sub_token}</code></td>
             <td class="acts">
               <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>Manage</button>
@@ -494,6 +515,17 @@
     <label>Group<select bind:value={mGroupId}><option value={undefined}>No group</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
     <label>Data limit (GB, 0=∞)<input type="number" bind:value={mLimitGB} /></label>
     <label>Extend expiry (days from now, 0=leave)<input type="number" bind:value={mExpireDays} /></label>
+    <label>
+      Devices (max addresses at once, 0=∞)
+      <input type="number" min="0" bind:value={mIPLimit} data-testid="ip-limit" />
+      <!-- An address counts while it has connected within the last couple of
+           minutes, not while a socket is open. Saying so here is the difference
+           between an operator trusting the number and filing a bug. -->
+      <small>
+        Counts distinct source addresses seen in the last couple of minutes.
+        Going over it twice in a row holds the account for five minutes.
+      </small>
+    </label>
   </div>
   <h4>Assign inbounds to this user</h4>
   <div class="assign" data-testid="assign-inbounds">
@@ -533,6 +565,9 @@
 </Modal>
 
 <style>
+  .badge.held { background: rgba(217,155,43,0.18); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); margin-left: 6px; }
+  label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.5); font-size: 11px; line-height: 1.5; }
+
   .rot-intro { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0 0 14px; }
   .rot { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
   .rot span { display: flex; flex-direction: column; gap: 3px; }

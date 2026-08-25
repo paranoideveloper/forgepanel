@@ -48,9 +48,17 @@ type Scheduler struct {
 	backupEvery func() (dataDir, master string, every time.Duration, keep int)
 	reloadHook  func()                                     // called after a mutation to reapply engine configs
 	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	now         func() time.Time // injectable clock (tests use a controllable one)
+	// activeAddresses reports how many distinct source addresses a user is
+	// currently connecting from. Nil disables IP-limit enforcement entirely,
+	// which is the honest behaviour when there is no presence source: acting on
+	// a count of zero would release every held user.
+	activeAddresses func(email string) int
+	auditHook       func(action, target string, seen, limit int)
+	ipLimits        *ipLimitState
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	now    func() time.Time // injectable clock (tests use a controllable one)
 }
 
 // Config configures a Scheduler.
@@ -80,6 +88,12 @@ type Config struct {
 	// TestTrafficIsNotLostWhenACycleIsInterrupted fails if this is ever called
 	// with reset=true.
 	PollTraffic func(reset bool) (map[string]int64, error)
+	// ActiveAddresses reports a user's current distinct source-address count.
+	// Nil disables IP-limit enforcement rather than enforcing against zero.
+	ActiveAddresses func(email string) int
+	// AuditIPLimit records enforcement actions so an account that stops working
+	// has a findable reason.
+	AuditIPLimit func(action, target string, seen, limit int)
 }
 
 // New builds a Scheduler with sane defaults.
@@ -97,6 +111,9 @@ func New(cfg Config) *Scheduler {
 		rollupHourlyRetention: cfg.RollupHourlyRetention,
 		rollupDailyRetention:  cfg.RollupDailyRetention,
 		backupEvery:           cfg.BackupConfig,
+		activeAddresses:       cfg.ActiveAddresses,
+		auditHook:             cfg.AuditIPLimit,
+		ipLimits:              newIPLimitState(),
 		now:                   time.Now,
 	}
 }
@@ -361,6 +378,13 @@ func (s *Scheduler) sweepAt(now time.Time) {
 				changed = true
 			}
 		}
+	}
+	// IP-limit enforcement runs on the same sweep so a hold and a release cost
+	// ONE engine reload between them, not one per user. It is deliberately after
+	// the lifecycle steps: a user who just expired should not also be recorded as
+	// having breached an address limit they can no longer reach.
+	if s.enforceIPLimits() {
+		changed = true
 	}
 	if changed && s.reloadHook != nil {
 		s.reloadHook()

@@ -131,10 +131,26 @@ type User struct {
 	// xray and sing-box alike, unlike a core-specific connection API.
 	LastSeenAt *time.Time `json:"last_seen_at"`
 
-	IPLimit    int        `json:"ip_limit"`
-	TelegramID int64      `json:"telegram_id"`
-	Note       string     `json:"note"`
-	SubRevoked *time.Time `json:"sub_revoked_at"`
+	// IPLimit is the maximum number of distinct source addresses this user may
+	// connect from at once. Zero is unlimited.
+	//
+	// It was stored and editable from the day it was added and NOTHING read it:
+	// an operator set a limit, the panel accepted it, and it did nothing. That
+	// is worse than not offering the field, because the operator believes the
+	// account is capped.
+	IPLimit int `json:"ip_limit"`
+	// IPLimitedUntil is set when a user is over their IP limit, and excludes
+	// them from every generated core config until it passes.
+	//
+	// It is deliberately NOT a Status value. Status carries why an account is
+	// unusable in a way an operator acts on — expired, over quota, disabled by
+	// hand — and each has its own recovery. Folding a transient, self-clearing
+	// IP cooldown into it would overwrite the real reason and leave the account
+	// wrong once the cooldown lifted.
+	IPLimitedUntil *time.Time `json:"ip_limited_until"`
+	TelegramID     int64      `json:"telegram_id"`
+	Note           string     `json:"note"`
+	SubRevoked     *time.Time `json:"sub_revoked_at"`
 }
 
 // Inbound is a canonical model.Node persisted plus panel bookkeeping. The

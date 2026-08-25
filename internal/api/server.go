@@ -204,6 +204,29 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 			}
 			return out, nil
 		},
+		// Presence is what makes User.IPLimit mean anything. Nil when there is no
+		// core, and the scheduler treats nil as "do not enforce" rather than
+		// enforcing against a count of zero — which would release every held
+		// user on a panel that happens to have no engine running.
+		ActiveAddresses: func(email string) int {
+			if s.engine == nil {
+				return 0
+			}
+			return s.engine.ActiveAddresses(email)
+		},
+		// An account that stops working needs a findable reason. Without this the
+		// user reports an outage, the panel shows them active, and nothing
+		// anywhere says the panel did it on purpose.
+		AuditIPLimit: func(action, target string, seen, limit int) {
+			if s.db == nil {
+				return
+			}
+			entry := &store.AuditLog{Actor: "system", Action: action, Target: target}
+			if seen > 0 {
+				entry.Diff = fmt.Sprintf("addresses: %d; limit: %d", seen, limit)
+			}
+			s.db.Audit(entry)
+		},
 	})
 	s.sched.Start()
 	s.startBot(ctx)
