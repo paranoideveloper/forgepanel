@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/forgepanel/forgepanel/internal/protocol/parse"
 	"strings"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -40,6 +41,13 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	b := &Bundle{}
 	var xin, sin, sep []any
 	statsUsed := false
+	// Egress chains: upstream hop URI -> outbound tag, plus the inbound tags
+	// routed through it. Built as we walk the specs and emitted after, so two
+	// inbounds sharing one upstream share a single outbound rather than dialling
+	// it twice.
+	egressTag := map[string]string{}
+	var egressOutbounds []any
+	var egressRules []any
 	for _, sp := range specs {
 		n := sp.Node
 		injectCert(n, certPath, keyPath)
@@ -56,6 +64,25 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			applyXrayClients(in, n, sp.Clients)
 			if len(sp.Clients) > 0 {
 				statsUsed = true
+			}
+			if uri := strings.TrimSpace(n.Egress); uri != "" {
+				tag, ok := egressTag[uri]
+				if !ok {
+					out, err := egressOutbound(uri, len(egressTag))
+					if err != nil {
+						// A broken upstream must not silently become a direct
+						// exit: that would leak traffic straight out of the box
+						// the operator explicitly told to relay it.
+						b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "egress: " + err.Error()})
+						continue
+					}
+					tag, _ = out["tag"].(string)
+					egressTag[uri] = tag
+					egressOutbounds = append(egressOutbounds, out)
+				}
+				egressRules = append(egressRules, jobj{
+					"type": "field", "inboundTag": []string{n.Tag}, "outboundTag": tag,
+				})
 			}
 			xin = append(xin, in)
 			b.XrayN++
@@ -93,11 +120,17 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 		"stats":    jobj{},
 		"policy":   jobj{"levels": jobj{"0": jobj{"statsUserUplink": statsUsed, "statsUserDownlink": statsUsed}}, "system": jobj{"statsInboundUplink": true, "statsInboundDownlink": true}},
 		"inbounds": append([]any{jobj{"tag": "api", "listen": "127.0.0.1", "port": xrayAPIPort, "protocol": "dokodemo-door", "settings": jobj{"address": "127.0.0.1"}}}, xin...),
-		"outbounds": []any{
+		"outbounds": append([]any{
 			jobj{"tag": "direct", "protocol": "freedom"},
 			jobj{"tag": "block", "protocol": "blackhole"},
-		},
-		"routing": jobj{"rules": []any{jobj{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"}}},
+		}, egressOutbounds...),
+		// The api rule must stay FIRST: it keeps the local gRPC listener talking
+		// to the api outbound. Egress rules follow, and anything unmatched falls
+		// through to the default direct outbound, so an inbound without an
+		// egress is completely unaffected.
+		"routing": jobj{"rules": append([]any{
+			jobj{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
+		}, egressRules...)},
 	}
 	raw, err := json.MarshalIndent(xrayCfg, "", "  ")
 	if err != nil {
@@ -298,4 +331,30 @@ func injectCert(n *model.Node, certPath, keyPath string) {
 		n.Security.CertificateFile = certPath
 		n.Security.KeyFile = keyPath
 	}
+}
+
+// egressOutbound turns an upstream-hop URI into an Xray outbound.
+//
+// The URI is parsed with the panel's own link parser and rendered with its own
+// outbound renderer, so a chain hop supports exactly the protocols and
+// transports the panel already understands — including REALITY, XHTTP and the
+// full TLS surface. Writing a second, chain-specific renderer here is how the
+// two would drift and a hop would quietly lose its uTLS fingerprint or its
+// REALITY short id.
+func egressOutbound(uri string, index int) (jobj, error) {
+	hop, err := parse.URI(uri)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse the upstream hop: %w", err)
+	}
+	hop.Normalize()
+	if err := hop.Validate(); err != nil {
+		return nil, fmt.Errorf("upstream hop is not usable: %w", err)
+	}
+	// A distinct tag per upstream so several chains can coexist.
+	hop.Tag = fmt.Sprintf("egress-%d", index)
+	out, err := render.XrayOutbound(hop)
+	if err != nil {
+		return nil, fmt.Errorf("cannot render the upstream hop: %w", err)
+	}
+	return out, nil
 }

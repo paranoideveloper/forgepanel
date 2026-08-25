@@ -503,6 +503,21 @@ type Node struct {
 	// It is descriptive metadata only — Normalize never touches it.
 	Country string `json:"country,omitempty"`
 
+	// Egress relays this inbound's traffic out through an upstream hop instead
+	// of leaving the machine directly, which is what makes a multi-hop chain
+	// (client -> entry -> transit -> internet) possible. It is the shape Iranian
+	// deployments need: a client reaches a nearby entry, and the traffic exits
+	// somewhere else entirely.
+	//
+	// It holds a client URI for the next hop in any protocol the panel can
+	// parse, so a chain is configured with the same link an operator would paste
+	// into a client app. Empty means the inbound egresses directly, which is
+	// exactly what every existing inbound already does.
+	//
+	// This is a SERVER-side secret: it carries the upstream hop's credentials,
+	// so it must never be exported into a subscription or a client link.
+	Egress string `json:"egress,omitempty"`
+
 	// Domain is the single source of truth an operator sets once; it CASCADES to
 	// the SNI, the transport Host / gRPC authority, the exported client address
 	// and certificate selection (see ApplyDomainCascade). Every derived field is
