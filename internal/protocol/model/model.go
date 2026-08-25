@@ -61,6 +61,11 @@ func AllProtocols() []Protocol {
 	return []Protocol{
 		ProtoVLESS, ProtoVMess, ProtoTrojan, ProtoShadowsocks, ProtoSOCKS,
 		ProtoHTTP, ProtoHysteria2, ProtoTUIC, ProtoAnyTLS, ProtoWireGuard,
+		// AmneziaWG was declared as a protocol and fully implemented (kernel
+		// mode, awg-quick) but was missing from this list, which is what the
+		// API's protocol metadata and the test matrices enumerate. It was
+		// therefore invisible to anything that asked "which protocols exist".
+		ProtoAmneziaWG,
 		ProtoShadowTLS, ProtoSSH, ProtoBrook, ProtoForgeDNS,
 	}
 }

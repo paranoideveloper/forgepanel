@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/forgepanel/forgepanel/internal/config"
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
 
 func testServer(t *testing.T) *Server {
@@ -63,8 +64,18 @@ func TestProtocolsEndpoint(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &protos); err != nil {
 		t.Fatal(err)
 	}
-	if len(protos) != 14 {
-		t.Fatalf("expected 14 protocols, got %d", len(protos))
+	// Derived from the model rather than hardcoded: this assertion previously
+	// pinned "14", which silently locked AmneziaWG out of the endpoint and made
+	// adding any protocol a test failure in an unrelated package.
+	if want := len(model.AllProtocols()); len(protos) != want {
+		t.Fatalf("expected %d protocols (model.AllProtocols), got %d", want, len(protos))
+	}
+	// Every advertised protocol must carry an engine, or the UI shows a picker
+	// entry that cannot be served.
+	for _, p := range protos {
+		if p.Engine == "" || p.Engine == model.EngineUnknown {
+			t.Errorf("protocol %q advertised with engine %q", p.Proto, p.Engine)
+		}
 	}
 }
 

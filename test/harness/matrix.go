@@ -9,7 +9,11 @@
 // one table rather than by reading the runner.
 package harness
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
+)
 
 // Expectation of a case: does traffic have to flow, or has to be refused.
 type Expectation string
@@ -44,20 +48,13 @@ type Case struct {
 // Engine is the core the panel routes this protocol to. It mirrors
 // render.EngineFor; the harness keeps its own copy so the results file can be
 // grouped by engine without importing the renderer.
-func (c Case) Engine() string {
-	switch c.Protocol {
-	case "vless", "vmess", "trojan", "shadowsocks", "socks", "http":
-		return "xray"
-	case "hysteria2", "tuic", "anytls", "shadowtls", "ssh", "wireguard":
-		return "sing-box"
-	case "brook":
-		return "brook"
-	case "amneziawg":
-		return "amneziawg"
-	default:
-		return "unknown"
-	}
-}
+// Engine reports which engine should serve this case's protocol.
+//
+// It delegates to model.EngineFor rather than keeping its own switch: this was
+// the third copy of that table, and like the other two it had drifted (it was
+// missing forgedns). A harness that disagrees with production about which
+// engine serves a protocol asserts the wrong thing and passes anyway.
+func (c Case) Engine() string { return model.EngineFor(model.Protocol(c.Protocol)) }
 
 // InboundPayload builds the model.Node JSON the panel's create endpoint takes.
 // Address is deliberately omitted: the panel defaults it to 0.0.0.0 and

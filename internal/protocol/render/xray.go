@@ -407,27 +407,12 @@ func defaultStrs(v, def []string) []string {
 // EngineFor reports which engine renders a given protocol. This drives the
 // supervisor's routing (spec §6): Xray for the classic V2Ray-family protocols,
 // sing-box for the QUIC/modern ones, Brook for Brook.
-func EngineFor(p model.Protocol) string {
-	switch p {
-	case model.ProtoVLESS, model.ProtoVMess, model.ProtoTrojan, model.ProtoShadowsocks,
-		model.ProtoSOCKS, model.ProtoHTTP:
-		return "xray"
-	// WireGuard runs as a sing-box wireguard ENDPOINT — the only correct form in
-	// sing-box ≥1.13 and a real, standard WG server (xray's WG inbound is not a
-	// standard-interoperable server; sing-box's old wg outbound was removed).
-	case model.ProtoHysteria2, model.ProtoTUIC, model.ProtoAnyTLS, model.ProtoShadowTLS, model.ProtoSSH, model.ProtoWireGuard:
-		return "sing-box"
-	case model.ProtoAmneziaWG:
-		// AmneziaWG runs in KERNEL mode via the amneziawg module + awg-quick, its
-		// own engine — never sing-box (that would be the userspace implementation).
-		return "amneziawg"
-	case model.ProtoBrook:
-		return "brook"
-	case model.ProtoForgeDNS:
-		return "forgedns"
-	default:
-		return "unknown"
-	}
-}
+// EngineFor reports which engine serves a protocol.
+//
+// The mapping itself lives in model.EngineFor — one authority, because this
+// function previously had two hand-maintained duplicates that had silently
+// drifted (see internal/protocol/model/engine.go). This wrapper stays because
+// it is the name the rest of the codebase and the docs already use.
+func EngineFor(p model.Protocol) string { return model.EngineFor(p) }
 
 var _ = strings.TrimSpace

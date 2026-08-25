@@ -21,6 +21,13 @@ func TestAllProtocolsEnumeration(t *testing.T) {
 	want := []Protocol{
 		ProtoVLESS, ProtoVMess, ProtoTrojan, ProtoShadowsocks, ProtoSOCKS,
 		ProtoHTTP, ProtoHysteria2, ProtoTUIC, ProtoAnyTLS, ProtoWireGuard,
+		// ProtoAmneziaWG belongs here: it is a declared protocol, it is fully
+		// implemented in kernel mode (amneziawg module + awg-quick), it has its
+		// own engine, and the README advertises it as supported. This list
+		// previously omitted it, which is precisely why it was invisible to the
+		// API's protocol metadata, the UI pickers and every test matrix that
+		// enumerates AllProtocols().
+		ProtoAmneziaWG,
 		ProtoShadowTLS, ProtoSSH, ProtoBrook, ProtoForgeDNS,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -36,10 +43,17 @@ func TestAllProtocolsEnumeration(t *testing.T) {
 			t.Errorf("protocol id %q is not lower-case; the value is a stable JSON/DB discriminator", p)
 		}
 	}
-	// AmneziaWG is a real protocol with its own engine but is deliberately not in
-	// the matrix list; guard the discrepancy so it cannot change silently.
-	if seen[ProtoAmneziaWG] {
-		t.Error("AllProtocols() now includes amneziawg; update EngineFor matrix tests too")
+	// AmneziaWG must be present. It was previously excluded here on the grounds
+	// that it did not belong in "the matrix list", which conflated two different
+	// questions: which protocols the panel SUPPORTS (this list — it feeds
+	// /api/protocols, the UI pickers and protocol switching) versus which
+	// protocols a config-generation matrix can exercise on a machine without the
+	// amneziawg kernel module. The exclusion answered the second question in the
+	// place that answers the first, so a fully implemented, README-advertised
+	// protocol was invisible to the API. Tests that need the old behaviour
+	// narrow the list themselves rather than the list narrowing reality.
+	if !seen[ProtoAmneziaWG] {
+		t.Error("AllProtocols() is missing amneziawg — it is implemented and advertised, so it must be enumerable")
 	}
 }
 

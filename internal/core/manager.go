@@ -337,23 +337,13 @@ func (c *Controller) singboxSpec() supervisor.EngineSpec {
 	}
 }
 
-func engineFor(n *model.Node) string {
-	// Mirror render.EngineFor without importing render here (avoids a cycle if
-	// render ever needs core). Kept in sync deliberately.
-	switch n.Protocol {
-	case model.ProtoVLESS, model.ProtoVMess, model.ProtoTrojan, model.ProtoShadowsocks,
-		model.ProtoSOCKS, model.ProtoHTTP:
-		return "xray"
-	case model.ProtoHysteria2, model.ProtoTUIC, model.ProtoAnyTLS, model.ProtoShadowTLS, model.ProtoSSH, model.ProtoWireGuard:
-		return "sing-box"
-	case model.ProtoBrook:
-		return "brook"
-	case model.ProtoAmneziaWG:
-		return "amneziawg"
-	default:
-		return ""
-	}
-}
+// engineFor reports which engine serves a node's protocol.
+//
+// This was a copy of render.EngineFor, justified by an import cycle that does
+// not exist (internal/core/engine already imports render). The copy had drifted:
+// it was missing ProtoForgeDNS entirely and returned "" rather than "unknown"
+// for anything unmapped. It now delegates to the single authority in model.
+func engineFor(n *model.Node) string { return model.EngineForNode(n) }
 
 func validateResult(err error) string {
 	if err != nil {
