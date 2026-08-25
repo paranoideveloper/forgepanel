@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Component } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { apiFetch, setAuthToken, getAuthToken } from '$lib/api';
+  import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toast, { showToast } from '$lib/components/Toast.svelte';
 
@@ -80,8 +80,11 @@
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
+      // Keep BOTH halves. The refresh token was already being received and
+      // thrown away, which is why an expired access token filled the panel with
+      // bare 401s that named no cause and offered no way back.
       token = res.access_token;
-      setAuthToken(token);
+      setSession(res.access_token, res.refresh_token);
       showToast('Signed in successfully', 'success');
       await loadTabModule('overview');
     } catch (err: any) {
@@ -91,9 +94,19 @@
 
   function handleLogout() {
     token = '';
-    setAuthToken('');
+    clearSession();
     showToast('Logged out', 'info');
   }
+
+  // When the refresh finally fails the session is genuinely over. Say so once,
+  // and drop to the sign-in screen — rather than letting every in-flight call
+  // surface its own unexplained failure.
+  onMount(() => onSessionExpired(() => {
+    if (!token) return;
+    token = '';
+    authError = 'Your session expired. Please sign in again.';
+    showToast('Session expired — please sign in again', 'info');
+  }));
 
   onMount(async () => {
     if (token) {

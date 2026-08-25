@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch, setAuthToken, getAuthToken } from '$lib/api';
+  import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import type { User, UserGroup, Node, SystemHealth } from '$lib/types';
 
   let token = $state(getAuthToken());
@@ -26,12 +26,14 @@
     if (e) e.preventDefault();
     authError = '';
     try {
-      const res = await apiFetch<{ access_token: string }>('/login', {
+      // Keep BOTH halves. Storing only the access token is why an expired
+      // session used to fill the panel with bare 401s and no way back.
+      const res = await apiFetch<{ access_token: string; refresh_token?: string }>('/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
       token = res.access_token;
-      setAuthToken(token);
+      setSession(res.access_token, res.refresh_token);
       await loadAll();
     } catch (err: any) {
       authError = err.message || 'Authentication failed';
@@ -47,7 +49,7 @@
     } catch (err: any) {
       if (err.status === 401) {
         token = '';
-        setAuthToken('');
+        clearSession();
       }
     }
   }

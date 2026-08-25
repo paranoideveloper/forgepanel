@@ -53,6 +53,12 @@ describe('ForgeDNSView Component', () => {
     };
     render(ForgeDNSView);
 
+    // Wait for the adapter list to land before submitting. The view defaults
+    // selectedAdapter from the first adapter, so clicking earlier posts an empty
+    // adapter — the test was passing on microtask timing rather than on the
+    // component being ready.
+    await screen.findByRole('option', { name: 'CottenDNS (A)' });
+
     await fireEvent.input(screen.getByPlaceholderText('Tunnel domain (e.g. dns.example.com)'), { target: { value: 'new.example.com' } });
     await fireEvent.click(screen.getByText('Create & Activate'));
 

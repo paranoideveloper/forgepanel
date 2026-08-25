@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiFetch, setAuthToken, getAuthToken } from '$lib/api';
+  import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import ForgeDNSView from '$lib/views/ForgeDNSView.svelte';
 
   let token = $state(getAuthToken());
@@ -11,12 +11,14 @@
     if (e) e.preventDefault();
     loginErr = '';
     try {
-      const res = await apiFetch<{ access_token: string }>('/login', {
+      // Keep BOTH halves. Storing only the access token is why an expired
+      // session used to fill the panel with bare 401s and no way back.
+      const res = await apiFetch<{ access_token: string; refresh_token?: string }>('/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
       token = res.access_token;
-      setAuthToken(token);
+      setSession(res.access_token, res.refresh_token);
     } catch (err: any) {
       loginErr = err.message || 'Login failed';
     }
@@ -24,7 +26,7 @@
 
   function signOut() {
     token = '';
-    setAuthToken('');
+    clearSession();
   }
 </script>
 
