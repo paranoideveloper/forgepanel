@@ -177,6 +177,13 @@ type Inbound struct {
 	// level of undo can restore it. Empty means there is nothing to undo.
 	PrevNodeJSON string `gorm:"type:text" json:"-"`
 
+	// ImportSource identifies where this row came from, as "<panel>:<row id>".
+	//
+	// It is what makes a re-import idempotent under renaming: matching on the
+	// remark means an inbound renamed on either side is imported again as a
+	// duplicate, and the operator ends up with two of everything they touched.
+	ImportSource string `gorm:"index;size:128" json:"import_source,omitempty"`
+
 	// NotServingReason is why this inbound is not in the running configuration,
 	// or empty when it is serving normally.
 	//

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,9 +28,10 @@ import (
 // fresh import from a repeat.
 func (s *Server) existingState() migrate.Existing {
 	ex := migrate.Existing{
-		PortsInUse: map[int]string{},
-		Remarks:    map[string]bool{},
-		Usernames:  map[string]bool{},
+		PortsInUse:      map[int]string{},
+		ImportedSources: map[string]string{},
+		Remarks:         map[string]bool{},
+		Usernames:       map[string]bool{},
 	}
 	if s.db == nil {
 		return ex
@@ -36,6 +39,9 @@ func (s *Server) existingState() migrate.Existing {
 	if ins, err := s.db.ListInbounds(); err == nil {
 		for _, in := range ins {
 			ex.Remarks[in.Remark] = true
+			if in.ImportSource != "" {
+				ex.ImportedSources[in.ImportSource] = in.Remark
+			}
 			if in.Port > 0 {
 				ex.PortsInUse[in.Port] = in.Remark
 			}
@@ -54,6 +60,10 @@ func (s *Server) existingState() migrate.Existing {
 func (s *Server) planFromRequest(c *gin.Context) (*migrate.Plan, bool) {
 	var req struct {
 		Path string `json:"path"`
+		// Panel names the source, for provenance. Defaulted from the file name
+		// rather than required: making an operator invent a label to run a
+		// migration is friction for no benefit in the common single-source case.
+		Panel string `json:"panel"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -77,7 +87,14 @@ func (s *Server) planFromRequest(c *gin.Context) (*migrate.Plan, bool) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return nil, false
 	}
-	return migrate.BuildPlan(res, s.existingState()), true
+	// The source panel names the provenance keys, so importing from two different
+	// panels that both number their inbounds from one does not make the second
+	// one a no-op.
+	panel := strings.TrimSpace(req.Panel)
+	if panel == "" {
+		panel = defaultSourcePanel(req.Path)
+	}
+	return migrate.BuildPlanFrom(res, s.existingState(), panel), true
 }
 
 // handleMigratePreview is the dry run. It writes nothing.
@@ -106,7 +123,7 @@ func (s *Server) handleMigrateApply(c *gin.Context) {
 		if pi.Action != migrate.ActionCreate || pi.Node == nil {
 			continue
 		}
-		item := store.ImportInbound{Node: pi.Node}
+		item := store.ImportInbound{Node: pi.Node, SourceKey: pi.SourceKey}
 		for _, pu := range pi.Users {
 			if pu.Action != migrate.ActionCreate {
 				continue
@@ -154,4 +171,13 @@ func (s *Server) handleMigrateApply(c *gin.Context) {
 
 func formatImportSummary(inbounds, users int) string {
 	return fmt.Sprintf("imported %d inbound(s) and %d user(s)", inbounds, users)
+}
+
+// defaultSourcePanel derives a provenance label from the database path.
+func defaultSourcePanel(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if base == "" || base == "." {
+		return "foreign"
+	}
+	return base
 }

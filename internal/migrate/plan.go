@@ -43,6 +43,9 @@ type PlannedInbound struct {
 	Reason   string        `json:"reason,omitempty"`
 	Users    []PlannedUser `json:"users"`
 	Node     *model.Node   `json:"-"`
+	// SourceKey is the provenance stamped onto the row if it is created, so a
+	// later re-import recognises it even after a rename on either side.
+	SourceKey string `json:"source_key,omitempty"`
 }
 
 // PlannedUser is one client the import considered.
@@ -74,16 +77,37 @@ type Existing struct {
 	// PortsInUse maps a port to the remark of whatever holds it, so a conflict
 	// can name the obstacle rather than just the number.
 	PortsInUse map[int]string
-	// Remarks and Usernames are the identity checks for "already imported".
+	// ImportedSources maps an import-source key to the remark of the row that
+	// carries it. This is the RELIABLE identity check: it survives a rename on
+	// either side, which matching on the remark does not.
+	ImportedSources map[string]string
+	// Remarks and Usernames are the fallback identity checks, for rows that
+	// predate provenance tracking or were created by hand.
 	Remarks   map[string]bool
 	Usernames map[string]bool
 }
 
+// SourceKey identifies a row in a foreign panel.
+//
+// The panel name is part of it because two different source panels can both have
+// an inbound with id 3, and treating those as the same row would make importing
+// the second one a no-op.
+func SourceKey(panel string, id uint) string {
+	return fmt.Sprintf("%s:%d", panel, id)
+}
+
 // BuildPlan decides what would happen, without touching anything.
-func BuildPlan(res *Result, ex Existing) *Plan {
+func BuildPlan(res *Result, ex Existing) *Plan { return BuildPlanFrom(res, ex, "foreign") }
+
+// BuildPlanFrom is BuildPlan with the source panel named, so provenance keys can
+// distinguish two panels that both number their inbounds from one.
+func BuildPlanFrom(res *Result, ex Existing, sourcePanel string) *Plan {
 	p := &Plan{Warnings: append([]string(nil), res.Warnings...)}
 	if ex.PortsInUse == nil {
 		ex.PortsInUse = map[int]string{}
+	}
+	if ex.ImportedSources == nil {
+		ex.ImportedSources = map[string]string{}
 	}
 	if ex.Remarks == nil {
 		ex.Remarks = map[string]bool{}
@@ -102,11 +126,21 @@ func BuildPlan(res *Result, ex Existing) *Plan {
 		if imp.Node == nil {
 			continue
 		}
+		key := ""
+		if imp.SourceID != 0 {
+			key = SourceKey(sourcePanel, imp.SourceID)
+		}
 		pi := PlannedInbound{
 			Remark: imp.Node.Remark, Protocol: string(imp.Node.Protocol),
 			Port: imp.Node.Port, Action: ActionCreate, Node: imp.Node,
+			SourceKey: key,
 		}
 		switch {
+		case key != "" && ex.ImportedSources[key] != "":
+			// Already imported from this exact source row. Recognised even if
+			// either side has been renamed since, which is the whole point.
+			pi.Action = ActionSkip
+			pi.Reason = fmt.Sprintf("already imported as %q", ex.ImportedSources[key])
 		case ex.Remarks[imp.Node.Remark]:
 			pi.Action = ActionSkip
 			pi.Reason = "an inbound with this name already exists; importing again would duplicate it"

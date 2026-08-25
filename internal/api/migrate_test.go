@@ -261,3 +261,76 @@ func TestMigrateIsOwnerOnly(t *testing.T) {
 	}
 	_ = os.Remove("/tmp/x")
 }
+
+func TestARenamedInboundIsNotImportedTwice(t *testing.T) {
+	s, token := adminAPI(t)
+	path := foreignPanelDB(t,
+		vlessRow("original-name", 10443, client("ivy@panel", "b831381d-6324-4d53-ad4f-8cda48b30811")))
+	body := fmt.Sprintf(`{"path":%q}`, path)
+
+	if code, b := doPOST(t, s, "/api/admin/migrate/apply", token, body); code != 200 {
+		t.Fatalf("first apply: %d %s", code, b)
+	}
+	ins, _ := s.db.ListInbounds()
+	if len(ins) != 1 {
+		t.Fatalf("setup: %d inbounds", len(ins))
+	}
+	// The operator renames it AND moves it to a different port — both ordinary
+	// things to do after a migration.
+	//
+	// Both matter for this test. Changing only the name leaves the original port
+	// occupied, so a re-import is blocked by the port conflict instead and the
+	// test passes without provenance doing anything: an earlier version of this
+	// test did exactly that and PASSED with provenance matching disabled.
+	if err := s.db.UpdateInboundFields(ins[0].ID, map[string]any{
+		"remark": "renamed-by-operator", "port": 20443,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, b := doPOST(t, s, "/api/admin/migrate/apply", token, body); code != 200 {
+		t.Fatalf("second apply: %d %s", code, b)
+	}
+	ins, _ = s.db.ListInbounds()
+	// Matching on the remark would create a duplicate here, and the operator
+	// ends up with two of everything they touched.
+	if len(ins) != 1 {
+		t.Fatalf("a renamed inbound was imported again: %d inbounds", len(ins))
+	}
+}
+
+func TestTwoSourcePanelsWithTheSameRowIdsBothImport(t *testing.T) {
+	s, token := adminAPI(t)
+	a := foreignPanelDB(t, vlessRow("from-a", 10443, client("j@panel", "b831381d-6324-4d53-ad4f-8cda48b30811")))
+	b := foreignPanelDB(t, vlessRow("from-b", 10444, client("k@panel", "11111111-2222-4333-8444-555555555555")))
+
+	// Both databases number their first inbound 1. Keying provenance on the row
+	// id alone would make the second import a no-op.
+	if code, r := doPOST(t, s, "/api/admin/migrate/apply", token,
+		fmt.Sprintf(`{"path":%q,"panel":"panel-a"}`, a)); code != 200 {
+		t.Fatalf("%d: %s", code, r)
+	}
+	if code, r := doPOST(t, s, "/api/admin/migrate/apply", token,
+		fmt.Sprintf(`{"path":%q,"panel":"panel-b"}`, b)); code != 200 {
+		t.Fatalf("%d: %s", code, r)
+	}
+	ins, _ := s.db.ListInbounds()
+	if len(ins) != 2 {
+		t.Fatalf("inbounds = %d, want one from each source panel", len(ins))
+	}
+}
+
+func TestProvenanceIsRecordedOnTheRow(t *testing.T) {
+	s, token := adminAPI(t)
+	path := foreignPanelDB(t, vlessRow("p", 10443, client("l@panel", "b831381d-6324-4d53-ad4f-8cda48b30811")))
+	if code, b := doPOST(t, s, "/api/admin/migrate/apply", token,
+		fmt.Sprintf(`{"path":%q,"panel":"old-panel"}`, path)); code != 200 {
+		t.Fatalf("%d: %s", code, b)
+	}
+	ins, _ := s.db.ListInbounds()
+	// Without this the row cannot be recognised later, and "where did this
+	// inbound come from" has no answer at all.
+	if len(ins) != 1 || !strings.HasPrefix(ins[0].ImportSource, "old-panel:") {
+		t.Fatalf("import source = %q, want old-panel:<id>", ins[0].ImportSource)
+	}
+}

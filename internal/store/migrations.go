@@ -40,6 +40,7 @@ const (
 	migVTrafficSplit  uint64 = 10
 	migVAPITokens     uint64 = 11
 	migVProfiles      uint64 = 12
+	migVImportSource  uint64 = 13
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -191,6 +192,17 @@ func migrations() []migrate.Migration {
 			// One protocol definition deployed to many nodes.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Profile{}, &ProfileBinding{}})
+				return err
+			},
+		},
+		{
+			Version: migVImportSource,
+			Name:    "inbound_import_provenance",
+			Rollback: "safe to drop. The column only records where a row was imported from; losing " +
+				"it makes a future re-import fall back to matching on the remark, which duplicates " +
+				"anything that has been renamed since.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Inbound{}})
 				return err
 			},
 		},

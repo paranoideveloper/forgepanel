@@ -20,6 +20,13 @@ import (
 type ImportedInbound struct {
 	Node  *model.Node    `json:"node"`
 	Users []ImportedUser `json:"users"`
+	// SourceID is the row id this inbound had in the foreign panel.
+	//
+	// Matching a re-import on the REMARK was the obvious approach and is wrong:
+	// rename an inbound on either side and the next import creates a duplicate
+	// rather than recognising it. The source id does not change when a human
+	// edits a label.
+	SourceID uint `json:"source_id"`
 }
 
 // ImportedUser is a client lifted out of a foreign inbound.
@@ -65,7 +72,7 @@ func ImportPanelDB(dbPath string) (*Result, error) {
 		if n == nil {
 			continue
 		}
-		res.Inbounds = append(res.Inbounds, ImportedInbound{Node: n, Users: users})
+		res.Inbounds = append(res.Inbounds, ImportedInbound{Node: n, Users: users, SourceID: r.ID})
 	}
 	if len(res.Inbounds) == 0 {
 		res.Warnings = append(res.Warnings, "no importable inbounds found")

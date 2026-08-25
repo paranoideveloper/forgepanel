@@ -23,6 +23,9 @@ import (
 type ImportInbound struct {
 	Node  *model.Node
 	Users []ImportUser
+	// SourceKey records where this row came from, so a later re-import
+	// recognises it rather than creating a second copy.
+	SourceKey string
 }
 
 // ImportUser is one account to create.
@@ -60,6 +63,7 @@ func (s *Store) ApplyImport(items []ImportInbound) (*ImportOutcome, error) {
 			}
 			var in Inbound
 			in.Enabled = true
+			in.ImportSource = item.SourceKey
 			if err := in.SetNode(item.Node); err != nil {
 				return fmt.Errorf("import %q: %w", item.Node.Remark, err)
 			}
