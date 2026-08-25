@@ -34,6 +34,9 @@ func TestNodeAgentHeartbeatAndApplyConfig(t *testing.T) {
 		panel:   server.URL,
 		token:   "test-token",
 		dataDir: dir,
+		// No binary: the config is still written and validated-by-skipping, which
+		// is the state of a node whose core has not downloaded yet.
+		engines: testEngines(""),
 	}
 
 	if err := agent.register(); err != nil {
@@ -43,24 +46,24 @@ func TestNodeAgentHeartbeatAndApplyConfig(t *testing.T) {
 		t.Fatal("expected agent to register with panel")
 	}
 
-	cfg, err := agent.heartbeat()
+	cfgs, err := agent.heartbeat()
 	if err != nil {
 		t.Fatalf("agent.heartbeat failed: %v", err)
 	}
-	if cfg != `{"inbounds":[]}` {
-		t.Fatalf("expected xray config, got %q", cfg)
+	if cfgs["xray"] != `{"inbounds":[]}` {
+		t.Fatalf("expected xray config, got %q", cfgs["xray"])
 	}
 
 	// Test config application
-	agent.applyConfig(cfg)
+	agent.applyConfigs(cfgs)
 
 	writtenConfigPath := filepath.Join(dir, "node-xray.json")
 	data, err := os.ReadFile(writtenConfigPath)
 	if err != nil {
 		t.Fatalf("failed to read written config: %v", err)
 	}
-	if string(data) != cfg {
-		t.Fatalf("expected written config %q, got %q", cfg, string(data))
+	if string(data) != cfgs["xray"] {
+		t.Fatalf("expected written config %q, got %q", cfgs["xray"], string(data))
 	}
 }
 
@@ -78,19 +81,22 @@ func TestNodeAgentRejectsInvalidConfig(t *testing.T) {
 		panel:   "http://localhost:8080",
 		token:   "test-token",
 		dataDir: dir,
-		xrayBin: dummyBin,
+		engines: testEngines(dummyBin),
 	}
 
 	// Apply invalid config
-	agent.applyConfig("bad-config")
+	agent.applyConfigs(map[string]string{"xray": "bad-config"})
 
 	writtenConfigPath := filepath.Join(dir, "node-xray.json")
 	if _, err := os.Stat(writtenConfigPath); !os.IsNotExist(err) {
 		t.Fatalf("expected node-xray.json NOT to exist after invalid config rejection")
 	}
 
-	if agent.lastCfg != "" {
-		t.Fatalf("expected lastCfg to be empty, got %q", agent.lastCfg)
+	// A rejected config must not be recorded as applied, or the next heartbeat
+	// carrying the SAME bad config would be skipped as unchanged and the node
+	// would sit on the old one forever without retrying.
+	if got := agent.engines["xray"].lastCfg; got != "" {
+		t.Fatalf("a rejected config was recorded as applied: %q", got)
 	}
 }
 
@@ -148,7 +154,7 @@ func TestNodeAgentStepAndProcessLifecycle(t *testing.T) {
 		panel:   server.URL,
 		token:   "test-token",
 		dataDir: dir,
-		xrayBin: dummyBin,
+		engines: testEngines(dummyBin),
 	}
 
 	agent.step()
@@ -157,5 +163,15 @@ func TestNodeAgentStepAndProcessLifecycle(t *testing.T) {
 	}
 
 	// Re-applying same config should skip restart
-	agent.applyConfig(`{"inbounds":[]}`)
+	agent.applyConfigs(map[string]string{"xray": `{"inbounds":[]}`})
+}
+
+// testEngines builds the supervised-engine map with a stub binary, mirroring
+// what the constructor does without downloading a real core.
+func testEngines(bin string) map[string]*engineProc {
+	out := map[string]*engineProc{}
+	for _, spec := range engineSpecs() {
+		out[spec.name] = &engineProc{spec: spec, bin: bin}
+	}
+	return out
 }

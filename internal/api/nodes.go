@@ -155,19 +155,30 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
 	s.accountNodeTraffic(n.ID, req.Traffic, req.TrafficCumulative)
-	// Return the current xray config bundle so the node runs the same inbounds.
+	// Return the current config bundle so the node runs the same inbounds.
+	//
+	// BOTH engines. The bundle has always carried a sing-box config alongside the
+	// xray one and the heartbeat sent only the xray half, so every hysteria2,
+	// tuic, anytls, shadowtls and wireguard inbound simply vanished the moment it
+	// was assigned to a remote node — the panel showed it, the node never served
+	// it, and nothing said why.
+	//
+	// singbox_config is a NEW field rather than a change to the existing one, so
+	// an agent that predates it ignores what it does not understand and keeps
+	// serving xray exactly as before. Same reasoning as traffic_cumulative above.
+	//
 	// A control-plane-only panel has no local engine; the heartbeat still
 	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
-	var xrayCfg string
+	var xrayCfg, singboxCfg string
 	specs := s.enabledInboundSpecsForNodeAddress(n.Address)
 	if b, err := engine.BuildMulti(specs, 10085, "", ""); err == nil && b != nil {
-		xrayCfg = string(b.Xray)
+		xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
 	} else if s.engine != nil {
 		if b := s.engine.LastBundle(); b != nil {
-			xrayCfg = string(b.Xray)
+			xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
 		}
 	}
-	c.JSON(200, gin.H{"xray_config": xrayCfg})
+	c.JSON(200, gin.H{"xray_config": xrayCfg, "singbox_config": singboxCfg})
 }
 
 // handleDeleteNode removes a node.
@@ -437,4 +448,17 @@ func (s *Server) accountNodeTraffic(nodeID uint, counters map[string]int64, cumu
 	if changed {
 		s.startBackground(s.reloadEngines)
 	}
+}
+
+// singboxIfServing returns the sing-box config only when it actually has
+// inbounds to serve.
+//
+// BuildMulti always emits a syntactically valid sing-box document, even an empty
+// one. Sending that to a node would have it download the binary and run a core
+// that listens on nothing — cost and a process to supervise, for no traffic.
+func singboxIfServing(b *engine.Bundle) string {
+	if b == nil || b.SingboxN == 0 {
+		return ""
+	}
+	return string(b.Singbox)
 }

@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -32,19 +31,17 @@ type NodeAgent struct {
 	token string
 	// pin is the panel's certificate SHA-256, hex. Empty means "use the system
 	// trust store", which is correct once the panel has a real certificate.
-	pin       string
-	client    *http.Client
-	dataDir   string
-	binMgr    *binmgr.Manager
-	xrayBin   string
-	lastCfg   string
-	mu        sync.Mutex
-	activeCmd *exec.Cmd
-	// coreStartedAt is when the supervised core last started, so the heartbeat
-	// can report real uptime. A core that is crash-looping reports a
-	// permanently near-zero value, which is the only way the panel can tell a
-	// node that is "connected but serving nothing" from a healthy one.
-	coreStartedAt time.Time
+	pin     string
+	client  *http.Client
+	dataDir string
+	binMgr  *binmgr.Manager
+	mu      sync.Mutex
+	// engines is every core this node can supervise, keyed by name.
+	//
+	// A map rather than one xray field: the node ran exactly one process, so
+	// every hysteria2, tuic, anytls, shadowtls and wireguard inbound vanished
+	// the moment it was assigned to a remote node.
+	engines map[string]*engineProc
 }
 
 // stateDir is the filesystem the node's own data lives on, and the one whose
@@ -76,19 +73,24 @@ func main() {
 	_ = os.MkdirAll(dataDir, 0o700)
 
 	bm := binmgr.New(dataDir)
-	xrayPath, err := bm.Ensure(binmgr.EngineXray)
-	if err != nil {
-		// Fallback to path lookup if binmgr download fails in offline test environments
-		xrayPath, _ = exec.LookPath("xray")
-	}
-
 	agent := &NodeAgent{
 		panel:   panel,
 		token:   token,
 		pin:     pin,
 		dataDir: dataDir,
 		binMgr:  bm,
-		xrayBin: xrayPath,
+		engines: map[string]*engineProc{},
+	}
+	for _, spec := range engineSpecs() {
+		// Resolved LAZILY per engine, and a failure is not fatal: a node that
+		// serves only xray protocols must not refuse to start because the
+		// sing-box download failed, and an offline test environment must still
+		// be able to run the agent.
+		bin, err := bm.Ensure(spec.engine)
+		if err != nil {
+			bin, _ = exec.LookPath(spec.name)
+		}
+		agent.engines[spec.name] = &engineProc{spec: spec, bin: bin}
 	}
 
 	if err := agent.register(); err != nil {
@@ -113,74 +115,26 @@ func nodeVersionRequested(args []string) bool {
 }
 
 func (a *NodeAgent) step() {
-	cfg, err := a.heartbeat()
+	cfgs, err := a.heartbeat()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "forgenode: heartbeat error:", err)
 		return
 	}
-	if cfg != "" && cfg != a.lastCfg {
-		a.applyConfig(cfg)
-	}
+	a.applyConfigs(cfgs)
 }
 
-func (a *NodeAgent) applyConfig(cfg string) {
+// applyConfigs hands each engine its share of the panel's bundle.
+//
+// An engine whose config is EMPTY is stopped rather than skipped: a core still
+// serving inbounds the panel has removed is exactly the drift this exists to
+// prevent. The one exception is a panel that sent nothing at all — see
+// heartbeat's note on why that is not the same as "serve nothing".
+func (a *NodeAgent) applyConfigs(cfgs map[string]string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
-	tmpConfigPath := filepath.Join(a.dataDir, "node-xray.tmp.json")
-	configPath := filepath.Join(a.dataDir, "node-xray.json")
-
-	if err := os.WriteFile(tmpConfigPath, []byte(cfg), 0o600); err != nil {
-		fmt.Fprintln(os.Stderr, "forgenode: failed to write temp config:", err)
-		return
+	for name, e := range a.engines {
+		e.apply(a.dataDir, cfgs[name])
 	}
-
-	if a.xrayBin != "" {
-		// Validate config before touching active process or committing config
-		testCmd := exec.Command(a.xrayBin, "run", "-test", "-config", tmpConfigPath)
-		if out, err := testCmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "forgenode: invalid xray config rejected: %v: %s\n", err, string(out))
-			_ = os.Remove(tmpConfigPath)
-			return
-		}
-	}
-
-	if err := os.Rename(tmpConfigPath, configPath); err != nil {
-		fmt.Fprintln(os.Stderr, "forgenode: failed to commit config:", err)
-		_ = os.Remove(tmpConfigPath)
-		return
-	}
-
-	a.lastCfg = cfg
-
-	// Stop existing process if running
-	if a.activeCmd != nil && a.activeCmd.Process != nil {
-		_ = a.activeCmd.Process.Kill()
-		_ = a.activeCmd.Wait()
-		a.activeCmd = nil
-	}
-
-	if a.xrayBin == "" {
-		fmt.Println("forgenode: config updated (xray binary not available to launch)")
-		return
-	}
-
-	// Launch xray core with validated config
-	cmd := exec.Command(a.xrayBin, "run", "-config", configPath)
-	// Stamped on every (re)start so the heartbeat can report how long the core
-	// has actually been up. A core that is quietly crash-looping shows a
-	// permanently near-zero uptime, which is the only signal the panel gets that
-	// the node is "connected" but serving nothing.
-	a.coreStartedAt = time.Now()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "forgenode: failed to start xray:", err)
-		return
-	}
-
-	a.activeCmd = cmd
-	fmt.Println("forgenode: successfully started xray engine with new config")
 }
 
 func (a *NodeAgent) register() error {
@@ -188,14 +142,24 @@ func (a *NodeAgent) register() error {
 	return a.post("/api/node/register", body, nil)
 }
 
-func (a *NodeAgent) heartbeat() (string, error) {
+func (a *NodeAgent) heartbeat() (map[string]string, error) {
 	cpu, mem := systemMetrics()
 	diskUsed, diskTotal := diskUsage(a.stateDir())
 	conns := tcpConnections()
+	// The uptime of the longest-running supervised core. With more than one
+	// engine there is no single "the core" any more, and reporting the newest
+	// would make an ordinary sing-box restart look like the whole node had just
+	// come back.
 	coreUptime := 0
-	if !a.coreStartedAt.IsZero() && a.activeCmd != nil {
-		coreUptime = int(time.Since(a.coreStartedAt).Seconds())
+	a.mu.Lock()
+	for _, e := range a.engines {
+		if e.running() && !e.startedAt.IsZero() {
+			if up := int(time.Since(e.startedAt).Seconds()); up > coreUptime {
+				coreUptime = up
+			}
+		}
 	}
+	a.mu.Unlock()
 	// Report CUMULATIVE counters and never reset them.
 	//
 	// This agent used to post deltas and reset after a successful response, and
@@ -221,11 +185,18 @@ func (a *NodeAgent) heartbeat() (string, error) {
 	})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
+		// A panel that predates multi-core omits this entirely, which reads as
+		// "sing-box has nothing to serve here" — correct, because such a panel
+		// never assigned sing-box protocols to a node in the first place.
+		SingboxConfig string `json:"singbox_config"`
 	}
 	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
-		return "", err
+		return nil, err
 	}
-	return resp.XrayConfig, nil
+	return map[string]string{
+		"xray":     resp.XrayConfig,
+		"sing-box": resp.SingboxConfig,
+	}, nil
 }
 
 // httpClient returns the client used for every panel call.
@@ -310,7 +281,13 @@ const nodeXrayAPIPort = 10085
 // slice of traffic, so the counters are only reset once the post succeeds —
 // see heartbeat().
 func (a *NodeAgent) collectTraffic(reset bool) map[string]int64 {
-	if a.xrayBin == "" {
+	// Xray only. sing-box's per-user counters come from a different API on a
+	// different port, and reporting them requires the v2ray_api build the panel
+	// now produces — so a node running sing-box protocols currently serves them
+	// unmetered rather than mis-metered. Stated here rather than left to be
+	// discovered from a usage figure that never moves.
+	bin := a.engineBin("xray")
+	if bin == "" {
 		return nil
 	}
 	args := []string{"api", "statsquery",
@@ -318,7 +295,7 @@ func (a *NodeAgent) collectTraffic(reset bool) map[string]int64 {
 	if reset {
 		args = append(args, "-reset")
 	}
-	out, err := exec.Command(a.xrayBin, args...).CombinedOutput()
+	out, err := exec.Command(bin, args...).CombinedOutput()
 	if err != nil {
 		return nil
 	}
@@ -446,4 +423,15 @@ func systemMetrics() (cpuPct float64, memMB int) {
 		}
 	}
 	return cpuPct, memMB
+}
+
+// engineBin returns a supervised engine's binary path, or "" when it is not
+// available on this node.
+func (a *NodeAgent) engineBin(name string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if e, ok := a.engines[name]; ok {
+		return e.bin
+	}
+	return ""
 }
