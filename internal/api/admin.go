@@ -213,6 +213,13 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	// A hop range that swallows another inbound's port silently reroutes THAT
+	// inbound's traffic here. The operator is looking at this one; the one that
+	// breaks is a different one, with no error anywhere.
+	if msg := s.portHopConflict(&n, 0); msg != "" {
+		c.JSON(409, gin.H{"error": msg, "code": "port_hop_conflict"})
+		return
+	}
 	in, err := s.db.CreateInbound(&n)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -239,6 +246,12 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 	s.applyDomain(&n) // inherit default domain + cascade
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	// Excluding this inbound's own id, or widening a range on an existing
+	// inbound would report it as conflicting with itself.
+	if msg := s.portHopConflict(&n, id); msg != "" {
+		c.JSON(409, gin.H{"error": msg, "code": "port_hop_conflict"})
 		return
 	}
 
