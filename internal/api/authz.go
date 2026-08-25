@@ -162,6 +162,13 @@ var adminAuthzRules = []authzRule{
 	// rather than tenant management.
 	{path: "/api/admin/profiles", roles: ownerAdmin},
 
+	// --- metrics ----------------------------------------------------------
+	//
+	// readDash: a scraper needs no more than a viewer, and the observability
+	// token scope maps to exactly that. The numbers still name every node and
+	// count every user, which is why this is not public.
+	{methods: get, path: "/api/admin/metrics", exact: true, roles: readDash},
+
 	// --- API tokens -------------------------------------------------------
 	//
 	// A reseller automating their own customer management is the ordinary case,

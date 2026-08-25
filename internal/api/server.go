@@ -600,6 +600,13 @@ func (s *Server) routes() {
 			// automating their own customer management is the ordinary case, and
 			// a token can never exceed the authority of the account that minted
 			// it (see clampRole).
+			// Prometheus scrape. Under /admin so it goes through the ordinary
+			// token path: an observability-scoped API token — the narrowest the
+			// panel issues — is exactly what a scraper should hold, and an open
+			// /metrics tells anyone who finds it how large the deployment is and
+			// when its nodes are struggling.
+			admin.GET("/metrics", s.handleMetrics)
+
 			admin.GET("/tokens", s.handleListAPITokens)
 			admin.POST("/tokens", s.handleCreateAPIToken)
 			admin.DELETE("/tokens/:id", s.handleRevokeAPIToken)
