@@ -162,7 +162,11 @@ func (s *Server) handleMe(c *gin.Context) {
 // --- inbounds -------------------------------------------------------------
 
 func (s *Server) handleListInbounds(c *gin.Context) {
-	ins, err := s.db.ListInbounds()
+	// Page the rows BEFORE the per-inbound work below: reachability probes the
+	// firewall per port, so transforming the whole table and then slicing it
+	// would keep the cost pagination is meant to remove.
+	q := parseListQuery(c)
+	ins, total, err := s.db.ListInboundsPage(q)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -174,7 +178,11 @@ func (s *Server) handleListInbounds(c *gin.Context) {
 		out = append(out, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port,
 			"enabled": in.Enabled, "node": n, "reachable": reach(in.Port)})
 	}
-	c.JSON(200, out)
+	if !q.Paged() {
+		c.JSON(200, out)
+		return
+	}
+	c.JSON(200, listPage{Items: out, Total: total, Limit: effectiveLimit(q), Offset: q.Offset})
 }
 
 func (s *Server) handleCreateInbound(c *gin.Context) {
@@ -429,12 +437,21 @@ func (s *Server) handleListUsers(c *gin.Context) {
 	if claims.Role == string(store.RoleReseller) {
 		owner = claims.AdminID // resellers see only their own users (spec §4)
 	}
-	us, err := s.db.ListUsers(owner)
+	// Pagination is opt-in: with no paging parameters this returns the bare
+	// array it always has, so every existing caller is unaffected. A request
+	// that asks for a page gets the total with it, because "50 shown" says
+	// nothing about how many there are.
+	q := parseListQuery(c)
+	us, total, err := s.db.ListUsersPage(owner, q)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, us)
+	if !q.Paged() {
+		c.JSON(200, us)
+		return
+	}
+	c.JSON(200, listPage{Items: us, Total: total, Limit: effectiveLimit(q), Offset: q.Offset})
 }
 
 // handleQuota reports the current admin's reseller limits and remaining headroom

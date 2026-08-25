@@ -21,12 +21,17 @@ import (
 
 // handleListNodes lists remote nodes (spec §10).
 func (s *Server) handleListNodes(c *gin.Context) {
-	ns, err := s.db.ListNodes()
+	q := parseListQuery(c)
+	ns, total, err := s.db.ListNodesPage(q)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, ns)
+	if !q.Paged() {
+		c.JSON(200, ns)
+		return
+	}
+	c.JSON(200, listPage{Items: ns, Total: total, Limit: effectiveLimit(q), Offset: q.Offset})
 }
 
 // handleEnrollNode creates a node with a one-time enroll token and returns the
