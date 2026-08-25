@@ -144,7 +144,19 @@ func (s *Server) handleRefresh(c *gin.Context) {
 // handleMe returns the authenticated admin's claims.
 func (s *Server) handleMe(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
-	c.JSON(200, gin.H{"admin_id": claims.AdminID, "username": claims.Username, "role": claims.Role})
+	out := gin.H{"admin_id": claims.AdminID, "username": claims.Username, "role": claims.Role}
+	// two_factor_enabled is what the panel's security card binds its state to.
+	// It was never returned, so the card read `undefined` and showed 2FA as OFF
+	// for an admin who had it ON — offering "Enable" to someone already enrolled
+	// and hiding the fact that the account was protected at all.
+	// recovery_codes_remaining goes with it: a single-use code count that only
+	// ever falls is the one number that tells an operator to regenerate BEFORE
+	// running out and losing the account.
+	if admin, err := s.db.AdminByID(claims.AdminID); err == nil {
+		out["two_factor_enabled"] = admin.TOTPSecret != ""
+		out["recovery_codes_remaining"] = recoveryRemaining(admin.RecoveryCodes)
+	}
+	c.JSON(200, out)
 }
 
 // --- inbounds -------------------------------------------------------------

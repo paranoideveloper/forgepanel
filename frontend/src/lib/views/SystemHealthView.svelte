@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch, setAuthToken } from '$lib/api';
   import type { HealthDetail, TwoFASetup, AuditLog } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
@@ -27,6 +27,18 @@
   let verifyCode = $state('');
 
   // Change Password state
+  // 2FA state. recoveryCodes holds plaintext that exists ONLY in this response;
+  // it is never persisted and is cleared when the modal closes.
+  let recoveryCodes = $state<string[]>([]);
+  let recoveryModalOpen = $state(false);
+  let recoveryRemaining = $state<number | null>(null);
+  let disableOpen = $state(false);
+  let disableCode = $state('');
+  let disableErr = $state('');
+  let regenOpen = $state(false);
+  let regenCode = $state('');
+  let regenErr = $state('');
+
   let oldPass = $state('');
   let newPass = $state('');
   let passErr = $state('');
@@ -41,8 +53,9 @@
       healthDetail = await apiFetch<HealthDetail>('/admin/health/detail');
       await runDoctor();
       auditLogs = await apiFetch<AuditLog[]>('/admin/stats');
-      const user = await apiFetch<{ two_factor_enabled?: boolean }>('/admin/me');
+      const user = await apiFetch<{ two_factor_enabled?: boolean; recovery_codes_remaining?: number }>('/admin/me');
       twoFAEnabled = !!user.two_factor_enabled;
+      recoveryRemaining = user.recovery_codes_remaining ?? null;
     } catch (err: any) {
       showToast(err.message || 'Failed to load system state', 'error');
     } finally {
@@ -62,26 +75,90 @@
   async function enable2FA() {
     if (!verifyCode.trim()) return;
     try {
-      await apiFetch('/admin/2fa/enable', {
+      // The response is the ONLY time these values exist. The recovery codes are
+      // stored as SHA-256 hashes and can never be shown again; enabling 2FA also
+      // revokes every existing session, so the fresh access token is the only
+      // way this tab stays signed in. Discarding the response — which is what
+      // this did — locked the operator out AND destroyed the codes that were
+      // their way back in.
+      const res = await apiFetch<{
+        recovery_codes?: string[];
+        access_token?: string;
+        sessions_revoked?: boolean;
+      }>('/admin/2fa/enable', {
         method: 'POST',
         body: JSON.stringify({ code: verifyCode.trim() })
       });
+      if (res.access_token) setAuthToken(res.access_token);
       twoFAEnabled = true;
       twoFAModalOpen = false;
+      verifyCode = '';
+      if (res.recovery_codes?.length) {
+        recoveryCodes = res.recovery_codes;
+        recoveryRemaining = res.recovery_codes.length;
+        // Shown in a modal the operator has to dismiss deliberately, not a
+        // toast that disappears on its own.
+        recoveryModalOpen = true;
+      }
       showToast('Two-Factor Authentication enabled', 'success');
     } catch (err: any) {
       showToast(err.message || 'Invalid 2FA code', 'error');
     }
   }
 
+  function copyRecoveryCodes() {
+    navigator.clipboard
+      .writeText(recoveryCodes.join('\n'))
+      .then(() => showToast('Recovery codes copied', 'success'))
+      .catch(() => showToast('Could not copy — select and copy them manually', 'error'));
+  }
+
   async function disable2FA() {
-    if (!confirm('Disable 2FA security?')) return;
+    // The handler verifies a CURRENT TOTP code before turning 2FA off. Posting
+    // no body meant every attempt 400'd, so the Disable button could not work.
+    // Requiring the code here is also the correct security boundary: a hijacked
+    // session must not be able to strip a factor.
+    disableErr = '';
+    if (!disableCode.trim()) {
+      disableErr = 'Enter a current code from your authenticator to confirm';
+      return;
+    }
     try {
-      await apiFetch('/admin/2fa/disable', { method: 'POST' });
+      await apiFetch('/admin/2fa/disable', {
+        method: 'POST',
+        body: JSON.stringify({ code: disableCode.trim() })
+      });
       twoFAEnabled = false;
-      showToast('Two-Factor Authentication disabled', 'info');
+      recoveryRemaining = null;
+      disableOpen = false;
+      disableCode = '';
+      showToast('Two-Factor Authentication disabled — sign in again', 'info');
     } catch (err: any) {
-      showToast(err.message || 'Failed to disable 2FA', 'error');
+      disableErr = err.message || 'Invalid code';
+    }
+  }
+
+  async function regenerateRecoveryCodes() {
+    regenErr = '';
+    if (!regenCode.trim()) {
+      regenErr = 'Enter a current code or your password to confirm';
+      return;
+    }
+    try {
+      const res = await apiFetch<{ recovery_codes?: string[] }>('/admin/2fa/recovery/regenerate', {
+        method: 'POST',
+        body: JSON.stringify({ code: regenCode.trim() })
+      });
+      regenOpen = false;
+      regenCode = '';
+      if (res.recovery_codes?.length) {
+        recoveryCodes = res.recovery_codes;
+        recoveryRemaining = res.recovery_codes.length;
+        recoveryModalOpen = true;
+      }
+      showToast('New recovery codes issued — the previous set no longer works', 'success');
+    } catch (err: any) {
+      regenErr = err.message || 'Could not regenerate recovery codes';
     }
   }
 
@@ -160,12 +237,69 @@
   <div>
     {#if twoFAEnabled}
       <span class="badge badge-ok">2FA Enabled</span>
-      <button class="btn-secondary danger" style="margin-left:12px" onclick={disable2FA}>Disable 2FA</button>
+      {#if recoveryRemaining !== null}
+        <span class="badge {recoveryRemaining <= 2 ? 'badge-warn' : ''}" style="margin-left:8px"
+          title="Single-use codes left. Regenerate before you run out — with none left and no authenticator, the account cannot be recovered.">
+          {recoveryRemaining} recovery code{recoveryRemaining === 1 ? '' : 's'} left
+        </span>
+      {/if}
+      <button class="btn-secondary" style="margin-left:12px" onclick={() => { regenOpen = true; regenErr = ''; }}>
+        Regenerate recovery codes
+      </button>
+      <button class="btn-secondary danger" style="margin-left:8px" onclick={() => { disableOpen = true; disableErr = ''; }}>
+        Disable 2FA
+      </button>
+      {#if recoveryRemaining !== null && recoveryRemaining <= 2}
+        <p class="err-text">
+          Only {recoveryRemaining} recovery code{recoveryRemaining === 1 ? '' : 's'} remain. Regenerate now —
+          losing your authenticator with no codes left means losing the account.
+        </p>
+      {/if}
     {:else}
       <button class="btn-primary" onclick={setup2FA}>Enable 2FA Authenticator</button>
     {/if}
   </div>
 </div>
+
+<!-- Recovery codes. Shown exactly once: the server keeps only SHA-256 hashes,
+     so there is no second chance to display them. -->
+<Modal isOpen={recoveryModalOpen} title="Save your recovery codes" onClose={() => { recoveryModalOpen = false; recoveryCodes = []; }}>
+  <p class="err-text">
+    These codes are shown once and cannot be retrieved again. Store them somewhere you can reach
+    without your authenticator — each one signs you in a single time.
+  </p>
+  <pre class="recovery-codes" data-testid="recovery-codes">{recoveryCodes.join('\n')}</pre>
+  <div class="form-grid">
+    <button class="btn-secondary" onclick={copyRecoveryCodes}>Copy all</button>
+    <button class="btn-primary" onclick={() => { recoveryModalOpen = false; recoveryCodes = []; }}>
+      I have saved them
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={disableOpen} title="Disable two-factor authentication" onClose={() => { disableOpen = false; disableCode = ''; }}>
+  <p class="muted">
+    Enter a current code from your authenticator. Disabling 2FA also invalidates your recovery codes
+    and signs out every session, including this one.
+  </p>
+  <div class="form-grid">
+    <input bind:value={disableCode} placeholder="6-digit code" data-testid="disable-2fa-code" />
+    <button class="btn-secondary danger" onclick={disable2FA}>Disable 2FA</button>
+  </div>
+  {#if disableErr}<p class="err-text">{disableErr}</p>{/if}
+</Modal>
+
+<Modal isOpen={regenOpen} title="Regenerate recovery codes" onClose={() => { regenOpen = false; regenCode = ''; }}>
+  <p class="muted">
+    Confirm with a current authenticator code or your password. The previous set stops working
+    immediately.
+  </p>
+  <div class="form-grid">
+    <input bind:value={regenCode} placeholder="6-digit code or password" data-testid="regen-code" />
+    <button class="btn-primary" onclick={regenerateRecoveryCodes}>Issue new codes</button>
+  </div>
+  {#if regenErr}<p class="err-text">{regenErr}</p>{/if}
+</Modal>
 
 <div class="card">
   <h3>Change Administrator Password</h3>
@@ -269,5 +403,27 @@
     .subsystem-grid { grid-template-columns: 1fr; }
     .doctor-grid { grid-template-columns: 1fr; }
     .view-header { flex-wrap: wrap; gap: 10px; }
+  }
+
+  /* Recovery codes are the one thing on this page an operator must be able to
+     read character-for-character and copy without transcription errors. */
+  .recovery-codes {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.95rem;
+    line-height: 1.8;
+    letter-spacing: 0.04em;
+    background: var(--bg-input, #11151c);
+    border: 1px solid var(--border, #2a3140);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    white-space: pre;
+    overflow-x: auto;
+    user-select: all;
+  }
+  .badge-warn {
+    background: rgba(217, 155, 43, 0.15);
+    color: #d99b2b;
+    border: 1px solid rgba(217, 155, 43, 0.4);
   }
 </style>
