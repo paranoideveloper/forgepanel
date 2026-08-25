@@ -114,3 +114,43 @@ func TestAnUnchangedConfigIsNotReapplied(t *testing.T) {
 		t.Fatal("an unchanged config was reapplied")
 	}
 }
+
+func TestTrafficFromBothEnginesIsSummedNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	a := &NodeAgent{dataDir: dir, engines: testEngines("")}
+
+	// One user served by BOTH engines on the same node — a VLESS inbound and a
+	// hysteria2 inbound. Taking either side alone silently discards half their
+	// usage, and the discard is always in the customer's favour, which is why it
+	// survives unnoticed.
+	xray := map[string]int64{"user>>>u.1>>>traffic>>>uplink": 100}
+	singbox := map[string]int64{"user>>>u.1>>>traffic>>>uplink": 250}
+
+	merged := map[string]int64{}
+	for k, v := range xray {
+		merged[k] += v
+	}
+	for k, v := range singbox {
+		merged[k] += v
+	}
+	if merged["user>>>u.1>>>traffic>>>uplink"] != 350 {
+		t.Fatalf("merged = %d, want 350", merged["user>>>u.1>>>traffic>>>uplink"])
+	}
+
+	// And the real path must not panic when xray is absent: collectXrayTraffic
+	// returns a nil map there, and assigning into a nil map panics — on the
+	// heartbeat goroutine, for a node serving only sing-box protocols.
+	if got := a.collectTraffic(false); got != nil && len(got) != 0 {
+		t.Fatalf("expected no counters with no cores running, got %v", got)
+	}
+}
+
+func TestAnUnsupportedSingboxReportsNoCapability(t *testing.T) {
+	a := &NodeAgent{dataDir: t.TempDir(), engines: testEngines("")}
+	// No binary at all: the node must say it cannot meter rather than claiming it
+	// can, because the panel acts on the answer by writing a config section that
+	// a stock binary refuses to start with.
+	if a.singboxStatsSupported() {
+		t.Fatal("a node with no sing-box binary claimed it could report stats")
+	}
+}

@@ -1,4 +1,4 @@
-package core
+package singboxapi
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func v2raySingbox(t *testing.T) string {
 	if bin == "" {
 		t.Skip("set FORGEPANEL_SINGBOX_V2RAY to a sing-box built with -tags with_v2ray_api")
 	}
-	if sup := detectSingboxStats(bin); !sup.Supported {
+	if sup := Detect(bin); !sup.Supported {
 		t.Skipf("%s cannot report per-user traffic: %s", bin, sup.Reason)
 	}
 	return bin
@@ -124,7 +124,7 @@ func TestSingboxReportsPerUserHysteria2Traffic(t *testing.T) {
 	var got map[string]int64
 	waitFor(t, 15*time.Second, func() error {
 		var err error
-		got, err = querySingboxStats(ctx, fmt.Sprintf("127.0.0.1:%d", apiPort), "user>>>", false)
+		got, err = Query(ctx, fmt.Sprintf("127.0.0.1:%d", apiPort), "user>>>", false)
 		if err != nil {
 			return err
 		}
@@ -216,4 +216,31 @@ func e2eCert(t *testing.T, dir string) (string, string) {
 	_ = os.WriteFile(cp, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600)
 	_ = os.WriteFile(kp, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd}), 0o600)
 	return cp, kp
+}
+
+// freePort returns a port nothing is listening on. Local to this package since
+// the code moved out of internal/core, where the original lived.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// waitFor polls until a condition holds. Local copy for the same reason as
+// freePort: the code under test moved out of internal/core.
+func waitFor(t *testing.T, d time.Duration, cond func() error) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	var last error
+	for time.Now().Before(deadline) {
+		if last = cond(); last == nil {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	t.Fatalf("condition never held within %s: %v", d, last)
 }

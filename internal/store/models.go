@@ -300,8 +300,16 @@ type Node struct {
 	Enrolled    bool       `json:"enrolled"`
 	LastSeen    *time.Time `json:"last_seen"`
 	CoreVersion string     `json:"core_version"`
-	CPU         float64    `json:"cpu"`
-	MemMB       int        `json:"mem_mb"`
+	// SingboxStats is whether THIS node's sing-box binary can report per-user
+	// counters, as reported by the node itself.
+	//
+	// The panel cannot detect it: the capability belongs to the binary installed
+	// on the node. Enabling the config section on a build without it is a
+	// STARTUP failure that takes every sing-box inbound on that node down, so
+	// the panel only asks for what the node says it can serve.
+	SingboxStats bool    `json:"singbox_stats"`
+	CPU          float64 `json:"cpu"`
+	MemMB        int     `json:"mem_mb"`
 	// Disk, connection count and core uptime. Disk is the metric that turns
 	// into an outage with no warning — a node whose filesystem fills stops
 	// writing configs and simply goes quiet — and core uptime is the only

@@ -134,6 +134,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		DiskTotalMB       int  `json:"disk_total_mb"`
 		TCPConns          int  `json:"tcp_conns"`
 		CoreUptimeSec     int  `json:"core_uptime_sec"`
+		SingboxStats      bool `json:"singbox_stats"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -152,6 +153,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.DiskTotalMB = req.DiskTotalMB
 	n.TCPConns = req.TCPConns
 	n.CoreUptimeSec = req.CoreUptimeSec
+	n.SingboxStats = req.SingboxStats
 	n.Healthy = true
 	_ = s.db.SaveNode(n)
 	s.accountNodeTraffic(n.ID, req.Traffic, req.TrafficCumulative)
@@ -169,9 +171,17 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	//
 	// A control-plane-only panel has no local engine; the heartbeat still
 	// succeeds and simply reports no bundle (spec: heartbeat works in light mode).
+	// The stats section is emitted ONLY for a node that says its binary can serve
+	// it. Emitting it for a stock sing-box is a startup failure that takes every
+	// sing-box inbound on that node down — strictly worse than leaving them
+	// unmetered, which is the state they were in anyway.
+	sbAPIPort := 0
+	if n.SingboxStats {
+		sbAPIPort = nodeSingboxAPIPort
+	}
 	var xrayCfg, singboxCfg string
 	specs := s.enabledInboundSpecsForNodeAddress(n.Address)
-	if b, err := engine.BuildMulti(specs, 10085, "", ""); err == nil && b != nil {
+	if b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", nil, nil); err == nil && b != nil {
 		xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
 	} else if s.engine != nil {
 		if b := s.engine.LastBundle(); b != nil {
@@ -449,6 +459,16 @@ func (s *Server) accountNodeTraffic(nodeID uint, counters map[string]int64, cumu
 		s.startBackground(s.reloadEngines)
 	}
 }
+
+// The loopback ports a node's cores expose their stats APIs on.
+//
+// Fixed rather than negotiated: both ends have to agree, and a value the node
+// discovers from the config it was just handed would be one more thing that can
+// disagree after a partial update. cmd/forgenode holds the same constants.
+const (
+	nodeXrayAPIPort    = 10085
+	nodeSingboxAPIPort = 10086
+)
 
 // singboxIfServing returns the sing-box config only when it actually has
 // inbounds to serve.

@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
+	"github.com/forgepanel/forgepanel/internal/core/singboxapi"
 	"github.com/forgepanel/forgepanel/internal/version"
 )
 
@@ -36,6 +38,12 @@ type NodeAgent struct {
 	dataDir string
 	binMgr  *binmgr.Manager
 	mu      sync.Mutex
+	// sbStats caches whether this node's sing-box can meter users. Detected from
+	// the binary, once — running the detector on every heartbeat would exec a
+	// process every ten seconds to answer a question that cannot change without
+	// a restart.
+	sbStatsOnce sync.Once
+	sbStats     bool
 	// engines is every core this node can supervise, keyed by name.
 	//
 	// A map rather than one xray field: the node ran exactly one process, so
@@ -182,6 +190,14 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 		"traffic_cumulative": true,
 		"disk_used_mb":       diskUsed, "disk_total_mb": diskTotal,
 		"tcp_conns": conns, "core_uptime_sec": coreUptime,
+		// Whether THIS node's sing-box can report per-user counters.
+		//
+		// The panel cannot know: the capability is a property of the binary
+		// installed here, and enabling the config section on a build without it
+		// is a STARTUP failure that takes every sing-box inbound down rather
+		// than merely leaving them unmetered. So the node says, and the panel
+		// only asks for what the node can serve.
+		"singbox_stats": a.singboxStatsSupported(),
 	})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
@@ -268,6 +284,11 @@ func (a *NodeAgent) post(path string, body []byte, out any) error {
 // The node reads its own counters through it.
 const nodeXrayAPIPort = 10085
 
+// nodeSingboxAPIPort mirrors internal/api.nodeSingboxAPIPort. Both ends have to
+// agree on it, and it is fixed rather than negotiated so a partial update cannot
+// leave them disagreeing.
+const nodeSingboxAPIPort = 10086
+
 // collectTraffic reads per-user counters from the node's OWN xray and RESETS
 // them, so each heartbeat carries a delta.
 //
@@ -280,12 +301,62 @@ const nodeXrayAPIPort = 10085
 // It also means a heartbeat that is COLLECTED but never DELIVERED loses that
 // slice of traffic, so the counters are only reset once the post succeeds —
 // see heartbeat().
+// collectTraffic reports per-user counters from EVERY metered core.
+//
+// Both engines, merged. A node used to poll xray only, so hysteria2, tuic,
+// anytls, shadowtls and wireguard traffic was invisible to the panel and a user
+// could exhaust their plan on those protocols from a node and stay active
+// forever — the quota system guarding traffic it could not see.
 func (a *NodeAgent) collectTraffic(reset bool) map[string]int64 {
-	// Xray only. sing-box's per-user counters come from a different API on a
-	// different port, and reporting them requires the v2ray_api build the panel
-	// now produces — so a node running sing-box protocols currently serves them
-	// unmetered rather than mis-metered. Stated here rather than left to be
-	// discovered from a usage figure that never moves.
+	out := a.collectXrayTraffic(reset)
+	if out == nil {
+		// collectXrayTraffic returns nil when xray is absent or unreadable, and
+		// assigning into a nil map PANICS — on the heartbeat goroutine, for a
+		// node that happens to serve only sing-box protocols.
+		out = map[string]int64{}
+	}
+	for name, v := range a.collectSingboxTraffic(reset) {
+		// SUMMED, not overwritten. One user can be served by both engines on the
+		// same node — a VLESS inbound and a hysteria2 inbound — and taking either
+		// side alone silently discards half their usage.
+		out[name] += v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// collectSingboxTraffic reads the sing-box v2ray API, when this node has one.
+func (a *NodeAgent) collectSingboxTraffic(reset bool) map[string]int64 {
+	if !a.singboxStatsSupported() {
+		return nil
+	}
+	a.mu.Lock()
+	e, ok := a.engines["sing-box"]
+	running := ok && e.running()
+	a.mu.Unlock()
+	if !running {
+		// Querying a core that is not running yields a connection error every
+		// heartbeat. Nothing is served, so nothing is owed.
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stats, err := singboxapi.Query(ctx,
+		"127.0.0.1:"+strconv.Itoa(nodeSingboxAPIPort), "user>>>", reset)
+	if err != nil {
+		// Reported, not silent. A node whose sing-box counters stop being
+		// readable is serving traffic nobody is billing for, and the previous
+		// version of that condition was "no error and a usage figure that never
+		// moves".
+		fmt.Fprintln(os.Stderr, "forgenode: sing-box stats unavailable:", err)
+		return nil
+	}
+	return stats
+}
+
+func (a *NodeAgent) collectXrayTraffic(reset bool) map[string]int64 {
 	bin := a.engineBin("xray")
 	if bin == "" {
 		return nil
@@ -434,4 +505,20 @@ func (a *NodeAgent) engineBin(name string) string {
 		return e.bin
 	}
 	return ""
+}
+
+// singboxStatsSupported reports whether this node's sing-box can meter users.
+//
+// Detected from the binary itself, once. Assuming it — in either direction —
+// is what produced the original gap: assuming yes breaks startup, assuming no
+// leaves the traffic unmetered forever.
+func (a *NodeAgent) singboxStatsSupported() bool {
+	a.mu.Lock()
+	e, ok := a.engines["sing-box"]
+	a.mu.Unlock()
+	if !ok || e.bin == "" {
+		return false
+	}
+	a.sbStatsOnce.Do(func() { a.sbStats = singboxapi.Detect(e.bin).Supported })
+	return a.sbStats
 }

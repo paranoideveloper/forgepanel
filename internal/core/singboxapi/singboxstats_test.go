@@ -1,4 +1,4 @@
-package core
+package singboxapi
 
 import (
 	"encoding/hex"
@@ -126,7 +126,7 @@ func TestMalformedFramesAreRefused(t *testing.T) {
 
 // The build tag is the whole question: two builds of the same version differ.
 func TestDetectSingboxStatsReadsBuildTags(t *testing.T) {
-	if got := detectSingboxStats(""); got.Supported {
+	if got := Detect(""); got.Supported {
 		t.Error("an absent binary was reported as capable")
 	} else if got.Reason == "" {
 		t.Error("an absent binary must say why it cannot meter")

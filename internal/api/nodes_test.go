@@ -69,3 +69,45 @@ func TestAnXrayOnlyNodeIsSentNoSingboxConfig(t *testing.T) {
 		t.Fatalf("an xray-only node was sent a sing-box config: %s", resp.SingboxConfig)
 	}
 }
+
+// The sing-box stats section is a STARTUP requirement, not a hint: a stock
+// sing-box refuses to start with it ("v2ray api is not included in this build").
+// So the panel must only ask for it from a node that says its binary can serve
+// it — and the panel cannot detect that itself, because the capability belongs
+// to the binary installed on the node.
+func TestTheStatsSectionIsOnlySentToACapableNode(t *testing.T) {
+	s, token := adminAPI(t)
+	n := &store.Node{Name: "edge", Address: "203.0.113.9", EnrollToken: "tok", Enrolled: true}
+	if err := s.db.SaveNode(n); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := doPOST(t, s, "/api/admin/inbounds", token,
+		`{"protocol":"hysteria2","address":"203.0.113.9","port":8443,"remark":"hy2","password":"pw"}`); code != 200 && code != 201 {
+		t.Fatalf("%d: %s", code, b)
+	}
+
+	singbox := func(beat string) string {
+		_, body := doPOST(t, s, "/api/node/heartbeat", "", beat)
+		var resp struct {
+			SingboxConfig string `json:"singbox_config"`
+		}
+		if err := json.Unmarshal([]byte(body), &resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp.SingboxConfig
+	}
+
+	// A stock binary: no stats section, or the core refuses to start and takes
+	// every sing-box inbound on that node down — strictly worse than leaving
+	// them unmetered, which is the state they were already in.
+	if cfg := singbox(`{"token":"tok","singbox_stats":false}`); strings.Contains(cfg, "v2ray_api") {
+		t.Fatalf("a stats section was sent to a node that cannot serve it: %s", cfg)
+	}
+	// A ForgePanel build: the section is included, and its users are enumerated —
+	// `stats: {enabled: true}` alone collects nothing and returns an empty
+	// response, which is indistinguishable from "no traffic yet".
+	cfg := singbox(`{"token":"tok","singbox_stats":true}`)
+	if !strings.Contains(cfg, "v2ray_api") {
+		t.Fatalf("a capable node was sent no stats section; its traffic stays unmetered: %s", cfg)
+	}
+}

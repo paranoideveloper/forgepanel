@@ -62,6 +62,21 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 // rules: it is a safety decision, not an ordering detail.
 func BuildMultiWithRouting(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string,
 	outbounds []OutboundSpec, rules []RuleSpec) (*Bundle, error) {
+	return BuildMultiFor(specs, xrayAPIPort, SingboxAPIPort, certPath, keyPath, outbounds, rules)
+}
+
+// BuildMultiFor is BuildMultiWithRouting with the sing-box stats port passed
+// EXPLICITLY rather than read from the package global.
+//
+// The global is the panel's own port, decided by whether the PANEL's local
+// sing-box supports metering. A remote node has a different binary and a
+// different answer, so a config built for a node has to be told — reading the
+// global gave every node the panel's answer, which is wrong in both directions:
+// it omitted the stats section on a control-plane-only panel (leaving capable
+// nodes unmetered forever) and would emit it for a node whose stock binary
+// refuses to start with it.
+func BuildMultiFor(specs []InboundSpec, xrayAPIPort, singboxAPIPort int, certPath, keyPath string,
+	outbounds []OutboundSpec, rules []RuleSpec) (*Bundle, error) {
 	b := &Bundle{}
 	var xin, sin, sep []any
 	statsUsed := false
@@ -288,11 +303,11 @@ func BuildMultiWithRouting(specs []InboundSpec, xrayAPIPort int, certPath, keyPa
 	// collects nothing and the API returns an empty response, which is
 	// indistinguishable from "no traffic yet". Every tracked name has to be
 	// enumerated, which is why this is built from the specs rather than a flag.
-	if SingboxAPIPort > 0 && len(sin) > 0 {
+	if singboxAPIPort > 0 && len(sin) > 0 {
 		if stats := singboxStatsSection(specs, sin, sbEgressOutbounds); stats != nil {
 			singboxCfg["experimental"] = jobj{
 				"v2ray_api": jobj{
-					"listen": fmt.Sprintf("127.0.0.1:%d", SingboxAPIPort),
+					"listen": fmt.Sprintf("127.0.0.1:%d", singboxAPIPort),
 					"stats":  stats,
 				},
 			}

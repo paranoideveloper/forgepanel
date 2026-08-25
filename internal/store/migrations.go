@@ -41,6 +41,7 @@ const (
 	migVAPITokens     uint64 = 11
 	migVProfiles      uint64 = 12
 	migVImportSource  uint64 = 13
+	migVNodeSbStats   uint64 = 14
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -203,6 +204,17 @@ func migrations() []migrate.Migration {
 				"anything that has been renamed since.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Inbound{}})
+				return err
+			},
+		},
+		{
+			Version: migVNodeSbStats,
+			Name:    "node_singbox_stats_capability",
+			Rollback: "safe to drop. The column caches what the node reports on every heartbeat; " +
+				"losing it makes the panel omit the sing-box stats section for one cycle, after " +
+				"which the next heartbeat restores it.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Node{}})
 				return err
 			},
 		},
