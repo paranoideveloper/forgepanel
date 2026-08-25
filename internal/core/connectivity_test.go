@@ -66,7 +66,7 @@ func TestFullMatrixConnectivity(t *testing.T) {
 	defer xraySrv()
 	sbSrv := startProc(t, sbBin, "run", "-c", sbCfg)
 	defer sbSrv()
-	time.Sleep(1500 * time.Millisecond)
+	waitForServerInbounds(t, nodes, 30*time.Second)
 
 	var fails []string
 	for _, n := range nodes {
@@ -246,3 +246,61 @@ func pemDecode(b []byte) ([]byte, []byte) {
 }
 
 var _ = fmt.Sprintf
+
+// waitForServerInbounds blocks until every TCP inbound in the matrix is
+// accepting connections.
+//
+// This replaced a flat time.Sleep(1500ms). The sleep was a guess about how long
+// two proxy cores take to bind ~20 listeners, and on a loaded machine it is the
+// wrong guess: the suite runs test packages in parallel, and after this repo
+// gained the adapter and frontrouter packages the connectivity test began
+// failing intermittently with every xray-backed protocol reporting curl exit 56
+// (connection reset) while the sing-box ones passed. That asymmetry is the
+// signature — the xray server simply had not finished binding when curl fired,
+// so the client dialled a port nobody was listening on.
+//
+// A readiness probe is deterministic where a sleep is a race: it costs nothing
+// when the cores are quick and waits as long as genuinely needed when they are
+// not. The deadline is generous because the failure it guards against is a
+// false RED in the regression gate, and a slow pass is worth far more than a
+// fast flake.
+//
+// UDP-only protocols are skipped: a TCP dial cannot prove a QUIC listener is
+// up, and reporting them as never-ready would be its own false failure. They
+// are covered by the exchange itself.
+func waitForServerInbounds(t *testing.T, nodes []*model.Node, timeout time.Duration) {
+	t.Helper()
+	udpOnly := map[model.Protocol]bool{
+		model.ProtoHysteria2: true,
+		model.ProtoTUIC:      true,
+		model.ProtoWireGuard: true,
+		model.ProtoAmneziaWG: true,
+	}
+	pending := make(map[string]int, len(nodes))
+	for _, n := range nodes {
+		if udpOnly[n.Protocol] || n.Port == 0 {
+			continue
+		}
+		pending[n.Remark] = n.Port
+	}
+
+	deadline := time.Now().Add(timeout)
+	for len(pending) > 0 && time.Now().Before(deadline) {
+		for remark, port := range pending {
+			conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 200*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				delete(pending, remark)
+			}
+		}
+		if len(pending) > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	// Not fatal: a listener that never opens will be reported per-protocol by
+	// the exchange below, with the protocol's own name attached, which is far
+	// more useful to whoever reads the failure than a bulk timeout here.
+	for remark, port := range pending {
+		t.Logf("! %-26s inbound on :%d never started accepting within %s", remark, port, timeout)
+	}
+}
