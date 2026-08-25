@@ -6,6 +6,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/forgepanel/forgepanel/internal/cert"
+	"github.com/forgepanel/forgepanel/internal/core/adapter"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/core/porthop"
@@ -39,14 +41,24 @@ type Controller struct {
 	// certificate for the same name.
 	certFor func(sni string) (certPath, keyPath string, ok bool)
 
-	mu             sync.Mutex
-	xray           *supervisor.Process
-	singbox        *supervisor.Process
-	brook          *BrookManager
-	awg            *AWGManager
-	porthop        *porthop.Manager
-	lastPortHopErr string
-	lastBundle     *engine.Bundle
+	// registry is the single dispatch table: which core serves which inbound.
+	// It replaces the per-core if-blocks that ReloadSpecs, EnsureBinaries,
+	// StopAll and Status each maintained separately. regErr records a registry
+	// that could not be built, so the failure surfaces at the next reload rather
+	// than as a nil dereference.
+	registry *adapter.Registry
+	regErr   error
+
+	mu      sync.Mutex
+	brook   *BrookManager
+	awg     *AWGManager
+	porthop *porthop.Manager
+	// active is the set of engines the last reload gave something to serve, so
+	// Status() reports exactly the cores in use — as it always has.
+	active            map[string]bool
+	lastPortHopErr    string
+	lastBestEffortErr string
+	lastBundle        *engine.Bundle
 }
 
 // NewController builds a controller rooted at dataDir. Binaries are resolved
@@ -58,8 +70,26 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	// bind ("address already in use"). Safe at startup — none of our engines are
 	// running yet, so anything under our bin dir is a stray.
 	reapStrayEngines(bins.BinDir)
-	return &Controller{dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins, brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New()}
+	c := &Controller{
+		dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins,
+		brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New(),
+	}
+	// Built once. A failure here is stored rather than panicked on: the panel
+	// still has to start so an operator can reach the UI and see why.
+	c.registry, c.regErr = c.buildRegistry()
+	return c
 }
+
+// ensureSelfSignedFor returns the panel's self-signed pair under a data dir. It
+// exists so the registry's Certs hook and ReloadSpecs cannot disagree about
+// where that certificate lives.
+func ensureSelfSignedFor(dataDir string) (string, string, error) {
+	return cert.EnsureSelfSigned(filepath.Join(dataDir, "certs"))
+}
+
+// Registry exposes the adapter registry, so the API can report which core
+// serves which protocol instead of the panel and the operator guessing.
+func (c *Controller) Registry() *adapter.Registry { return c.registry }
 
 // SetCertResolver wires the certificate store into config generation, so an
 // inbound whose SNI the panel holds a real certificate for is served with that
@@ -136,33 +166,7 @@ func (c *Controller) SingboxBinary() (string, error) {
 }
 
 func (c *Controller) EnsureBinaries(nodes []*model.Node) error {
-	needXray, needSB, needBrook := false, false, false
-	for _, n := range nodes {
-		switch engineFor(n) {
-		case "xray":
-			needXray = true
-		case "sing-box":
-			needSB = true
-		case "brook":
-			needBrook = true
-		}
-	}
-	if needBrook {
-		if _, err := c.bins.Ensure(binmgr.EngineBrook); err != nil {
-			return err
-		}
-	}
-	if needXray {
-		if _, err := c.bins.Ensure(binmgr.EngineXray); err != nil {
-			return err
-		}
-	}
-	if needSB {
-		if _, err := c.bins.Ensure(binmgr.EngineSingbox); err != nil {
-			return err
-		}
-	}
-	return nil
+	return c.ensureBinariesFor(nodes)
 }
 
 // Reload regenerates and hot-applies configs for the given inbounds with no
@@ -195,52 +199,27 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 	if err != nil {
 		return nil, err
 	}
+	// Route each inbound to the one core that will serve it, and tell EVERY
+	// adapter its share — including an empty one. An adapter whose last inbound
+	// was just deleted has to be told, or its core keeps serving inbounds the
+	// panel no longer knows about.
+	active, unroutable, dispatchErr := c.dispatch(specs, cp, kp)
+	c.active = active
+
+	// An inbound no core can serve must be REPORTED, never dropped. An inbound
+	// that silently vanishes from the generated config is the failure operators
+	// cannot debug, and the old hand-written dispatch simply skipped anything
+	// its switch did not recognise.
+	for _, u := range unroutable {
+		bundle.Skipped = append(bundle.Skipped, engine.SkippedInbound{
+			Remark: u.Remark,
+			Reason: u.Reason,
+		})
+	}
 	c.lastBundle = bundle
-
-	// Xray
-	if bundle.XrayN > 0 {
-		if c.xray == nil {
-			c.xray = supervisor.NewProcess(c.xraySpec())
-		}
-		if err := c.xray.Apply(bundle.Xray); err != nil {
-			return bundle, err
-		}
-	} else if c.xray != nil {
-		c.xray.Stop()
+	if dispatchErr != nil {
+		return bundle, dispatchErr
 	}
-
-	// sing-box
-	if bundle.SingboxN > 0 {
-		if c.singbox == nil {
-			c.singbox = supervisor.NewProcess(c.singboxSpec())
-		}
-		if err := c.singbox.Apply(bundle.Singbox); err != nil {
-			return bundle, err
-		}
-	} else if c.singbox != nil {
-		c.singbox.Stop()
-	}
-
-	// Brook inbounds are external processes (one per inbound, CLI-driven).
-	var brookNodes []*model.Node
-	for _, sp := range specs {
-		if engineFor(sp.Node) == "brook" {
-			brookNodes = append(brookNodes, sp.Node)
-		}
-	}
-	if err := c.brook.Sync(brookNodes, cp, kp); err != nil {
-		return bundle, err
-	}
-
-	// AmneziaWG (kernel mode): reconcile awg-quick interfaces. Best-effort — a
-	// missing kernel module surfaces via AWGStatus, never as a reload failure.
-	var awgNodes []*model.Node
-	for _, sp := range specs {
-		if engineFor(sp.Node) == "amneziawg" {
-			awgNodes = append(awgNodes, sp.Node)
-		}
-	}
-	_ = c.awg.Sync(awgNodes)
 
 	// Hysteria2 port-hopping: install/refresh the UDP-range firewall redirects for
 	// every hy2 inbound that requested one, and tear down rules for those removed.
@@ -279,21 +258,37 @@ func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]s
 		results["build"] = err.Error()
 		return bundle, results
 	}
-	if bundle.XrayN > 0 {
-		if _, e := c.bins.Ensure(binmgr.EngineXray); e != nil {
-			results["xray"] = "binary: " + e.Error()
-		} else {
-			p := supervisor.NewProcess(c.xraySpec())
-			results["xray"] = validateResult(p.ValidateBytes(bundle.Xray, filepath.Join(c.dataDir, "engines", "xray.candidate.json")))
+	if c.registry == nil {
+		if c.regErr != nil {
+			results["registry"] = c.regErr.Error()
 		}
+		return bundle, results
 	}
-	if bundle.SingboxN > 0 {
-		if _, e := c.bins.Ensure(binmgr.EngineSingbox); e != nil {
-			results["sing-box"] = "binary: " + e.Error()
-		} else {
-			p := supervisor.NewProcess(c.singboxSpec())
-			results["sing-box"] = validateResult(p.ValidateBytes(bundle.Singbox, filepath.Join(c.dataDir, "engines", "singbox.candidate.json")))
+
+	// Validate through the adapters, so every core is checked with its OWN
+	// validator. The hand-written version only ever checked Xray and sing-box:
+	// a Brook or AmneziaWG inbound was never validated at all, and its first
+	// sign of trouble was the core refusing to start.
+	plans, unroutable := c.registry.Partition(specs, cp, kp)
+	for _, u := range unroutable {
+		// Report by remark, since an unroutable inbound has no engine to key on.
+		name := u.Remark
+		if name == "" {
+			name = "inbound"
 		}
+		results[name] = u.Reason
+		bundle.Skipped = append(bundle.Skipped, engine.SkippedInbound{Remark: u.Remark, Reason: u.Reason})
+	}
+	for _, ap := range plans {
+		if ap.Plan.Empty() {
+			continue
+		}
+		cfg, genErr := ap.Adapter.GenerateConfig(ap.Plan.Nodes())
+		if genErr != nil {
+			results[ap.Engine] = "generate: " + genErr.Error()
+			continue
+		}
+		results[ap.Engine] = validateResult(ap.Adapter.ValidateConfig(cfg))
 	}
 	return bundle, results
 }
@@ -301,16 +296,12 @@ func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]s
 // Status returns each engine's supervised status.
 func (c *Controller) Status() []supervisor.Status {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	var out []supervisor.Status
-	if c.xray != nil {
-		out = append(out, c.xray.Status())
-	}
-	if c.singbox != nil {
-		out = append(out, c.singbox.Status())
-	}
-	_ = c.brook // brook status is a separate shape; surfaced via BrookStatus()
-	return out
+	active := c.active
+	c.mu.Unlock()
+	// Health is read outside the controller lock: a core's status probe can
+	// block on the process, and holding c.mu through it would stall every
+	// reload behind a wedged engine.
+	return c.adapterStatuses(active)
 }
 
 // PortHopStatus reports the port-hopping firewall backend, whether the panel can
@@ -362,40 +353,24 @@ func (c *Controller) LastBundle() *engine.Bundle {
 // StopAll stops every supervised core (graceful shutdown).
 func (c *Controller) StopAll() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.xray != nil {
-		c.xray.Stop()
+	reg := c.registry
+	c.active = nil
+	c.mu.Unlock()
+	if reg == nil {
+		// No registry means no core was ever dispatched through one; stop the
+		// reconcilers directly so a failed startup still tears down cleanly.
+		c.brook.StopAll()
+		c.awg.StopAll()
+		return
 	}
-	if c.singbox != nil {
-		c.singbox.Stop()
-	}
-	c.brook.StopAll()
-	c.awg.StopAll()
-}
-
-func (c *Controller) xraySpec() supervisor.EngineSpec {
-	return supervisor.EngineSpec{
-		Name: "xray", BinPath: c.bins.Path(binmgr.EngineXray),
-		RunArgs: []string{"run", "-c"}, TestArgs: []string{"run", "-test", "-c"},
-		ConfigPath: filepath.Join(c.dataDir, "engines", "xray.json"),
-	}
-}
-
-func (c *Controller) singboxSpec() supervisor.EngineSpec {
-	return supervisor.EngineSpec{
-		Name: "sing-box", BinPath: c.bins.Path(binmgr.EngineSingbox),
-		RunArgs: []string{"run", "-c"}, TestArgs: []string{"check", "-c"},
-		ConfigPath: filepath.Join(c.dataDir, "engines", "singbox.json"),
+	// Every adapter, so a core added to the registry is stopped without editing
+	// this function — the omission that used to leave a core running after the
+	// panel had forgotten about it.
+	ctx := context.Background()
+	for _, a := range reg.All() {
+		_ = a.Stop(ctx)
 	}
 }
-
-// engineFor reports which engine serves a node's protocol.
-//
-// This was a copy of render.EngineFor, justified by an import cycle that does
-// not exist (internal/core/engine already imports render). The copy had drifted:
-// it was missing ProtoForgeDNS entirely and returned "" rather than "unknown"
-// for anything unmapped. It now delegates to the single authority in model.
-func engineFor(n *model.Node) string { return model.EngineForNode(n) }
 
 func validateResult(err error) string {
 	if err != nil {

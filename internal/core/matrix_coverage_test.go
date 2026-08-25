@@ -27,7 +27,6 @@ import (
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
-	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -147,23 +146,25 @@ func validateNodes(t *testing.T, nodes []*model.Node) (passed []string, failures
 			failures = append(failures, n.Remark+": SKIPPED: "+b.Skipped[0].Reason)
 			continue
 		}
-		eng := model.EngineFor(n.Protocol)
-		var p *supervisor.Process
-		var cfg []byte
-		switch eng {
-		case model.EngineXray:
-			p, cfg = supervisor.NewProcess(ctrl.xraySpec()), b.Xray
-		case model.EngineSingBox:
-			p, cfg = supervisor.NewProcess(ctrl.singboxSpec()), b.Singbox
-		default:
-			failures = append(failures, n.Remark+": engine "+eng+" has no core validator")
+		// Validate through the adapter the panel itself dispatches to, so this
+		// suite exercises the product's validation path rather than one the
+		// test assembles — the difference that let the adapter layer sit
+		// unmounted while every test passed.
+		res, resErr := ctrl.Registry().ResolveNode(n)
+		if resErr != nil {
+			failures = append(failures, n.Remark+": no adapter: "+resErr.Error())
 			continue
 		}
-		if err := p.ValidateBytes(cfg, filepath.Join(dir, "chk-"+n.Remark+".json")); err != nil {
-			failures = append(failures, n.Remark+" ["+eng+"]: "+err.Error())
+		cfg, genErr := res.Adapter.GenerateConfig([]*model.Node{n})
+		if genErr != nil {
+			failures = append(failures, n.Remark+" ["+res.Engine+"]: generate: "+genErr.Error())
 			continue
 		}
-		passed = append(passed, n.Remark+" ["+eng+"]")
+		if err := res.Adapter.ValidateConfig(cfg); err != nil {
+			failures = append(failures, n.Remark+" ["+res.Engine+"]: "+err.Error())
+			continue
+		}
+		passed = append(passed, n.Remark+" ["+res.Engine+"]")
 	}
 	return passed, failures
 }

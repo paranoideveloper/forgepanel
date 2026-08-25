@@ -17,7 +17,7 @@ package buildinfo_test
 //	                            and takes EVERY inbound offline.
 //	internal/core/adapter       1,353 lines: a CoreAdapter interface, four real
 //	                            adapters and a conformance suite. Zero non-test
-//	                            importers.
+//	                            importers — now wired into Controller.dispatch.
 //	internal/service            404 lines of service layer. Same.
 //
 // TestEveryHandlerIsReachableFromTheRouter covers HTTP handlers. This covers the
@@ -40,10 +40,6 @@ import (
 // meaning anything. The test reports them on every run so the count cannot
 // quietly grow.
 var knownUnlinked = map[string]string{
-	"github.com/forgepanel/forgepanel/internal/core/adapter": "FP-ADAPT-001/002: 1,353 lines — a CoreAdapter interface, " +
-		"four working adapters (xray/sing-box/brook/amneziawg) and a conformance suite. " +
-		"internal/api/server.go still builds core.NewController, which keeps the hardcoded engine switch. " +
-		"Wiring it replaces the live inbound-serving dispatch, so it needs a deliberate decision, not a drive-by.",
 	"github.com/forgepanel/forgepanel/internal/service": "FP-TRAF-003: 404 lines of service layer, including the " +
 		"NodeClientTraffic rollup machinery. Its only importer is its own test, so the rollup tables it " +
 		"maintains are never written and no dashboard can read them.",

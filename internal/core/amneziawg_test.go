@@ -63,7 +63,7 @@ func TestAWGKernelStatusShape(t *testing.T) {
 }
 
 func TestAWGEngineForRouting(t *testing.T) {
-	if engineFor(awgTestNode(51820)) != "amneziawg" {
+	if model.EngineForNode(awgTestNode(51820)) != "amneziawg" {
 		t.Fatal("awg must route to the amneziawg engine, not sing-box")
 	}
 }

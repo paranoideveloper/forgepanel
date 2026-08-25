@@ -8,7 +8,6 @@ import (
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
-	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
@@ -119,21 +118,26 @@ func TestFullMatrixValidates(t *testing.T) {
 			failures = append(failures, n.Remark+": SKIPPED: "+b.Skipped[0].Reason)
 			continue
 		}
+		// Validate through the ADAPTER the panel would actually use, rather
+		// than a supervisor the test builds itself. Validating via a
+		// hand-built process meant this suite could pass while the product's
+		// own validation path was broken or unwired — which is exactly what
+		// happened: the adapter layer was never mounted at all.
 		eng := render.EngineFor(n.Protocol)
-		var p *supervisor.Process
-		var cfg []byte
-		if eng == "xray" {
-			p = supervisor.NewProcess(ctrl.xraySpec())
-			cfg = b.Xray
-		} else {
-			p = supervisor.NewProcess(ctrl.singboxSpec())
-			cfg = b.Singbox
+		res, resErr := ctrl.Registry().ResolveNode(n)
+		if resErr != nil {
+			failures = append(failures, n.Remark+" ["+eng+"]: no adapter: "+resErr.Error())
+			continue
 		}
-		out := filepath.Join(dir, "check-"+n.Remark+".json")
-		if err := p.ValidateBytes(cfg, out); err != nil {
-			failures = append(failures, n.Remark+" ["+eng+"]: "+err.Error())
+		cfg, genErr := res.Adapter.GenerateConfig([]*model.Node{n})
+		if genErr != nil {
+			failures = append(failures, n.Remark+" ["+res.Engine+"]: generate: "+genErr.Error())
+			continue
+		}
+		if err := res.Adapter.ValidateConfig(cfg); err != nil {
+			failures = append(failures, n.Remark+" ["+res.Engine+"]: "+err.Error())
 		} else {
-			t.Logf("✓ %-26s [%s] valid", n.Remark, eng)
+			t.Logf("✓ %-26s [%s] valid", n.Remark, res.Engine)
 		}
 	}
 	if len(failures) > 0 {

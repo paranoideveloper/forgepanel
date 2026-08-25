@@ -62,6 +62,30 @@ func (m *Manager) Path(e Engine) string {
 	return filepath.Join(m.BinDir, string(e)+"-"+ver, name)
 }
 
+// managedEngines is every core this manager can download. It is the single list
+// Managed and Ensure both answer from, so a core added to one and not the other
+// is a test failure rather than an "unknown engine" at an operator's first
+// reload.
+var managedEngines = []Engine{EngineXray, EngineSingbox, EngineBrook}
+
+// Managed reports whether this manager fetches a binary for e.
+//
+// Not every core has one to fetch. AmneziaWG runs from the host's own kernel
+// module and awg-quick tooling, so asking for its "binary" is not an error and
+// must not be treated as one — a caller that fetches whatever the inbounds need
+// has to be able to tell "nothing to download" from "download failed".
+func Managed(e Engine) bool {
+	for _, m := range managedEngines {
+		if m == e {
+			return true
+		}
+	}
+	return false
+}
+
+// ManagedEngines returns the cores this manager can download.
+func ManagedEngines() []Engine { return append([]Engine(nil), managedEngines...) }
+
 // Ensure makes sure the pinned binary for e exists and is executable, downloading
 // and verifying it if necessary. It returns the binary path.
 func (m *Manager) Ensure(e Engine) (string, error) {
