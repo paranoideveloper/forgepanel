@@ -34,8 +34,26 @@ import (
 // borrowedSNIs is the REALITY steal-site rotation — a mix of Iranian domestic
 // sites (which stay reachable inside Iran) and global sites, exactly the set the
 // operator's sample configs use.
+// borrowedSNIs are the server names REALITY inbounds advertise.
+//
+// EVERY entry here must be a site the realityDest below can actually complete a
+// TLS handshake for. REALITY does not terminate the client's handshake: it
+// relays the ClientHello to dest, and dest answers with a certificate for the
+// SNI the client asked for. If dest cannot serve that SNI, the handshake fails
+// and the client sees a TLS error — the inbound looks broken even though the
+// panel, the key pair and the config are all correct.
+//
+// This list previously carried snapp.ir and www.digikala.com. Measured on a
+// live server (client in France, REALITY inbound in the Netherlands), those two
+// failed on every port while the other nine passed, and the correlation was
+// exact: they are the only two NOT hosted on Cloudflare (snapp.ir is on
+// AliDNS), so www.cloudflare.com cannot answer for them. 28 of 34 variants
+// carried traffic; all 6 failures were those two names.
+//
+// Keep this list and realityDest consistent. Changing dest to a non-Cloudflare
+// site means revisiting every entry here.
 var borrowedSNIs = []string{
-	"www.cloudflare.com", "aparat.ir", "www.digikala.com", "snapp.ir",
+	"www.cloudflare.com", "aparat.ir",
 	"discord.com", "chatgpt.com", "gitlab.com", "hcaptcha.com",
 	"nobat.com", "taskulu.com", "akharinkhabar.com",
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,9 +35,25 @@ func EnsureSelfSigned(dir string) (certPath, keyPath string, err error) {
 	// A 10-year, wildcard-ish self-signed cert. Deterministic-ish validity so
 	// re-generation is unnecessary; SANs cover common test SNIs.
 	tmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "forgepanel.local"},
-		DNSNames:              []string{"forgepanel.local", "*.forgepanel.local", "localhost"},
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "forgepanel.local"},
+		DNSNames:     []string{"forgepanel.local", "*.forgepanel.local", "localhost"},
+		// IP SANs are required, not cosmetic. Before a domain is configured the
+		// panel is reached by IP, and a certificate with no IP SAN cannot be
+		// verified for one: Go reports
+		//   "cannot validate certificate for <ip> because it doesn't contain any IP SANs".
+		// That is not a browser-warning-level problem — it broke node
+		// enrolment outright. Measured on live servers: forgenode on a second
+		// host could not POST /api/node/register to the panel's IP at all, and
+		// crash-looped on that error, so a fresh multi-node install could never
+		// complete without a domain.
+		//
+		// The loopback addresses cover local tooling; the host's own routable
+		// addresses are added below so a node dialling this panel by IP can
+		// verify it.
+		IPAddresses: append([]net.IP{
+			net.ParseIP("127.0.0.1"), net.ParseIP("::1"),
+		}, hostIPs()...),
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -60,4 +77,32 @@ func EnsureSelfSigned(dir string) (certPath, keyPath string, err error) {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// hostIPs returns this host's own routable addresses, so the self-signed
+// certificate can be verified when the panel is reached by IP.
+//
+// Link-local and loopback are skipped: loopback is added explicitly by the
+// caller, and a link-local SAN is never what a remote node dials. A failure to
+// enumerate interfaces is not fatal — the certificate is still valid for the
+// loopback SANs and for any configured domain, and refusing to start over it
+// would turn a cosmetic gap into an outage.
+func hostIPs() []net.IP {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []net.IP
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP == nil {
+			continue
+		}
+		ip := ipnet.IP
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			continue
+		}
+		out = append(out, ip)
+	}
+	return out
 }
