@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import Modal from '$lib/components/Modal.svelte';
@@ -68,7 +69,7 @@
       rules = r.rules ?? [];
       precedence = r.precedence ?? [];
     } catch (err: any) {
-      loadError = err.message || 'Failed to load routing';
+      loadError = err.message || tr('routing.failed_to_load_routing');
     } finally {
       loading = false;
     }
@@ -124,23 +125,23 @@
         ? `/admin/routing/outbounds/${obEditing.id}`
         : '/admin/routing/outbounds';
       await apiFetch(path, { method: obEditing ? 'PUT' : 'POST', body: JSON.stringify(body) });
-      showToast('Outbound saved', 'success');
+      showToast(tr('routing.outbound_saved'), 'success');
       obOpen = false;
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to save outbound', 'error');
+      showToast(err.message || tr('routing.failed_to_save_outbound'), 'error');
     }
   }
 
   async function deleteOutbound(o: Outbound) {
-    if (!confirm(`Delete the outbound "${o.tag}"?`)) return;
+    if (!confirm(tr('routing.delete_the_outbound_tag', { tag: o.tag }))) return;
     try {
       await apiFetch(`/admin/routing/outbounds/${o.id}`, { method: 'DELETE' });
-      showToast('Outbound deleted', 'success');
+      showToast(tr('routing.outbound_deleted'), 'success');
       await load();
     } catch (err: any) {
       // The API refuses while a rule still points at it, and says which rules.
-      showToast(err.message || 'Failed to delete', 'error');
+      showToast(err.message || tr('routing.failed_to_delete'), 'error');
     }
   }
 
@@ -172,7 +173,7 @@
     rDomain = lines(r?.domain);
     rIP = lines(r?.ip);
     rPort = r?.port ?? '';
-    rNetwork = r?.network || 'tcp,udp';
+    rNetwork = r?.network || tr('routing.tcp_udp');
     rProtocol = lines(r?.protocol);
     rInbounds = lines(r?.inbound_tags);
     rOutbound = r?.outbound_tag ?? 'block';
@@ -201,22 +202,22 @@
       };
       const path = rEditing ? `/admin/routing/rules/${rEditing.id}` : '/admin/routing/rules';
       await apiFetch(path, { method: rEditing ? 'PUT' : 'POST', body: JSON.stringify(body) });
-      showToast('Rule saved', 'success');
+      showToast(tr('routing.rule_saved'), 'success');
       ruleOpen = false;
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to save rule', 'error');
+      showToast(err.message || tr('routing.failed_to_save_rule'), 'error');
     }
   }
 
   async function deleteRule(r: Rule) {
-    if (!confirm(`Delete the rule "${r.name}"?`)) return;
+    if (!confirm(tr('routing.delete_the_rule_name', { name: r.name }))) return;
     try {
       await apiFetch(`/admin/routing/rules/${r.id}`, { method: 'DELETE' });
-      showToast('Rule deleted', 'success');
+      showToast(tr('routing.rule_deleted'), 'success');
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete', 'error');
+      showToast(err.message || tr('routing.failed_to_delete'), 'error');
     }
   }
 
@@ -228,7 +229,7 @@
       });
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to update', 'error');
+      showToast(err.message || tr('routing.failed_to_update'), 'error');
     }
   }
 
@@ -247,7 +248,7 @@
       });
       rules = next;
     } catch (err: any) {
-      showToast(err.message || 'Failed to reorder', 'error');
+      showToast(err.message || tr('routing.failed_to_reorder'), 'error');
       await load();
     }
   }
@@ -261,28 +262,27 @@
     if (r.protocol?.length) parts.push(`proto: ${r.protocol.join(', ')}`);
     if (r.inbound_tags?.length) parts.push(`inbound: ${r.inbound_tags.join(', ')}`);
     if (r.user_ids?.length) parts.push(`${r.user_ids.length} user(s)`);
-    return parts.join(' · ') || 'no conditions';
+    return parts.join(' · ') || tr('routing.no_conditions');
   }
 
   onMount(load);
 </script>
 
 <div class="view-header">
-  <h2>Routing</h2>
-  <button class="btn-primary" onclick={load}>Refresh</button>
+  <h2>{tr('routing.routing')}</h2>
+  <button class="btn-primary" onclick={load}>{tr('routing.refresh')}</button>
 </div>
 
 {#if precedence.length}
   <!-- Stated, not inferred. Getting this wrong can pull traffic out of a relay
        chain and expose the server's real address. -->
   <div class="card precedence" data-testid="precedence">
-    <h3>Evaluation order</h3>
+    <h3>{tr('routing.evaluation_order')}</h3>
     <ol>
       {#each precedence as step}<li>{step}</li>{/each}
     </ol>
     <p class="muted">
-      First match wins. Rules sit below per-inbound relay chains, so a rule cannot
-      move traffic off an inbound that has one.
+      {tr('routing.first_match_wins_rules_sit_below')}
     </p>
   </div>
 {/if}
@@ -290,22 +290,21 @@
 {#if loadError}
   <div class="card"><p class="err-text">{loadError}</p></div>
 {:else if loading}
-  <div class="card"><p class="muted">Loading…</p></div>
+  <div class="card"><p class="muted">{tr('routing.loading')}</p></div>
 {:else}
   <div class="card">
     <div class="section-head">
-      <h3>Outbounds</h3>
+      <h3>{tr('routing.outbounds')}</h3>
       <button class="btn-primary" data-testid="new-outbound" onclick={() => openOutbound(null)}>
-        New outbound
+        {tr('routing.new_outbound')}
       </button>
     </div>
     <p class="muted">
-      Built in and always available: {builtin.join(', ')}. Unmatched traffic goes
-      out through <code>direct</code>.
+      {tr('routing.built_in_and_always_available_unmatched', { p1: builtin.join(', ') })} <code>{tr('routing.direct')}</code>.
     </p>
     {#if outbounds.length}
       <table>
-        <thead><tr><th>Tag</th><th>Protocol</th><th>Send through</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>{tr('routing.tag')}</th><th>{tr('routing.protocol')}</th><th>{tr('routing.send_through')}</th><th>{tr('routing.note')}</th><th></th></tr></thead>
         <tbody>
           {#each outbounds as o}
             <tr class:off={!o.enabled}>
@@ -314,8 +313,8 @@
               <td class="mono">{o.send_through || '—'}</td>
               <td class="note">{o.note || '—'}</td>
               <td class="acts">
-                <button class="btn-sm" onclick={() => openOutbound(o)}>Edit</button>
-                <button class="btn-sm danger" onclick={() => deleteOutbound(o)}>Delete</button>
+                <button class="btn-sm" onclick={() => openOutbound(o)}>{tr('routing.edit')}</button>
+                <button class="btn-sm danger" onclick={() => deleteOutbound(o)}>{tr('routing.delete')}</button>
               </td>
             </tr>
           {/each}
@@ -326,17 +325,16 @@
 
   <div class="card">
     <div class="section-head">
-      <h3>Rules</h3>
-      <button class="btn-primary" data-testid="new-rule" onclick={() => openRule(null)}>New rule</button>
+      <h3>{tr('routing.rules')}</h3>
+      <button class="btn-primary" data-testid="new-rule" onclick={() => openRule(null)}>{tr('routing.new_rule')}</button>
     </div>
     {#if rules.length === 0}
       <p class="muted" data-testid="no-rules">
-        No rules yet. Without any, every inbound behaves exactly as it does today:
-        relay chains apply, and everything else goes out directly.
+        {tr('routing.no_rules_yet_without_any_every')}
       </p>
     {:else}
       <table>
-        <thead><tr><th>#</th><th>Rule</th><th>Matches</th><th>Sends to</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>{tr('routing.rule')}</th><th>{tr('routing.matches')}</th><th>{tr('routing.sends_to')}</th><th></th></tr></thead>
         <tbody>
           {#each rules as r, i}
             <tr class:off={!r.enabled}>
@@ -345,13 +343,13 @@
               <td class="muted">{summarise(r)}</td>
               <td><code>{r.outbound_tag}</code></td>
               <td class="acts">
-                <button class="btn-sm" disabled={i === 0} onclick={() => move(i, -1)} title="Earlier">↑</button>
-                <button class="btn-sm" disabled={i === rules.length - 1} onclick={() => move(i, 1)} title="Later">↓</button>
+                <button class="btn-sm" disabled={i === 0} onclick={() => move(i, -1)} title={tr('routing.earlier')}>↑</button>
+                <button class="btn-sm" disabled={i === rules.length - 1} onclick={() => move(i, 1)} title={tr('routing.later')}>↓</button>
                 <button class="btn-sm" data-testid="toggle-rule" onclick={() => toggleRule(r)}>
                   {r.enabled ? 'Disable' : 'Enable'}
                 </button>
-                <button class="btn-sm" onclick={() => openRule(r)}>Edit</button>
-                <button class="btn-sm danger" onclick={() => deleteRule(r)}>Delete</button>
+                <button class="btn-sm" onclick={() => openRule(r)}>{tr('routing.edit')}</button>
+                <button class="btn-sm danger" onclick={() => deleteRule(r)}>{tr('routing.delete')}</button>
               </td>
             </tr>
           {/each}
@@ -362,68 +360,68 @@
 {/if}
 
 <Modal title={obEditing ? 'Edit outbound' : 'New outbound'} isOpen={obOpen} onClose={() => (obOpen = false)}>
-  <label>Tag<input bind:value={obTag} placeholder="relay-de" data-testid="ob-tag" /></label>
+  <label>{tr('routing.tag')}<input bind:value={obTag} placeholder={tr('routing.relay_de')} data-testid="ob-tag" /></label>
   <label>
-    Protocol
+    {tr('routing.protocol')}
     <select bind:value={obProto} data-testid="ob-proto">
       {#each OUTBOUND_PROTOCOLS as p}<option value={p}>{p}</option>{/each}
     </select>
   </label>
   <label>
-    Settings (JSON)
+    {tr('routing.settings_json')}
     <textarea bind:value={obSettings} rows="6" data-testid="ob-settings"
       placeholder={'{"servers":[{"address":"127.0.0.1","port":1080}]}'}></textarea>
-    <small>The core's own object, passed through unchanged. The core validates it.</small>
+    <small>{tr('routing.the_core_s_own_object_passed')}</small>
   </label>
   <label>
-    Stream settings (JSON)
+    {tr('routing.stream_settings_json')}
     <textarea bind:value={obStream} rows="4" placeholder={'{"network":"tcp"}'}></textarea>
   </label>
   <label>
-    Send through
+    {tr('routing.send_through')}
     <input bind:value={obSendThrough} placeholder="10.0.0.5" />
-    <small>Local source address, for a host with several egress IPs.</small>
+    <small>{tr('routing.local_source_address_for_a_host')}</small>
   </label>
-  <label>Note<input bind:value={obNote} placeholder="what this exit is for" /></label>
+  <label>{tr('routing.note')}<input bind:value={obNote} placeholder={tr('routing.what_this_exit_is_for')} /></label>
   <div class="modal-actions">
-    <button class="btn-sm" onclick={() => (obOpen = false)}>Cancel</button>
-    <button class="btn-primary" data-testid="save-outbound" onclick={saveOutbound}>Save</button>
+    <button class="btn-sm" onclick={() => (obOpen = false)}>{tr('routing.cancel')}</button>
+    <button class="btn-primary" data-testid="save-outbound" onclick={saveOutbound}>{tr('routing.save')}</button>
   </div>
 </Modal>
 
 <Modal title={rEditing ? 'Edit rule' : 'New rule'} isOpen={ruleOpen} onClose={() => (ruleOpen = false)}>
-  <label>Name<input bind:value={rName} placeholder="block ads" data-testid="rule-name" /></label>
+  <label>{tr('routing.name')}<input bind:value={rName} placeholder={tr('routing.block_ads')} data-testid="rule-name" /></label>
   <label>
-    Domains
+    {tr('routing.domains')}
     <textarea bind:value={rDomain} rows="3" data-testid="rule-domain"
       placeholder={'geosite:category-ads-all\ndomain:example.com'}></textarea>
   </label>
   <label>
-    IPs
+    {tr('routing.ips')}
     <textarea bind:value={rIP} rows="3" placeholder={'geoip:ir\n10.0.0.0/8'}></textarea>
   </label>
-  <label>Ports<input bind:value={rPort} placeholder="80,443,1000-2000" /></label>
+  <label>{tr('routing.ports')}<input bind:value={rPort} placeholder="80,443,1000-2000" /></label>
   <label>
-    Network
+    {tr('routing.network')}
     <select bind:value={rNetwork}>
-      <option value="tcp,udp">tcp and udp</option>
-      <option value="tcp">tcp</option>
-      <option value="udp">udp</option>
+      <option value="tcp,udp">{tr('routing.tcp_and_udp')}</option>
+      <option value="tcp">{tr('routing.tcp')}</option>
+      <option value="udp">{tr('routing.udp')}</option>
     </select>
   </label>
   <label>
-    Sniffed protocols
+    {tr('routing.sniffed_protocols')}
     <textarea bind:value={rProtocol} rows="2" placeholder={'tls\nbittorrent'}></textarea>
     <!-- A rule matching on a sniffed protocol silently never fires when
          sniffing is off for the inbound, which reads as a broken panel. -->
-    <small>Only matches when sniffing is enabled on the inbound.</small>
+    <small>{tr('routing.only_matches_when_sniffing_is_enabled')}</small>
   </label>
   <label>
-    Inbound tags
-    <textarea bind:value={rInbounds} rows="2" placeholder="in-443"></textarea>
+    {tr('routing.inbound_tags')}
+    <textarea bind:value={rInbounds} rows="2" placeholder={tr('routing.in_443')}></textarea>
   </label>
   <label>
-    Send to
+    {tr('routing.send_to')}
     <select bind:value={rOutbound} data-testid="rule-outbound">
       {#each allTags as t}<option value={t}>{t}</option>{/each}
     </select>
@@ -432,14 +430,13 @@
     <!-- The API refuses this too; saying so here means the operator finds out
          while looking at the form rather than from a rejected request. -->
     <p class="warn" data-testid="rule-warning">
-      A rule with no conditions matches all traffic and would swallow every rule
-      below it. Add at least one condition.
+      {tr('routing.a_rule_with_no_conditions_matches')}
     </p>
   {/if}
   <div class="modal-actions">
-    <button class="btn-sm" onclick={() => (ruleOpen = false)}>Cancel</button>
+    <button class="btn-sm" onclick={() => (ruleOpen = false)}>{tr('routing.cancel')}</button>
     <button class="btn-primary" data-testid="save-rule" disabled={!ruleHasMatcher} onclick={saveRule}>
-      Save
+      {tr('routing.save')}
     </button>
   </div>
 </Modal>
@@ -450,9 +447,9 @@
   .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .card h3 { margin: 0; font-size: 13px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
   .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-  .precedence ol { margin: 10px 0; padding-left: 20px; color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.8; }
+  .precedence ol { margin: 10px 0; padding-inline-start: 20px; color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.8; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.off td { opacity: 0.45; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }

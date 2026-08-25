@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import type { User, UserGroup, Node, SystemHealth } from '$lib/types';
@@ -36,7 +37,7 @@
       setSession(res.access_token, res.refresh_token);
       await loadAll();
     } catch (err: any) {
-      authError = err.message || 'Authentication failed';
+      authError = err.message || tr('admin.authentication_failed');
     }
   }
 
@@ -65,7 +66,7 @@
       newUsername = '';
       await loadAll();
     } catch (err: any) {
-      userError = err.message || 'Failed to create user';
+      userError = err.message || tr('admin.failed_to_create_user');
     }
   }
 
@@ -77,7 +78,7 @@
       });
       await loadAll();
     } catch (err: any) {
-      alert(err.message || 'Failed to update user status');
+      alert(err.message || tr('admin.failed_to_update_user_status'));
     }
   }
 
@@ -93,17 +94,17 @@
       newNodeAddr = '';
       await loadAll();
     } catch (err: any) {
-      nodeError = err.message || 'Failed to register node';
+      nodeError = err.message || tr('admin.failed_to_register_node');
     }
   }
 
   async function deleteNode(id: number) {
-    if (!confirm('Remove this node?')) return;
+    if (!confirm(tr('admin.remove_this_node'))) return;
     try {
       await apiFetch(`/admin/nodes/${id}`, { method: 'DELETE' });
       await loadAll();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete node');
+      alert(err.message || tr('admin.failed_to_delete_node'));
     }
   }
 
@@ -113,7 +114,7 @@
 </script>
 
 <svelte:head>
-  <title>ForgePanel — Administration</title>
+  <title>{tr('admin.forgepanel_administration')}</title>
 </svelte:head>
 
 <div class="layout">
@@ -124,9 +125,9 @@
     </div>
     {#if token}
       <nav>
-        <button class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>Overview</button>
-        <button class:active={activeTab === 'users'} onclick={() => activeTab = 'users'}>Users ({users.length})</button>
-        <button class:active={activeTab === 'nodes'} onclick={() => activeTab = 'nodes'}>Nodes ({nodes.length})</button>
+        <button class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>{tr('admin.overview')}</button>
+        <button class:active={activeTab === 'users'} onclick={() => activeTab = 'users'}>{tr('admin.users', { length: users.length })}</button>
+        <button class:active={activeTab === 'nodes'} onclick={() => activeTab = 'nodes'}>{tr('admin.nodes', { length: nodes.length })}</button>
       </nav>
     {/if}
   </aside>
@@ -134,36 +135,36 @@
   <main class="content">
     {#if !token}
       <div class="card login-box">
-        <h2>Sign In</h2>
+        <h2>{tr('admin.sign_in')}</h2>
         <form onsubmit={login}>
           <div class="form-group">
-            <label for="u">Username</label>
+            <label for="u">{tr('admin.username')}</label>
             <input id="u" type="text" bind:value={username} required />
           </div>
           <div class="form-group">
-            <label for="p">Password</label>
+            <label for="p">{tr('admin.password')}</label>
             <input id="p" type="password" bind:value={password} required />
           </div>
-          <button type="submit" class="primary">Sign In</button>
+          <button type="submit" class="primary">{tr('admin.sign_in')}</button>
         </form>
         {#if authError}<p class="err">{authError}</p>{/if}
       </div>
     {:else}
       {#if activeTab === 'overview'}
         <section class="tab-pane">
-          <h2>System Health</h2>
+          <h2>{tr('admin.system_health')}</h2>
           {#if health}
             <div class="stats-grid">
               <div class="stat-card">
-                <span class="label">Status</span>
+                <span class="label">{tr('admin.status')}</span>
                 <span class="value ok">{health.status}</span>
               </div>
               <div class="stat-card">
-                <span class="label">Version</span>
+                <span class="label">{tr('admin.version')}</span>
                 <span class="value">{health.version}</span>
               </div>
               <div class="stat-card">
-                <span class="label">Active Nodes</span>
+                <span class="label">{tr('admin.active_nodes')}</span>
                 <span class="value">{health.nodes_online} / {health.nodes_total}</span>
               </div>
             </div>
@@ -171,25 +172,25 @@
         </section>
       {:else if activeTab === 'users'}
         <section class="tab-pane">
-          <h2>User Accounts</h2>
+          <h2>{tr('admin.user_accounts')}</h2>
           <div class="card">
-            <h3>Add New User</h3>
+            <h3>{tr('admin.add_new_user')}</h3>
             <div class="row">
-              <input type="text" bind:value={newUsername} placeholder="Username" />
+              <input type="text" bind:value={newUsername} placeholder={tr('admin.username')} />
               <select bind:value={newGroup}>
-                <option value={undefined}>No Group</option>
+                <option value={undefined}>{tr('admin.no_group')}</option>
                 {#each groups as g}
                   <option value={g.id}>{g.name}</option>
                 {/each}
               </select>
-              <button onclick={createUser} class="primary">Create User</button>
+              <button onclick={createUser} class="primary">{tr('admin.create_user')}</button>
             </div>
             {#if userError}<p class="err">{userError}</p>{/if}
           </div>
 
           <table>
             <thead>
-              <tr><th>ID</th><th>Username</th><th>Sub Token</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>ID</th><th>{tr('admin.username')}</th><th>{tr('admin.sub_token')}</th><th>{tr('admin.status')}</th><th>{tr('admin.actions')}</th></tr>
             </thead>
             <tbody>
               {#each users as u}
@@ -214,20 +215,20 @@
         </section>
       {:else if activeTab === 'nodes'}
         <section class="tab-pane">
-          <h2>Node Cluster</h2>
+          <h2>{tr('admin.node_cluster')}</h2>
           <div class="card">
-            <h3>Register Node</h3>
+            <h3>{tr('admin.register_node')}</h3>
             <div class="row">
-              <input type="text" bind:value={newNodeName} placeholder="Node Name" />
-              <input type="text" bind:value={newNodeAddr} placeholder="Address (IP/Domain)" />
-              <button onclick={createNode} class="primary">Register</button>
+              <input type="text" bind:value={newNodeName} placeholder={tr('admin.node_name')} />
+              <input type="text" bind:value={newNodeAddr} placeholder={tr('admin.address_ip_domain')} />
+              <button onclick={createNode} class="primary">{tr('admin.register')}</button>
             </div>
             {#if nodeError}<p class="err">{nodeError}</p>{/if}
           </div>
 
           <table>
             <thead>
-              <tr><th>Name</th><th>Address</th><th>CPU</th><th>Memory</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>{tr('admin.name')}</th><th>{tr('admin.address')}</th><th>CPU</th><th>{tr('admin.memory')}</th><th>{tr('admin.status')}</th><th>{tr('admin.actions')}</th></tr>
             </thead>
             <tbody>
               {#each nodes as n}
@@ -235,14 +236,14 @@
                   <td><strong>{n.name}</strong></td>
                   <td><code>{n.address}</code></td>
                   <td>{n.cpu}%</td>
-                  <td>{n.mem_mb} MB</td>
+                  <td>{tr('admin.mb', { mem_mb: n.mem_mb })}</td>
                   <td>
                     <span class="badge {n.healthy ? 'ok' : 'err'}">
                       {n.healthy ? 'Online' : 'Offline'}
                     </span>
                   </td>
                   <td>
-                    <button class="sm danger" onclick={() => deleteNode(n.id)}>Delete</button>
+                    <button class="sm danger" onclick={() => deleteNode(n.id)}>{tr('admin.delete')}</button>
                   </td>
                 </tr>
               {/each}
@@ -265,7 +266,7 @@
   .sidebar {
     width: 240px;
     background: #0F1420;
-    border-right: 1px solid rgba(255,255,255,0.08);
+    border-inline-end: 1px solid rgba(255,255,255,0.08);
     padding: 24px 16px;
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
@@ -273,7 +274,7 @@
   nav button {
     display: block;
     width: 100%;
-    text-align: left;
+    text-align: start;
     background: none;
     border: none;
     color: rgba(255,255,255,0.7);
@@ -327,7 +328,7 @@
   .stat-card .value { font-size: 24px; font-weight: 700; }
   .value.ok { color: #27D17C; }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
+  th, td { padding: 12px; text-align: start; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
   th { color: rgba(255,255,255,0.6); font-weight: 600; }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }

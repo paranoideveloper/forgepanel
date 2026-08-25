@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
@@ -32,7 +33,7 @@
       addr = await apiFetch<PanelAddress>('/admin/panel-address');
       panelDomain = addr.domain || '';
     } catch (err: any) {
-      showToast(err.message || 'Failed to load TLS status', 'error');
+      showToast(err.message || tr('certificates.failed_to_load_tls_status'), 'error');
     } finally {
       loading = false;
     }
@@ -45,10 +46,10 @@
         body: JSON.stringify({ domain: panelDomain.trim() })
       });
       restartNote = !!res.restart_required;
-      showToast('Panel domain saved — HTTPS/ACME enabled', 'success');
+      showToast(tr('certificates.panel_domain_saved_https_acme_enabled'), 'success');
       await loadData();
     } catch (err: any) {
-      showToast(err.message || 'Failed to update domain', 'error');
+      showToast(err.message || tr('certificates.failed_to_update_domain'), 'error');
     }
   }
 
@@ -59,7 +60,7 @@
     try {
       dns = await apiFetch<DnsCheck>(`/admin/panel-address/dns-check?domain=${encodeURIComponent(panelDomain.trim())}`);
     } catch (err: any) {
-      showToast('DNS check failed', 'error');
+      showToast(tr('certificates.dns_check_failed'), 'error');
     } finally {
       checkingDns = false;
     }
@@ -80,7 +81,7 @@
       });
       certPem = '';
       keyPem = '';
-      showToast('TLS Certificate imported successfully', 'success');
+      showToast(tr('certificates.tls_certificate_imported_successfully'), 'success');
       await loadData();
     } catch (err: any) {
       importErr = err.message || 'Failed to import certificate';
@@ -90,10 +91,10 @@
   async function renewCert() {
     try {
       await apiFetch('/admin/panel-address/cert/renew', { method: 'POST' });
-      showToast('ACME certificate issued/renewed', 'success');
+      showToast(tr('certificates.acme_certificate_issued_renewed'), 'success');
       await loadData();
     } catch (err: any) {
-      showToast(err.message || 'Failed to renew certificate', 'error');
+      showToast(err.message || tr('certificates.failed_to_renew_certificate'), 'error');
     }
   }
 
@@ -101,88 +102,87 @@
 </script>
 
 <div class="view-header">
-  <h2>Certificates &amp; Panel Domain</h2>
-  <button class="btn-primary" onclick={loadData}>Refresh</button>
+  <h2>{tr('certificates.certificates_amp_panel_domain')}</h2>
+  <button class="btn-primary" onclick={loadData}>{tr('certificates.refresh')}</button>
 </div>
 
 {#if addr?.domain}
   <div class="banner {onDomain && addr.cert?.available ? 'ok' : 'warn'}" data-testid="access-banner">
     {#if onDomain && addr.cert?.available}
-      ✅ You are viewing the panel over its domain with a browser-trusted certificate.
+      {tr('certificates.you_are_viewing_the_panel_over', {  })}
     {:else if onDomain}
-      ⚠️ You are on the domain, but no trusted certificate has been issued yet — the browser still shows the self-signed fallback (“Not Secure”). Click <strong>Force ACME Issue / Renew</strong> below. If it keeps failing, Let's Encrypt must reach <strong>port 80</strong> of this server from the internet to validate the domain (open it in the firewall, and on Docker publish <code>80:80</code>); a domain saved after startup also needs one panel restart to start the ACME helper.
+      {tr('certificates.you_are_on_the_domain_but', {  })} <strong>{tr('certificates.force_acme_issue_renew')}</strong> {tr('certificates.below_if_it_keeps_failing_let')} <strong>{tr('certificates.port_80')}</strong> {tr('certificates.of_this_server_from_the_internet')} <code>80:80</code>{tr('certificates.a_domain_saved_after_startup_also', {  })}
     {:else}
-      ⚠️ You are viewing the panel by IP ({viewingHost}), so the browser shows the self-signed fallback and marks it “Not Secure”.
-      Open your panel at its domain for a trusted certificate:
+      {tr('certificates.you_are_viewing_the_panel_by', { viewingHost })}
       <a class="url" href={addr.public_url} target="_blank" rel="noreferrer">{addr.public_url}</a>
     {/if}
   </div>
 {/if}
 
 <div class="card">
-  <h3>Panel Domain &amp; Auto TLS (Let's Encrypt / ACME)</h3>
-  <p class="hint">Point an A record for your domain at <code>{addr?.server_ipv4 || 'this server'}</code>, save it here, then reopen the panel via the domain. A Let's Encrypt certificate is issued automatically — this needs <strong>port 80</strong> reachable from the internet (open it in the firewall; on Docker publish <code>80:80</code>).</p>
+  <h3>{tr('certificates.panel_domain_amp_auto_tls_let')}</h3>
+  <p class="hint">{tr('certificates.point_an_a_record_for_your')} <code>{addr?.server_ipv4 || 'this server'}</code>{tr('certificates.save_it_here_then_reopen_the')} <strong>{tr('certificates.port_80')}</strong> {tr('certificates.reachable_from_the_internet_open_it')} <code>80:80</code>).</p>
   <div class="form-row">
-    <input type="text" bind:value={panelDomain} placeholder="panel.example.com" data-testid="domain-input" />
-    <button class="btn-primary" onclick={updateDomain} data-testid="save-domain">Save Domain</button>
+    <input type="text" bind:value={panelDomain} placeholder={tr('certificates.panel_example_com')} data-testid="domain-input" />
+    <button class="btn-primary" onclick={updateDomain} data-testid="save-domain">{tr('certificates.save_domain')}</button>
     <button class="btn-secondary" onclick={checkDns} disabled={checkingDns} data-testid="check-dns">
       {checkingDns ? 'Checking...' : 'Check DNS'}
     </button>
   </div>
 
   {#if restartNote}
-    <div class="dns-box warn">Saved. A restart applies the change to the ACME helper — <code>docker compose restart forgepanel</code> (or restart the service).</div>
+    <div class="dns-box warn">{tr('certificates.saved_a_restart_applies_the_change')} <code>{tr('certificates.docker_compose_restart_forgepanel')}</code> {tr('certificates.or_restart_the_service')}</div>
   {/if}
 
   {#if dns}
     {#if !dns.resolves}
-      <div class="dns-box err" data-testid="dns-result">DNS records failed to resolve{dns.error ? ` (${dns.error})` : ''}.</div>
+      <div class="dns-box err" data-testid="dns-result">{tr('certificates.dns_records_failed_to_resolve', { p1: dns.error ? ` (${dns.error})` : '' })}</div>
     {:else if dns.points_here}
-      <div class="dns-box ok" data-testid="dns-result">DNS resolves to {(dns.a || []).join(', ')} — points at this server ✅</div>
+      <div class="dns-box ok" data-testid="dns-result">{tr('certificates.dns_resolves_to_points_at_this', { p1: (dns.a || []).join(', ') })}</div>
     {:else}
-      <div class="dns-box warn" data-testid="dns-result">DNS resolves to {(dns.a || []).join(', ')}, but this server is {dns.server_ipv4}. Update the A record to point here.</div>
+      <div class="dns-box warn" data-testid="dns-result">{tr('certificates.dns_resolves_to_but_this_server', { p1: (dns.a || []).join(', '), server_ipv4: dns.server_ipv4 })}</div>
     {/if}
   {/if}
 </div>
 
 {#if addr}
   <div class="card">
-    <h3>Active TLS Certificate Status</h3>
+    <h3>{tr('certificates.active_tls_certificate_status')}</h3>
     <div class="status-grid">
-      <div><span class="lbl">Domain:</span> <strong>{addr.domain || 'N/A (self-signed on IP)'}</strong></div>
+      <div><span class="lbl">{tr('certificates.domain')}</span> <strong>{addr.domain || 'N/A (self-signed on IP)'}</strong></div>
       <div>
-        <span class="lbl">Status:</span>
+        <span class="lbl">{tr('certificates.status')}</span>
         {#if addr.cert?.available}
-          <span class="badge badge-ok" data-testid="cert-status">Trusted (ACME)</span>
+          <span class="badge badge-ok" data-testid="cert-status">{tr('certificates.trusted_acme')}</span>
         {:else if addr.domain}
-          <span class="badge badge-warn" data-testid="cert-status">Pending issuance</span>
+          <span class="badge badge-warn" data-testid="cert-status">{tr('certificates.pending_issuance')}</span>
         {:else}
-          <span class="badge badge-err" data-testid="cert-status">Self-signed</span>
+          <span class="badge badge-err" data-testid="cert-status">{tr('certificates.self_signed')}</span>
         {/if}
       </div>
-      <div><span class="lbl">Issuer:</span> <code>{addr.cert?.issuer || 'Self-Signed'}</code></div>
-      <div><span class="lbl">Valid Until:</span> {addr.cert?.not_after ? new Date(addr.cert.not_after).toLocaleDateString() : 'Indefinite'}{addr.cert?.days_remaining != null ? ` (${addr.cert.days_remaining}d)` : ''}</div>
+      <div><span class="lbl">{tr('certificates.issuer')}</span> <code>{addr.cert?.issuer || 'Self-Signed'}</code></div>
+      <div><span class="lbl">{tr('certificates.valid_until')}</span> {addr.cert?.not_after ? new Date(addr.cert.not_after).toLocaleDateString() : 'Indefinite'}{addr.cert?.days_remaining != null ? ` (${addr.cert.days_remaining}d)` : ''}</div>
     </div>
     {#if addr.cert?.acme?.renewal_error}
-      <div class="dns-box err">Last ACME error: {addr.cert.acme.renewal_error}</div>
+      <div class="dns-box err">{tr('certificates.last_acme_error', { renewal_error: addr.cert.acme.renewal_error })}</div>
     {/if}
     <div style="margin-top:16px">
-      <button class="btn-secondary" onclick={renewCert} data-testid="renew-cert">Force ACME Issue / Renew</button>
+      <button class="btn-secondary" onclick={renewCert} data-testid="renew-cert">{tr('certificates.force_acme_issue_renew')}</button>
     </div>
   </div>
 {/if}
 
 <div class="card">
-  <h3>Import Custom TLS Certificate</h3>
+  <h3>{tr('certificates.import_custom_tls_certificate')}</h3>
   <div class="form-group">
-    <label for="cert">Certificate PEM</label>
-    <textarea id="cert" rows="4" bind:value={certPem} placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+    <label for="cert">{tr('certificates.certificate_pem')}</label>
+    <textarea id="cert" rows="4" bind:value={certPem} placeholder={tr('certificates.begin_certificate')}></textarea>
   </div>
   <div class="form-group">
-    <label for="key">Private Key PEM</label>
-    <textarea id="key" rows="4" bind:value={keyPem} placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+    <label for="key">{tr('certificates.private_key_pem')}</label>
+    <textarea id="key" rows="4" bind:value={keyPem} placeholder={tr('certificates.begin_private_key')}></textarea>
   </div>
-  <button class="btn-primary" onclick={importCert}>Import Custom Certificate</button>
+  <button class="btn-primary" onclick={importCert}>{tr('certificates.import_custom_certificate')}</button>
   {#if importErr}<p class="err-text">{importErr}</p>{/if}
 </div>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
@@ -40,7 +41,7 @@
       domains = await apiFetch<Domain[]>('/admin/domains');
       status = await apiFetch<DomainStatus>('/admin/domains-status');
     } catch (err: any) {
-      showToast(err.message || 'Failed to load domains', 'error');
+      showToast(err.message || tr('domains.failed_to_load_domains'), 'error');
     } finally {
       loading = false;
     }
@@ -55,12 +56,12 @@
         method: 'POST',
         body: JSON.stringify({ name, provider: newProvider.trim() })
       });
-      showToast(`Domain ${name} added`, 'success');
+      showToast(tr('domains.domain_name_added', { name }), 'success');
       newName = '';
       newProvider = '';
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to add domain', 'error');
+      showToast(err.message || tr('domains.failed_to_add_domain'), 'error');
     } finally {
       adding = false;
     }
@@ -72,32 +73,32 @@
         method: 'PUT',
         body: JSON.stringify({ is_default: true })
       });
-      showToast(`${d.name} is now the default domain`, 'success');
+      showToast(tr('domains.name_is_now_the_default_domain', { name: d.name }), 'success');
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed', 'error');
+      showToast(err.message || tr('domains.failed'), 'error');
     }
   }
 
   async function removeDomain(d: Domain) {
-    if (!confirm(`Delete ${d.name}? Inbounds using it will keep the bare domain string.`)) return;
+    if (!confirm(tr('domains.delete_name_inbounds_using_it_will', { name: d.name }))) return;
     try {
       await apiFetch(`/admin/domains/${d.id}`, { method: 'DELETE' });
-      showToast(`${d.name} deleted`, 'success');
+      showToast(tr('domains.name_deleted', { name: d.name }), 'success');
       await load();
     } catch (err: any) {
       if (err.status === 409) {
-        if (confirm(`${d.name} is still used by inbounds. Delete anyway?`)) {
+        if (confirm(tr('domains.name_is_still_used_by_inbounds', { name: d.name }))) {
           try {
             await apiFetch(`/admin/domains/${d.id}?force=true`, { method: 'DELETE' });
-            showToast(`${d.name} deleted`, 'success');
+            showToast(tr('domains.name_deleted', { name: d.name }), 'success');
             await load();
           } catch (e: any) {
-            showToast(e.message || 'Failed', 'error');
+            showToast(e.message || tr('domains.failed'), 'error');
           }
         }
       } else {
-        showToast(err.message || 'Failed', 'error');
+        showToast(err.message || tr('domains.failed'), 'error');
       }
     }
   }
@@ -108,9 +109,9 @@
         method: 'POST',
         body: JSON.stringify({})
       });
-      showToast(`REALITY inbound created on port ${res.port}`, 'success');
+      showToast(tr('domains.reality_inbound_created_on_port_port', { port: res.port }), 'success');
     } catch (err: any) {
-      showToast(err.message || 'Failed to create REALITY inbound', 'error');
+      showToast(err.message || tr('domains.failed_to_create_reality_inbound'), 'error');
     }
   }
 
@@ -118,13 +119,13 @@
 </script>
 
 <div class="domains-view">
-  <h2>Domains</h2>
+  <h2>{tr('domains.domains')}</h2>
 
   {#if status && !status.has_domain}
     <!-- The no-domain state is loud, never silent: without a domain, TLS
          protocols cannot be secured, so steer the operator to REALITY. -->
     <div class="banner warn" role="alert">
-      <div class="banner-title">⚠️ No domain configured</div>
+      <div class="banner-title">{tr('domains.no_domain_configured')}</div>
       <p>{status.guidance_en}</p>
       <p dir="rtl" lang="fa" class="fa">{status.guidance_fa}</p>
       <div class="free-list">
@@ -136,41 +137,40 @@
         {/each}
       </div>
       <button class="btn-primary" onclick={realityQuickstart}>
-        Create a REALITY inbound in one click
+        {tr('domains.create_a_reality_inbound_in_one')}
       </button>
     </div>
   {/if}
 
   <section class="add-domain">
-    <h3>Add a domain</h3>
+    <h3>{tr('domains.add_a_domain')}</h3>
     <div class="add-row">
-      <input placeholder="vpn.example.com" bind:value={newName} aria-label="Domain name" />
-      <select bind:value={newProvider} aria-label="DNS provider">
-        <option value="">No provider</option>
+      <input placeholder={tr('domains.vpn_example_com')} bind:value={newName} aria-label={tr('domains.domain_name')} />
+      <select bind:value={newProvider} aria-label={tr('domains.dns_provider')}>
+        <option value="">{tr('domains.no_provider')}</option>
         <option value="cloudflare">Cloudflare</option>
-        <option value="arvan">ArvanCloud</option>
-        <option value="desec">deSEC</option>
+        <option value="arvan">{tr('domains.arvancloud')}</option>
+        <option value="desec">{tr('domains.desec')}</option>
       </select>
       <button class="btn-primary" onclick={addDomain} disabled={adding || !newName.trim()}>
         {adding ? 'Adding…' : 'Add domain'}
       </button>
     </div>
     <p class="hint">
-      Setting a domain on an inbound cascades to its SNI, Host header, certificate,
-      generated client links and subscription URL — set it once, everything follows.
+      {tr('domains.setting_a_domain_on_an_inbound')}
     </p>
   </section>
 
   <section class="domain-list">
-    <h3>Registered domains</h3>
+    <h3>{tr('domains.registered_domains')}</h3>
     {#if loading}
-      <p>Loading…</p>
+      <p>{tr('domains.loading')}</p>
     {:else if domains.length === 0}
-      <p class="empty">No domains yet — add one above to unlock one-click TLS.</p>
+      <p class="empty">{tr('domains.no_domains_yet_add_one_above')}</p>
     {:else}
       <table>
         <thead>
-          <tr><th>Domain</th><th>Provider</th><th>TLS</th><th>Default</th><th></th></tr>
+          <tr><th>{tr('domains.domain')}</th><th>{tr('domains.provider')}</th><th>TLS</th><th>{tr('domains.default')}</th><th></th></tr>
         </thead>
         <tbody>
           {#each domains as d}
@@ -180,12 +180,12 @@
               <td>{d.tls_mode || '—'}</td>
               <td>
                 {#if d.is_default}
-                  <span class="badge">default</span>
+                  <span class="badge">{tr('domains.default_2')}</span>
                 {:else}
-                  <button class="btn-link" onclick={() => makeDefault(d)}>make default</button>
+                  <button class="btn-link" onclick={() => makeDefault(d)}>{tr('domains.make_default')}</button>
                 {/if}
               </td>
-              <td><button class="btn-danger" onclick={() => removeDomain(d)}>Delete</button></td>
+              <td><button class="btn-danger" onclick={() => removeDomain(d)}>{tr('domains.delete')}</button></td>
             </tr>
           {/each}
         </tbody>
@@ -211,7 +211,7 @@
   .add-row input, .add-row select { padding: 0.5rem; border-radius: 6px; }
   .hint { font-size: 0.85rem; opacity: 0.75; margin-top: 0.5rem; }
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-  th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid rgba(127,127,127,0.2); }
+  th, td { text-align: start; padding: 0.5rem; border-bottom: 1px solid rgba(127,127,127,0.2); }
   .name { font-weight: 600; }
   .badge { background: #27d17c; color: #04140a; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; }
   .btn-primary { background: #ff7a1a; color: #1a1204; border: none; padding: 0.5rem 0.9rem; border-radius: 6px; cursor: pointer; font-weight: 600; }

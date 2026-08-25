@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import QRCode from '$lib/components/QRCode.svelte';
@@ -43,15 +44,15 @@
 
   async function saveDomain(skip = false) {
     if (skip) { step = 2; return; }
-    if (!domain.trim()) { showToast('Enter a domain, or Skip to use the IP', 'error'); return; }
+    if (!domain.trim()) { showToast(tr('setupwizard.enter_a_domain_or_skip_to'), 'error'); return; }
     savingDomain = true;
     try {
       await apiFetch('/admin/panel-address', { method: 'POST', body: JSON.stringify({ domain: domain.trim() }) });
       await loadAddr();
-      showToast('Domain saved — HTTPS/ACME enabled', 'success');
+      showToast(tr('setupwizard.domain_saved_https_acme_enabled'), 'success');
       step = 2;
     } catch (e: any) {
-      showToast(e.message || 'Failed to save domain', 'error');
+      showToast(e.message || tr('setupwizard.failed_to_save_domain'), 'error');
     } finally {
       savingDomain = false;
     }
@@ -62,17 +63,17 @@
     try {
       const r = await apiFetch<any>('/admin/inbounds/reality-quickstart', { method: 'POST', body: JSON.stringify({}) });
       inboundCreated = true;
-      inboundInfo = r?.node?.remark || r?.remark || 'VLESS + REALITY';
-      showToast('Inbound created (VLESS + REALITY)', 'success');
+      inboundInfo = r?.node?.remark || r?.remark || tr('setupwizard.vless_reality');
+      showToast(tr('setupwizard.inbound_created_vless_reality'), 'success');
     } catch (e: any) {
-      showToast(e.message || 'Failed to create inbound', 'error');
+      showToast(e.message || tr('setupwizard.failed_to_create_inbound'), 'error');
     } finally {
       creatingInbound = false;
     }
   }
 
   async function createUser() {
-    if (!username.trim()) { showToast('Enter a username', 'error'); return; }
+    if (!username.trim()) { showToast(tr('setupwizard.enter_a_username'), 'error'); return; }
     creatingUser = true;
     try {
       const u = await apiFetch<any>('/admin/users', {
@@ -89,18 +90,18 @@
           await apiFetch(`/admin/users/${u.id}/inbounds`, { method: 'PUT', body: JSON.stringify({ inbound_ids: inbounds.map((i) => i.id) }) });
         }
       } catch (_) {}
-      showToast('User created', 'success');
+      showToast(tr('setupwizard.user_created'), 'success');
       step = 4;
     } catch (e: any) {
-      showToast(e.message || 'Failed to create user', 'error');
+      showToast(e.message || tr('setupwizard.failed_to_create_user'), 'error');
     } finally {
       creatingUser = false;
     }
   }
 
   async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); showToast('Copied', 'success'); }
-    catch (_) { showToast('Copy failed', 'error'); }
+    try { await navigator.clipboard.writeText(text); showToast(tr('setupwizard.copied'), 'success'); }
+    catch (_) { showToast(tr('setupwizard.copy_failed'), 'error'); }
   }
 
   // One-click Preset Wizard: build the WHOLE multi-protocol server (every config
@@ -120,31 +121,31 @@
         body: JSON.stringify({ domain: pwDomain.trim(), cf_token: pwToken.trim(), cf_account_id: pwAccount.trim() })
       });
       pwResult = r;
-      showToast(`Built ${r.count} inbounds`, 'success');
+      showToast(tr('setupwizard.built_count_inbounds', { count: r.count }), 'success');
     } catch (e: any) {
-      showToast(e.message || 'Preset wizard failed', 'error');
+      showToast(e.message || tr('setupwizard.preset_wizard_failed'), 'error');
     } finally {
       pwRunning = false;
     }
   }
 </script>
 
-<div class="view-header"><h2>Setup Wizard</h2></div>
+<div class="view-header"><h2>{tr('setupwizard.setup_wizard')}</h2></div>
 
 <div class="card preset">
-  <h3>🧙 One-click full server (Preset Wizard)</h3>
-  <p class="hint">Build the whole multi-protocol server in a single step — REALITY-Vision, REALITY-XHTTP &amp; Brutal (direct, SNI-rotating), VLESS-WS / VLESS-XHTTP / VMess-WS over TLS behind Cloudflare, and Shadowsocks-2022. Keys, ports, firewall and the Cloudflare DNS record are all wired for you. Then just create a user below and share.</p>
+  <h3>{tr('setupwizard.one_click_full_server_preset_wizard')}</h3>
+  <p class="hint">{tr('setupwizard.build_the_whole_multi_protocol_server')}</p>
   <div class="row">
-    <input placeholder="domain for the CDN configs (e.g. anonymous.observer)" bind:value={pwDomain} data-testid="pw-domain" />
-    <input placeholder="Cloudflare API token (optional — auto-creates DNS)" bind:value={pwToken} data-testid="pw-token" />
+    <input placeholder={tr('setupwizard.domain_for_the_cdn_configs_e')} bind:value={pwDomain} data-testid="pw-domain" />
+    <input placeholder={tr('setupwizard.cloudflare_api_token_optional_auto_creates')} bind:value={pwToken} data-testid="pw-token" />
     <button class="primary" onclick={runPresetWizard} disabled={pwRunning} data-testid="pw-run">{pwRunning ? 'Building…' : '⚡ Build full server'}</button>
   </div>
-  <p class="tiny">Token needs <strong>Zone · DNS · Edit</strong> for the domain. Without it the wizard still builds everything and tells you the single A-record to add. REALITY needs no domain at all.</p>
+  <p class="tiny">{tr('setupwizard.token_needs')} <strong>{tr('setupwizard.zone_dns_edit')}</strong> {tr('setupwizard.for_the_domain_without_it_the')}</p>
   {#if pwResult}
     <div class="pw-result">
-      <p class="ok-line">✅ Created {pwResult.count} inbounds · REALITY key <code>{pwResult.reality?.public_key}</code></p>
+      <p class="ok-line">{tr('setupwizard.created_inbounds_reality_key', { count: pwResult.count })} <code>{pwResult.reality?.public_key}</code></p>
       <ul class="pw-list">
-        {#each pwResult.created as c}<li>{c.remark} · port {c.port}{c.cdn ? ' · behind Cloudflare' : ' · direct'}</li>{/each}
+        {#each pwResult.created as c}<li>{tr('setupwizard.port', { remark: c.remark, port: c.port, p3: c.cdn ? ' · behind Cloudflare' : ' · direct' })}</li>{/each}
       </ul>
       {#if pwResult.warnings?.length}{#each pwResult.warnings as w}<p class="warn-line">⚠️ {w}</p>{/each}{/if}
     </div>
@@ -161,53 +162,53 @@
 
 <div class="card">
   {#if step === 1}
-    <h3>1 · Domain &amp; automatic TLS</h3>
-    <p class="hint">Point a domain's A record at <code>{serverIP || 'this server'}</code>, then save it here to get a free Let's Encrypt certificate. Needs port 80 reachable. No domain? Skip — the panel stays on a self-signed cert at the IP.</p>
+    <h3>{tr('setupwizard.1_domain_amp_automatic_tls')}</h3>
+    <p class="hint">{tr('setupwizard.point_a_domain_s_a_record')} <code>{serverIP || 'this server'}</code>{tr('setupwizard.then_save_it_here_to_get')}</p>
     <div class="row">
-      <input placeholder="panel.example.com" bind:value={domain} data-testid="wiz-domain" />
+      <input placeholder={tr('setupwizard.panel_example_com')} bind:value={domain} data-testid="wiz-domain" />
       <button class="primary" onclick={() => saveDomain(false)} disabled={savingDomain} data-testid="wiz-save-domain">{savingDomain ? 'Saving…' : 'Save & continue'}</button>
-      <button class="ghost" onclick={() => saveDomain(true)} data-testid="wiz-skip-domain">Skip</button>
+      <button class="ghost" onclick={() => saveDomain(true)} data-testid="wiz-skip-domain">{tr('setupwizard.skip')}</button>
     </div>
-    {#if domain && certAvailable}<p class="ok-line">✅ A trusted certificate is active for {domain}.</p>{/if}
+    {#if domain && certAvailable}<p class="ok-line">{tr('setupwizard.a_trusted_certificate_is_active_for', { domain })}</p>{/if}
   {:else if step === 2}
-    <h3>2 · Create your first inbound</h3>
-    <p class="hint">VLESS + REALITY is the most censorship-resistant option for Iran — it borrows a real website's TLS handshake. One click generates the keys, UUID and a steal-site.</p>
+    <h3>{tr('setupwizard.2_create_your_first_inbound')}</h3>
+    <p class="hint">{tr('setupwizard.vless_reality_is_the_most_censorship')}</p>
     {#if !inboundCreated}
       <button class="primary" onclick={createInbound} disabled={creatingInbound} data-testid="wiz-create-inbound">{creatingInbound ? 'Creating…' : '⚡ Create VLESS + REALITY'}</button>
     {:else}
-      <p class="ok-line">✅ Created: <strong>{inboundInfo}</strong></p>
+      <p class="ok-line">{tr('setupwizard.created')} <strong>{inboundInfo}</strong></p>
     {/if}
     <div class="nav">
-      <button class="ghost" onclick={() => (step = 1)}>Back</button>
-      <button class="primary" onclick={() => (step = 3)} disabled={!inboundCreated} data-testid="wiz-next-user">Next</button>
+      <button class="ghost" onclick={() => (step = 1)}>{tr('setupwizard.back')}</button>
+      <button class="primary" onclick={() => (step = 3)} disabled={!inboundCreated} data-testid="wiz-next-user">{tr('setupwizard.next')}</button>
     </div>
   {:else if step === 3}
-    <h3>3 · Create your first user</h3>
-    <p class="hint">A user gets a private subscription link. Leave limits at 0 for unlimited / never-expires.</p>
+    <h3>{tr('setupwizard.3_create_your_first_user')}</h3>
+    <p class="hint">{tr('setupwizard.a_user_gets_a_private_subscription')}</p>
     <div class="row">
-      <input placeholder="username" bind:value={username} data-testid="wiz-username" />
-      <input type="number" placeholder="limit GB (0=∞)" bind:value={limitGB} />
-      <input type="number" placeholder="expire days (0=never)" bind:value={expireDays} />
+      <input placeholder={tr('setupwizard.username')} bind:value={username} data-testid="wiz-username" />
+      <input type="number" placeholder={tr('setupwizard.limit_gb_0')} bind:value={limitGB} />
+      <input type="number" placeholder={tr('setupwizard.expire_days_0_never')} bind:value={expireDays} />
     </div>
     <div class="nav">
-      <button class="ghost" onclick={() => (step = 2)}>Back</button>
+      <button class="ghost" onclick={() => (step = 2)}>{tr('setupwizard.back')}</button>
       <button class="primary" onclick={createUser} disabled={creatingUser} data-testid="wiz-create-user">{creatingUser ? 'Creating…' : 'Create user'}</button>
     </div>
   {:else}
-    <h3>4 · Share the subscription 🎉</h3>
-    <p class="hint">Send this link to the user, or open it in a browser for one-tap client import. Keep it private.</p>
+    <h3>{tr('setupwizard.4_share_the_subscription')}</h3>
+    <p class="hint">{tr('setupwizard.send_this_link_to_the_user')}</p>
     {#if subBase}
       <div class="share">
         <div class="qr"><QRCode value={subBase} size={180} /></div>
         <div class="links">
-          <div class="linkrow"><code>{subBase}</code><button class="ghost sm" onclick={() => copy(subBase)} data-testid="wiz-copy-sub">Copy</button></div>
-          <a class="ghost sm openbtn" href={subBase} target="_blank" rel="noreferrer">Open subscription page ↗</a>
-          <p class="tiny">Clients: Hiddify · v2rayNG · NekoBox · sing-box · Clash Meta · Streisand. Routing (bypass-Iran, block ads/malware) and TLS Fragment are already applied — tune them in <strong>Users &amp; Subscriptions → Subscription defaults</strong>.</p>
+          <div class="linkrow"><code>{subBase}</code><button class="ghost sm" onclick={() => copy(subBase)} data-testid="wiz-copy-sub">{tr('setupwizard.copy')}</button></div>
+          <a class="ghost sm openbtn" href={subBase} target="_blank" rel="noreferrer">{tr('setupwizard.open_subscription_page')}</a>
+          <p class="tiny">{tr('setupwizard.clients_hiddify_v2rayng_nekobox_sing_box')} <strong>{tr('setupwizard.users_amp_subscriptions_subscription_defaults')}</strong>.</p>
         </div>
       </div>
-      {#if !domain}<p class="warn-line">⚠️ You're on the IP with a self-signed cert. Some clients reject that — add a domain in step 1 for a trusted certificate.</p>{/if}
+      {#if !domain}<p class="warn-line">{tr('setupwizard.you_re_on_the_ip_with')}</p>{/if}
     {/if}
-    <div class="nav"><button class="ghost" onclick={() => (step = 3)}>Back</button><button class="primary" onclick={() => (step = 1)}>Done — start over</button></div>
+    <div class="nav"><button class="ghost" onclick={() => (step = 3)}>{tr('setupwizard.back')}</button><button class="primary" onclick={() => (step = 1)}>{tr('setupwizard.done_start_over')}</button></div>
   {/if}
 </div>
 
@@ -233,7 +234,7 @@
   .nav { display: flex; justify-content: space-between; margin-top: 18px; gap: 10px; }
   .preset { margin-bottom: 18px; border-color: rgba(255,122,26,0.35); }
   .pw-result { margin-top: 14px; }
-  .pw-list { margin: 8px 0 0; padding-left: 18px; color: rgba(255,255,255,0.75); font-size: 13px; line-height: 1.7; }
+  .pw-list { margin: 8px 0 0; padding-inline-start: 18px; color: rgba(255,255,255,0.75); font-size: 13px; line-height: 1.7; }
   .pw-list li { word-break: break-word; }
   .ok-line { color: #27D17C; font-size: 14px; margin-top: 14px; }
   .warn-line { color: #FFC24B; font-size: 13px; margin-top: 14px; }

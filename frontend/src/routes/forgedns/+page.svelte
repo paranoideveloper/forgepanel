@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import ForgeDNSView from '$lib/views/ForgeDNSView.svelte';
 
@@ -20,7 +21,7 @@
       token = res.access_token;
       setSession(res.access_token, res.refresh_token);
     } catch (err: any) {
-      loginErr = err.message || 'Login failed';
+      loginErr = err.message || tr('forgedns.login_failed');
     }
   }
 
@@ -31,26 +32,26 @@
 </script>
 
 <svelte:head>
-  <title>ForgePanel — DNS Tunnels</title>
+  <title>{tr('forgedns.forgepanel_dns_tunnels')}</title>
 </svelte:head>
 
 <header>
   <div class="dot {token ? 'on' : ''}"></div>
-  <h1>ForgePanel — DNS Tunnels</h1>
-  {#if token}<button class="ghost signout" onclick={signOut}>Sign out</button>{/if}
+  <h1>{tr('forgedns.forgepanel_dns_tunnels')}</h1>
+  {#if token}<button class="ghost signout" onclick={signOut}>{tr('forgedns.sign_out')}</button>{/if}
 </header>
 
 <main>
   {#if !token}
     <div class="card auth-card">
-      <h2>Sign in</h2>
+      <h2>{tr('forgedns.sign_in')}</h2>
       <form onsubmit={handleLogin}>
         <div class="row">
-          <input type="text" bind:value={username} placeholder="Username" required />
-          <input type="password" bind:value={password} placeholder="Password" required />
+          <input type="text" bind:value={username} placeholder={tr('forgedns.username')} required />
+          <input type="password" bind:value={password} placeholder={tr('forgedns.password')} required />
         </div>
         <div class="row" style="margin-top:12px">
-          <button type="submit">Sign in</button>
+          <button type="submit">{tr('forgedns.sign_in')}</button>
         </div>
       </form>
       {#if loginErr}
@@ -104,7 +105,7 @@
     background: var(--ok);
   }
   header .signout {
-    margin-left: auto;
+    margin-inline-start: auto;
   }
   main {
     max-width: 980px;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { Node } from '$lib/types';
@@ -67,7 +68,7 @@
     try {
       nodes = await apiFetch<Node[]>('/admin/nodes');
     } catch (err: any) {
-      showToast(err.message || 'Failed to load nodes', 'error');
+      showToast(err.message || tr('nodes.failed_to_load_nodes'), 'error');
     } finally {
       loading = false;
     }
@@ -104,21 +105,21 @@
       scriptModalOpen = true;
       newName = '';
       newAddress = '';
-      showToast('Node registered — run the command on that server', 'success');
+      showToast(tr('nodes.node_registered_run_the_command_on'), 'success');
       await loadNodes();
     } catch (err: any) {
-      createErr = err.message || 'Failed to register node';
+      createErr = err.message || tr('nodes.failed_to_register_node');
     }
   }
 
   async function deleteNode(id: number) {
-    if (!confirm('Remove this node from the cluster?')) return;
+    if (!confirm(tr('nodes.remove_this_node_from_the_cluster'))) return;
     try {
       await apiFetch(`/admin/nodes/${id}`, { method: 'DELETE' });
-      showToast('Node deleted', 'info');
+      showToast(tr('nodes.node_deleted'), 'info');
       await loadNodes();
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete node', 'error');
+      showToast(err.message || tr('nodes.failed_to_delete_node'), 'error');
     }
   }
 
@@ -136,9 +137,9 @@
   async function copyScript() {
     try {
       await navigator.clipboard.writeText(installScript);
-      showToast('Install script copied', 'success');
+      showToast(tr('nodes.install_script_copied'), 'success');
     } catch (_) {
-      showToast('Failed to copy script', 'error');
+      showToast(tr('nodes.failed_to_copy_script'), 'error');
     }
   }
 
@@ -148,40 +149,40 @@
 </script>
 
 <div class="view-header">
-  <h2>Node Cluster & Daemons</h2>
+  <h2>{tr('nodes.node_cluster_daemons')}</h2>
   <div class="actions">
-    <button class="btn-secondary" onclick={showInstallModal}>Install Agent Script</button>
-    <button class="btn-primary" onclick={loadNodes}>Refresh</button>
+    <button class="btn-secondary" onclick={showInstallModal}>{tr('nodes.install_agent_script')}</button>
+    <button class="btn-primary" onclick={loadNodes}>{tr('nodes.refresh')}</button>
   </div>
 </div>
 
 <div class="card">
-  <h3>Register Remote Node Agent</h3>
+  <h3>{tr('nodes.register_remote_node_agent')}</h3>
   <div class="form-grid">
-    <input type="text" bind:value={newName} placeholder="Node Name (e.g. EU-West-1)" />
-    <input type="text" bind:value={newAddress} placeholder="Public IP or Domain (optional)" />
-    <button class="btn-primary" onclick={registerNode}>Register Node</button>
+    <input type="text" bind:value={newName} placeholder={tr('nodes.node_name_e_g_eu_west')} />
+    <input type="text" bind:value={newAddress} placeholder={tr('nodes.public_ip_or_domain_optional')} />
+    <button class="btn-primary" onclick={registerNode}>{tr('nodes.register_node')}</button>
   </div>
   {#if createErr}<p class="err-text">{createErr}</p>{/if}
 </div>
 
 <div class="card table-card">
   {#if loading}
-    <p class="muted">Loading node cluster...</p>
+    <p class="muted">{tr('nodes.loading_node_cluster')}</p>
   {:else}
     <table>
       <thead>
         <tr>
-          <th>Node Name</th>
-          <th>Address</th>
+          <th>{tr('nodes.node_name')}</th>
+          <th>{tr('nodes.address')}</th>
           <th>CPU</th>
-          <th>Memory</th>
-          <th>Disk</th>
-          <th>Conns</th>
-          <th>Core</th>
-          <th>Last seen</th>
-          <th>Status</th>
-          <th>Actions</th>
+          <th>{tr('nodes.memory')}</th>
+          <th>{tr('nodes.disk')}</th>
+          <th>{tr('nodes.conns')}</th>
+          <th>{tr('nodes.core')}</th>
+          <th>{tr('nodes.last_seen')}</th>
+          <th>{tr('nodes.status')}</th>
+          <th>{tr('nodes.actions')}</th>
         </tr>
       </thead>
       <tbody>
@@ -190,7 +191,7 @@
             <td><strong>{n.name}</strong></td>
             <td><code>{n.address}</code></td>
             <td>{Math.round(n.cpu || 0)}%</td>
-            <td>{n.mem_mb || 0} MB</td>
+            <td>{tr('nodes.mb', { p1: n.mem_mb || 0 })}</td>
             <td class={diskCritical(n) ? 'warn-cell' : ''} title={diskTitle(n)}>{diskLabel(n)}</td>
             <td>{n.tcp_conns ?? '—'}</td>
             <td title={n.core_version ? `core ${n.core_version}` : 'core version not reported'}>
@@ -202,18 +203,18 @@
                 {n.healthy ? 'Online' : 'Stale'}
               </span>
               {#if !n.enrolled}
-                <span class="badge badge-warn" title="Registered but the agent has never checked in">
-                  Not enrolled
+                <span class="badge badge-warn" title={tr('nodes.registered_but_the_agent_has_never')}>
+                  {tr('nodes.not_enrolled')}
                 </span>
               {/if}
               {#if n.config_dirty}
-                <span class="badge badge-warn" title="The node is running an older config than the panel holds">
-                  Config stale
+                <span class="badge badge-warn" title={tr('nodes.the_node_is_running_an_older')}>
+                  {tr('nodes.config_stale')}
                 </span>
               {/if}
             </td>
             <td>
-              <button class="btn-sm danger" onclick={() => deleteNode(n.id)}>Remove</button>
+              <button class="btn-sm danger" onclick={() => deleteNode(n.id)}>{tr('nodes.remove')}</button>
             </td>
           </tr>
         {/each}
@@ -222,29 +223,24 @@
   {/if}
 </div>
 
-<Modal title="Deploy Node Agent (forgenode)" isOpen={scriptModalOpen} onClose={() => scriptModalOpen = false}>
+<Modal title={tr('nodes.deploy_node_agent_forgenode')} isOpen={scriptModalOpen} onClose={() => scriptModalOpen = false}>
   {#if installScript}
     <p class="muted">
-      Run this on <strong>{enrolledName}</strong> as root. It downloads the agent from this panel,
-      verifies its checksum, installs a systemd unit and starts it.
+      {tr('nodes.run_this_on')} <strong>{enrolledName}</strong> {tr('nodes.as_root_it_downloads_the_agent')}
     </p>
     <pre><code data-testid="enroll-command">{installScript}</code></pre>
     <p class="err-text">
-      The enrollment token appears once. If you lose this command, remove the node and register it
-      again — the panel cannot show the token a second time.
+      {tr('nodes.the_enrollment_token_appears_once_if')}
     </p>
     {#if enrollFingerprint}
       <p class="muted">
-        This panel serves a self-signed certificate, so the command carries its fingerprint for the
-        agent to pin. Keep it intact: without it the agent has nothing to verify against and will
-        refuse to connect.
+        {tr('nodes.this_panel_serves_a_self_signed')}
       </p>
     {/if}
-    <button class="btn-primary" onclick={copyScript}>Copy Command</button>
+    <button class="btn-primary" onclick={copyScript}>{tr('nodes.copy_command')}</button>
   {:else}
     <p class="muted">
-      Register a node above to get its enrollment command. The command contains a one-time token
-      minted for that specific node, so there is no generic version to copy.
+      {tr('nodes.register_a_node_above_to_get')}
     </p>
   {/if}
 </Modal>
@@ -262,7 +258,7 @@
   .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
   .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
+  th, td { text-align: start; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
   th { color: rgba(255,255,255,0.6); font-weight: 600; }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }

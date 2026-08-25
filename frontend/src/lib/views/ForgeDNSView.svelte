@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { DNSZone, DNSAdapter, DNSBundle } from '$lib/types';
@@ -24,7 +25,7 @@
       }
       zones = await apiFetch<DNSZone[]>('/admin/forgedns/zones');
     } catch (err: any) {
-      showToast(err.message || 'Failed to load DNS state', 'error');
+      showToast(err.message || tr('forgedns.failed_to_load_dns_state'), 'error');
     } finally {
       loading = false;
     }
@@ -47,11 +48,11 @@
       });
       newDomain = '';
       extraDomains = '';
-      showToast('DNS Tunnel Zone created & activated', 'success');
+      showToast(tr('forgedns.dns_tunnel_zone_created_activated'), 'success');
       await loadData();
       await showSetup(created);
     } catch (err: any) {
-      createErr = err.message || 'Failed to create zone';
+      createErr = err.message || tr('forgedns.failed_to_create_zone');
     }
   }
 
@@ -61,28 +62,28 @@
     try {
       bundle = await apiFetch<DNSBundle>(`/admin/forgedns/zones/${z.id}/bundle`);
     } catch (err: any) {
-      showToast(err.message || 'Failed to load delegation bundle', 'error');
+      showToast(err.message || tr('forgedns.failed_to_load_delegation_bundle'), 'error');
     }
   }
 
   async function deleteZone(id: number) {
-    if (!confirm('Delete this DNS tunnel zone?')) return;
+    if (!confirm(tr('forgedns.delete_this_dns_tunnel_zone'))) return;
     try {
       await apiFetch(`/admin/forgedns/zones/${id}`, { method: 'DELETE' });
       if (bundleZone?.id === id) { bundleZone = null; bundle = null; }
-      showToast('Zone deleted', 'info');
+      showToast(tr('forgedns.zone_deleted'), 'info');
       await loadData();
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete zone', 'error');
+      showToast(err.message || tr('forgedns.failed_to_delete_zone'), 'error');
     }
   }
 
   async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
-      showToast(`${label} copied to clipboard`, 'success');
+      showToast(tr('forgedns.label_copied_to_clipboard', { label }), 'success');
     } catch (_) {
-      showToast('Failed to copy', 'error');
+      showToast(tr('forgedns.failed_to_copy'), 'error');
     }
   }
 
@@ -90,47 +91,46 @@
 </script>
 
 <div class="view-header">
-  <h2>ForgeDNS — DNS Tunnels</h2>
-  <button class="btn-primary" onclick={loadData}>Refresh</button>
+  <h2>{tr('forgedns.forgedns_dns_tunnels')}</h2>
+  <button class="btn-primary" onclick={loadData}>{tr('forgedns.refresh')}</button>
 </div>
 
 <div class="card">
-  <h3>Create DNS Tunnel Zone</h3>
+  <h3>{tr('forgedns.create_dns_tunnel_zone')}</h3>
   <div class="form-row">
-    <input type="text" bind:value={newDomain} placeholder="Tunnel domain (e.g. dns.example.com)" data-testid="zone-domain" />
+    <input type="text" bind:value={newDomain} placeholder={tr('forgedns.tunnel_domain_e_g_dns_example')} data-testid="zone-domain" />
     <select bind:value={selectedAdapter} data-testid="adapter-select">
       {#each adapters as a}
         <option value={a.id}>{a.name}</option>
       {/each}
     </select>
-    <button class="btn-primary" onclick={createZone} data-testid="create-zone">Create &amp; Activate</button>
+    <button class="btn-primary" onclick={createZone} data-testid="create-zone">{tr('forgedns.create_amp_activate')}</button>
   </div>
   <div class="form-row" style="margin-top:10px">
-    <input type="text" bind:value={extraDomains} placeholder="Additional tunnel domains (optional, comma-separated)" data-testid="zone-extra-domains" style="flex:1" />
+    <input type="text" bind:value={extraDomains} placeholder={tr('forgedns.additional_tunnel_domains_optional_comma_separated')} data-testid="zone-extra-domains" style="flex:1" />
   </div>
   {#if createErr}<p class="err-text">{createErr}</p>{/if}
   {#if selectedAdapter}
     <p class="muted" style="margin-top:8px;font-size:13px">
-      {adapters.find((a) => a.id === selectedAdapter)?.description || 'Pick a wire format adapter and enter your delegated domain.'}
-      ForgePanel will automatically manage authoritative DNS listeners.
+      {tr('forgedns.forgepanel_will_automatically_manage_authoritative_dns', { p1: adapters.find((a) => a.id === selectedAdapter)?.description || 'Pick a wire format adapter and enter your delegated domain.' })}
     </p>
   {/if}
 </div>
 
 <div class="card table-card">
   {#if loading}
-    <p class="muted">Loading DNS zones...</p>
+    <p class="muted">{tr('forgedns.loading_dns_zones')}</p>
   {:else if zones.length === 0}
-    <p class="muted" data-testid="no-zones">No DNS tunnel zones yet. Create one above to get delegation records and a client config.</p>
+    <p class="muted" data-testid="no-zones">{tr('forgedns.no_dns_tunnel_zones_yet_create')}</p>
   {:else}
     <table>
       <thead>
         <tr>
-          <th>Zone Domain</th>
-          <th>Adapter</th>
-          <th>Status</th>
-          <th>Listener</th>
-          <th>Actions</th>
+          <th>{tr('forgedns.zone_domain')}</th>
+          <th>{tr('forgedns.adapter')}</th>
+          <th>{tr('forgedns.status')}</th>
+          <th>{tr('forgedns.listener')}</th>
+          <th>{tr('forgedns.actions')}</th>
         </tr>
       </thead>
       <tbody>
@@ -145,8 +145,8 @@
             </td>
             <td><code>{z.bind_host || '0.0.0.0'}:{z.bind_port || 53}</code></td>
             <td class="action-cell">
-              <button class="btn-sm" onclick={() => showSetup(z)} data-testid="setup-info">Setup Info</button>
-              <button class="btn-sm danger" onclick={() => deleteZone(z.id)} data-testid="delete-zone">Delete</button>
+              <button class="btn-sm" onclick={() => showSetup(z)} data-testid="setup-info">{tr('forgedns.setup_info')}</button>
+              <button class="btn-sm danger" onclick={() => deleteZone(z.id)} data-testid="delete-zone">{tr('forgedns.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -157,17 +157,17 @@
 
 {#if bundleZone}
   <div class="card" data-testid="setup-panel">
-    <h3>Delegation &amp; Setup — {bundleZone.zone}</h3>
+    <h3>{tr('forgedns.delegation_amp_setup', { zone: bundleZone.zone })}</h3>
     {#if !bundle}
-      <p class="muted">Loading delegation records…</p>
+      <p class="muted">{tr('forgedns.loading_delegation_records')}</p>
     {:else}
       <p class="muted" style="font-size:13px">
-        Add these records at your domain registrar to delegate DNS traffic to this server:
+        {tr('forgedns.add_these_records_at_your_domain')}
       </p>
       {#if bundle.ns_records && bundle.ns_records.length > 0}
         <table>
           <thead>
-            <tr><th>Type</th><th>Name</th><th>Value</th></tr>
+            <tr><th>{tr('forgedns.type')}</th><th>{tr('forgedns.name')}</th><th>{tr('forgedns.value')}</th></tr>
           </thead>
           <tbody>
             {#each bundle.ns_records as r}
@@ -183,15 +183,15 @@
       {#if bundle.cloudflare_warning}
         <div class="warn-box">⚠️ {bundle.cloudflare_warning}</div>
       {/if}
-      <div class="warn-box">🔌 The authoritative listener runs on <code>0.0.0.0:53</code>. Port <strong>53/udp</strong> must be open on this server's firewall and reachable from the internet. If ForgePanel runs in Docker, publish it — <code>53:53/udp</code> in your compose ports — or delegated queries never arrive.</div>
+      <div class="warn-box">{tr('forgedns.the_authoritative_listener_runs_on')} <code>0.0.0.0:53</code>{tr('forgedns.port')} <strong>{tr('forgedns.53_udp')}</strong> {tr('forgedns.must_be_open_on_this_server')} <code>{tr('forgedns.53_53_udp')}</code> {tr('forgedns.in_your_compose_ports_or_delegated')}</div>
       {#if bundle.socks5}
-        <p style="margin-top:14px"><span class="muted">Client SOCKS5:</span> <code>{bundle.socks5}</code></p>
+        <p style="margin-top:14px"><span class="muted">{tr('forgedns.client_socks5')}</span> <code>{bundle.socks5}</code></p>
       {/if}
       {#if bundle.client_config_toml}
         <div style="margin-top:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span class="muted">Client config (the credential — keep it secret):</span>
-            <button class="btn-sm" onclick={() => copyText(bundle!.client_config_toml, 'Client config')} data-testid="copy-config">Copy config</button>
+            <span class="muted">{tr('forgedns.client_config_the_credential_keep_it')}</span>
+            <button class="btn-sm" onclick={() => copyText(bundle!.client_config_toml, 'Client config')} data-testid="copy-config">{tr('forgedns.copy_config')}</button>
           </div>
           <pre class="config" data-testid="client-config">{bundle.client_config_toml}</pre>
         </div>
@@ -218,7 +218,7 @@
   .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
   .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; word-break: break-all; }
+  th, td { text-align: start; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; word-break: break-all; }
   th { color: rgba(255,255,255,0.6); font-weight: 600; }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
@@ -228,6 +228,6 @@
   .muted { color: rgba(255,255,255,0.6); }
   .warn-box { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: #FFC24B; }
   .config { margin: 0; padding: 12px; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font-size: 12px; color: #cfe; overflow-x: auto; white-space: pre; }
-  .steps { margin: 16px 0 0; padding-left: 20px; font-size: 13px; color: rgba(255,255,255,0.75); }
+  .steps { margin: 16px 0 0; padding-inline-start: 20px; font-size: 13px; color: rgba(255,255,255,0.75); }
   .steps li { margin-bottom: 6px; }
 </style>

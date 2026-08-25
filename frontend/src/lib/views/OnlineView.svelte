@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
 
@@ -48,7 +49,7 @@
     } catch (err: any) {
       // A failed poll must not blank the list: the last good picture is more
       // useful than an empty screen that reads as "nobody is connected".
-      loadError = err.message || 'Failed to load presence';
+      loadError = err.message || tr('online.failed_to_load_presence');
     } finally {
       loading = false;
     }
@@ -89,13 +90,13 @@
 </script>
 
 <div class="view-header">
-  <h2>Online</h2>
+  <h2>{tr('online.online')}</h2>
   <div class="hdr-right">
     <span class="muted" data-testid="summary">
       {users.length} {users.length === 1 ? 'user' : 'users'} · {totalSessions}
       {totalSessions === 1 ? 'address' : 'addresses'}
     </span>
-    <button class="btn-primary" onclick={() => load(true)}>Refresh</button>
+    <button class="btn-primary" onclick={() => load(true)}>{tr('online.refresh')}</button>
   </div>
 </div>
 
@@ -105,20 +106,18 @@
 
 <div class="card">
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tr('online.loading')}</p>
   {:else if users.length === 0}
     <p class="muted" data-testid="empty">
-      Nobody is connected. A user counts as online for {ttl} seconds after their
-      last connection, so someone idle in a quiet tab may drop off this list
-      without having disconnected.
+      {tr('online.nobody_is_connected_a_user_counts', { ttl })}
     </p>
   {:else}
     <table>
       <thead>
         <tr>
-          <th>User</th>
-          <th>Addresses</th>
-          <th>Last seen</th>
+          <th>{tr('online.user')}</th>
+          <th>{tr('online.addresses')}</th>
+          <th>{tr('online.last_seen')}</th>
           <th></th>
         </tr>
       </thead>
@@ -146,7 +145,7 @@
               <td colspan="4">
                 <table class="inner">
                   <thead>
-                    <tr><th>Address</th><th>Inbound</th><th>Node</th><th>Connected</th><th>Conns</th></tr>
+                    <tr><th>{tr('online.address')}</th><th>{tr('online.inbound')}</th><th>{tr('online.node')}</th><th>{tr('online.connected')}</th><th>{tr('online.conns')}</th></tr>
                   </thead>
                   <tbody>
                     {#each u.sessions as sess}
@@ -167,8 +166,7 @@
       </tbody>
     </table>
     <p class="foot muted">
-      Presence is inferred from the last {ttl} seconds of connections and is never
-      written to disk.
+      {tr('online.presence_is_inferred_from_the_last', { ttl })}
     </p>
   {/if}
 </div>
@@ -179,9 +177,9 @@
   .hdr-right { display: flex; align-items: center; gap: 12px; }
   .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-right: 8px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-inline-end: 8px; }
   .count { display: inline-block; min-width: 24px; text-align: center; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
   /* Many simultaneous addresses is the signal worth noticing, so it is marked
      by weight and border as well as colour. */

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch, setAuthToken } from '$lib/api';
   import type { HealthDetail, TwoFASetup } from '$lib/types';
@@ -15,7 +16,7 @@
   async function runDoctor() {
     doctorBusy = true;
     try { doctor = await apiFetch('/admin/doctor'); }
-    catch (e: any) { showToast(e.message || 'doctor failed', 'error'); }
+    catch (e: any) { showToast(e.message || tr('systemhealth.doctor_failed'), 'error'); }
     finally { doctorBusy = false; }
   }
 
@@ -55,7 +56,7 @@
       twoFAEnabled = !!user.two_factor_enabled;
       recoveryRemaining = user.recovery_codes_remaining ?? null;
     } catch (err: any) {
-      showToast(err.message || 'Failed to load system state', 'error');
+      showToast(err.message || tr('systemhealth.failed_to_load_system_state'), 'error');
     } finally {
       loading = false;
     }
@@ -66,7 +67,7 @@
       twoFAData = await apiFetch<TwoFASetup>('/admin/2fa/setup', { method: 'POST' });
       twoFAModalOpen = true;
     } catch (err: any) {
-      showToast(err.message || 'Failed to initiate 2FA setup', 'error');
+      showToast(err.message || tr('systemhealth.failed_to_initiate_2fa_setup'), 'error');
     }
   }
 
@@ -98,17 +99,17 @@
         // toast that disappears on its own.
         recoveryModalOpen = true;
       }
-      showToast('Two-Factor Authentication enabled', 'success');
+      showToast(tr('systemhealth.two_factor_authentication_enabled'), 'success');
     } catch (err: any) {
-      showToast(err.message || 'Invalid 2FA code', 'error');
+      showToast(err.message || tr('systemhealth.invalid_2fa_code'), 'error');
     }
   }
 
   function copyRecoveryCodes() {
     navigator.clipboard
       .writeText(recoveryCodes.join('\n'))
-      .then(() => showToast('Recovery codes copied', 'success'))
-      .catch(() => showToast('Could not copy — select and copy them manually', 'error'));
+      .then(() => showToast(tr('systemhealth.recovery_codes_copied'), 'success'))
+      .catch(() => showToast(tr('systemhealth.could_not_copy_select_and_copy'), 'error'));
   }
 
   async function disable2FA() {
@@ -118,7 +119,7 @@
     // session must not be able to strip a factor.
     disableErr = '';
     if (!disableCode.trim()) {
-      disableErr = 'Enter a current code from your authenticator to confirm';
+      disableErr = tr('systemhealth.enter_a_current_code_from_your');
       return;
     }
     try {
@@ -130,16 +131,16 @@
       recoveryRemaining = null;
       disableOpen = false;
       disableCode = '';
-      showToast('Two-Factor Authentication disabled — sign in again', 'info');
+      showToast(tr('systemhealth.two_factor_authentication_disabled_sign_in'), 'info');
     } catch (err: any) {
-      disableErr = err.message || 'Invalid code';
+      disableErr = err.message || tr('systemhealth.invalid_code');
     }
   }
 
   async function regenerateRecoveryCodes() {
     regenErr = '';
     if (!regenCode.trim()) {
-      regenErr = 'Enter a current code or your password to confirm';
+      regenErr = tr('systemhealth.enter_a_current_code_or_your');
       return;
     }
     try {
@@ -154,9 +155,9 @@
         recoveryRemaining = res.recovery_codes.length;
         recoveryModalOpen = true;
       }
-      showToast('New recovery codes issued — the previous set no longer works', 'success');
+      showToast(tr('systemhealth.new_recovery_codes_issued_the_previous'), 'success');
     } catch (err: any) {
-      regenErr = err.message || 'Could not regenerate recovery codes';
+      regenErr = err.message || tr('systemhealth.could_not_regenerate_recovery_codes');
     }
   }
 
@@ -176,9 +177,9 @@
       });
       oldPass = '';
       newPass = '';
-      showToast('Password changed successfully', 'success');
+      showToast(tr('systemhealth.password_changed_successfully'), 'success');
     } catch (err: any) {
-      passErr = err.message || 'Failed to change password';
+      passErr = err.message || tr('systemhealth.failed_to_change_password');
     }
   }
 
@@ -186,9 +187,9 @@
     try {
       const res = await apiFetch<{ compose: string }>(`/deploy/compose?profiles=${encodeURIComponent(composeProfiles)}`);
       composeYaml = res.compose || '';
-      showToast('Docker Compose config generated', 'success');
+      showToast(tr('systemhealth.docker_compose_config_generated'), 'success');
     } catch (err: any) {
-      showToast('Failed to generate compose config', 'error');
+      showToast(tr('systemhealth.failed_to_generate_compose_config'), 'error');
     }
   }
 
@@ -198,18 +199,18 @@
 </script>
 
 <div class="view-header">
-  <h2>System Diagnostics &amp; Security</h2>
-  <button class="btn-primary" onclick={loadData}>Refresh</button>
+  <h2>{tr('systemhealth.system_diagnostics_amp_security')}</h2>
+  <button class="btn-primary" onclick={loadData}>{tr('systemhealth.refresh')}</button>
 </div>
 
 <div class="card" data-testid="doctor-panel">
   <div class="doctor-head">
-    <h3>Panel Doctor</h3>
+    <h3>{tr('systemhealth.panel_doctor')}</h3>
     <button class="btn-sm" onclick={runDoctor} disabled={doctorBusy}>{doctorBusy ? 'Running…' : 'Run diagnostics'}</button>
   </div>
   {#if doctor?.health}
     <p class="doctor-state">
-      Overall: <span class="badge {doctor.health.state === 'healthy' ? 'ok' : doctor.health.state === 'not_configured' ? 'warn' : 'err'}">{doctor.health.label || doctor.health.state}</span>
+      {tr('systemhealth.overall')} <span class="badge {doctor.health.state === 'healthy' ? 'ok' : doctor.health.state === 'not_configured' ? 'warn' : 'err'}">{doctor.health.label || doctor.health.state}</span>
     </p>
     {#if doctor.health.subsystems}
       <div class="doctor-grid">
@@ -222,96 +223,92 @@
       </div>
     {/if}
     {#if doctor.inbounds?.length}
-      <p class="muted" style="margin-top:12px">{doctor.inbounds.length} inbound(s) checked.</p>
+      <p class="muted" style="margin-top:12px">{tr('systemhealth.inbound_s_checked', { length: doctor.inbounds.length })}</p>
     {/if}
   {:else}
-    <p class="muted">Click “Run diagnostics” to check the panel, engines, certs and inbounds.</p>
+    <p class="muted">{tr('systemhealth.click_run_diagnostics_to_check_the')}</p>
   {/if}
 </div>
 
 <div class="card">
-  <h3>Two-Factor Authentication (2FA)</h3>
-  <p class="muted">Protect administrative access with Time-based One-Time Passwords (TOTP).</p>
+  <h3>{tr('systemhealth.two_factor_authentication_2fa')}</h3>
+  <p class="muted">{tr('systemhealth.protect_administrative_access_with_time_based')}</p>
   <div>
     {#if twoFAEnabled}
-      <span class="badge badge-ok">2FA Enabled</span>
+      <span class="badge badge-ok">{tr('systemhealth.2fa_enabled')}</span>
       {#if recoveryRemaining !== null}
-        <span class="badge {recoveryRemaining <= 2 ? 'badge-warn' : ''}" style="margin-left:8px"
-          title="Single-use codes left. Regenerate before you run out — with none left and no authenticator, the account cannot be recovered.">
-          {recoveryRemaining} recovery code{recoveryRemaining === 1 ? '' : 's'} left
+        <span class="badge {recoveryRemaining <= 2 ? 'badge-warn' : ''}" style="margin-inline-start:8px"
+          title={tr('systemhealth.single_use_codes_left_regenerate_before')}>
+          {tr('systemhealth.recovery_code_left', { recoveryRemaining, p2: recoveryRemaining === 1 ? '' : 's' })}
         </span>
       {/if}
-      <button class="btn-secondary" style="margin-left:12px" onclick={() => { regenOpen = true; regenErr = ''; }}>
-        Regenerate recovery codes
+      <button class="btn-secondary" style="margin-inline-start:12px" onclick={() => { regenOpen = true; regenErr = ''; }}>
+        {tr('systemhealth.regenerate_recovery_codes')}
       </button>
-      <button class="btn-secondary danger" style="margin-left:8px" onclick={() => { disableOpen = true; disableErr = ''; }}>
-        Disable 2FA
+      <button class="btn-secondary danger" style="margin-inline-start:8px" onclick={() => { disableOpen = true; disableErr = ''; }}>
+        {tr('systemhealth.disable_2fa')}
       </button>
       {#if recoveryRemaining !== null && recoveryRemaining <= 2}
         <p class="err-text">
-          Only {recoveryRemaining} recovery code{recoveryRemaining === 1 ? '' : 's'} remain. Regenerate now —
-          losing your authenticator with no codes left means losing the account.
+          {tr('systemhealth.only_recovery_code_remain_regenerate_now', { recoveryRemaining, p2: recoveryRemaining === 1 ? '' : 's' })}
         </p>
       {/if}
     {:else}
-      <button class="btn-primary" onclick={setup2FA}>Enable 2FA Authenticator</button>
+      <button class="btn-primary" onclick={setup2FA}>{tr('systemhealth.enable_2fa_authenticator')}</button>
     {/if}
   </div>
 </div>
 
 <!-- Recovery codes. Shown exactly once: the server keeps only SHA-256 hashes,
      so there is no second chance to display them. -->
-<Modal isOpen={recoveryModalOpen} title="Save your recovery codes" onClose={() => { recoveryModalOpen = false; recoveryCodes = []; }}>
+<Modal isOpen={recoveryModalOpen} title={tr('systemhealth.save_your_recovery_codes')} onClose={() => { recoveryModalOpen = false; recoveryCodes = []; }}>
   <p class="err-text">
-    These codes are shown once and cannot be retrieved again. Store them somewhere you can reach
-    without your authenticator — each one signs you in a single time.
+    {tr('systemhealth.these_codes_are_shown_once_and')}
   </p>
   <pre class="recovery-codes" data-testid="recovery-codes">{recoveryCodes.join('\n')}</pre>
   <div class="form-grid">
-    <button class="btn-secondary" onclick={copyRecoveryCodes}>Copy all</button>
+    <button class="btn-secondary" onclick={copyRecoveryCodes}>{tr('systemhealth.copy_all')}</button>
     <button class="btn-primary" onclick={() => { recoveryModalOpen = false; recoveryCodes = []; }}>
-      I have saved them
+      {tr('systemhealth.i_have_saved_them')}
     </button>
   </div>
 </Modal>
 
-<Modal isOpen={disableOpen} title="Disable two-factor authentication" onClose={() => { disableOpen = false; disableCode = ''; }}>
+<Modal isOpen={disableOpen} title={tr('systemhealth.disable_two_factor_authentication')} onClose={() => { disableOpen = false; disableCode = ''; }}>
   <p class="muted">
-    Enter a current code from your authenticator. Disabling 2FA also invalidates your recovery codes
-    and signs out every session, including this one.
+    {tr('systemhealth.enter_a_current_code_from_your')}
   </p>
   <div class="form-grid">
-    <input bind:value={disableCode} placeholder="6-digit code" data-testid="disable-2fa-code" />
-    <button class="btn-secondary danger" onclick={disable2FA}>Disable 2FA</button>
+    <input bind:value={disableCode} placeholder={tr('systemhealth.6_digit_code')} data-testid="disable-2fa-code" />
+    <button class="btn-secondary danger" onclick={disable2FA}>{tr('systemhealth.disable_2fa')}</button>
   </div>
   {#if disableErr}<p class="err-text">{disableErr}</p>{/if}
 </Modal>
 
-<Modal isOpen={regenOpen} title="Regenerate recovery codes" onClose={() => { regenOpen = false; regenCode = ''; }}>
+<Modal isOpen={regenOpen} title={tr('systemhealth.regenerate_recovery_codes')} onClose={() => { regenOpen = false; regenCode = ''; }}>
   <p class="muted">
-    Confirm with a current authenticator code or your password. The previous set stops working
-    immediately.
+    {tr('systemhealth.confirm_with_a_current_authenticator_code')}
   </p>
   <div class="form-grid">
-    <input bind:value={regenCode} placeholder="6-digit code or password" data-testid="regen-code" />
-    <button class="btn-primary" onclick={regenerateRecoveryCodes}>Issue new codes</button>
+    <input bind:value={regenCode} placeholder={tr('systemhealth.6_digit_code_or_password')} data-testid="regen-code" />
+    <button class="btn-primary" onclick={regenerateRecoveryCodes}>{tr('systemhealth.issue_new_codes')}</button>
   </div>
   {#if regenErr}<p class="err-text">{regenErr}</p>{/if}
 </Modal>
 
 <div class="card">
-  <h3>Change Administrator Password</h3>
+  <h3>{tr('systemhealth.change_administrator_password')}</h3>
   <div class="form-grid">
-    <input type="password" bind:value={oldPass} placeholder="Current Password" />
-    <input type="password" bind:value={newPass} placeholder="New Password" />
-    <button class="btn-primary" onclick={changePassword}>Update Password</button>
+    <input type="password" bind:value={oldPass} placeholder={tr('systemhealth.current_password')} />
+    <input type="password" bind:value={newPass} placeholder={tr('systemhealth.new_password')} />
+    <button class="btn-primary" onclick={changePassword}>{tr('systemhealth.update_password')}</button>
   </div>
   {#if passErr}<p class="err-text">{passErr}</p>{/if}
 </div>
 
 {#if healthDetail}
   <div class="card">
-    <h3>Subsystem Health Matrix</h3>
+    <h3>{tr('systemhealth.subsystem_health_matrix')}</h3>
     <div class="subsystem-grid">
       {#each healthDetail.subsystems as s}
         <div class="subsystem-card">
@@ -327,27 +324,27 @@
 {/if}
 
 <div class="card">
-  <h3>Export Docker Compose Configuration</h3>
+  <h3>{tr('systemhealth.export_docker_compose_configuration')}</h3>
   <div class="form-row">
-    <input type="text" bind:value={composeProfiles} placeholder="Profiles (default,dns,all)" />
-    <button class="btn-secondary" onclick={fetchCompose}>Generate YAML</button>
+    <input type="text" bind:value={composeProfiles} placeholder={tr('systemhealth.profiles_default_dns_all')} />
+    <button class="btn-secondary" onclick={fetchCompose}>{tr('systemhealth.generate_yaml')}</button>
   </div>
   {#if composeYaml}
     <pre><code>{composeYaml}</code></pre>
   {/if}
 </div>
 
-<Modal title="Set Up 2FA Authenticator" isOpen={twoFAModalOpen} onClose={() => twoFAModalOpen = false}>
+<Modal title={tr('systemhealth.set_up_2fa_authenticator')} isOpen={twoFAModalOpen} onClose={() => twoFAModalOpen = false}>
   {#if twoFAData}
     <div class="twofa-content">
-      <p class="muted">Scan this QR code with Google Authenticator or 1Password:</p>
+      <p class="muted">{tr('systemhealth.scan_this_qr_code_with_google')}</p>
       {#if twoFAData.qr_code_url}
         <QRCode value={twoFAData.qr_code_url} size={200} />
       {/if}
-      <p class="secret-text">Secret key: <code>{twoFAData.secret}</code></p>
+      <p class="secret-text">{tr('systemhealth.secret_key')} <code>{twoFAData.secret}</code></p>
       <div class="form-row" style="margin-top:12px">
-        <input type="text" bind:value={verifyCode} placeholder="6-digit TOTP code" />
-        <button class="btn-primary" onclick={enable2FA}>Verify &amp; Activate</button>
+        <input type="text" bind:value={verifyCode} placeholder={tr('systemhealth.6_digit_totp_code')} />
+        <button class="btn-primary" onclick={enable2FA}>{tr('systemhealth.verify_amp_activate')}</button>
       </div>
     </div>
   {/if}

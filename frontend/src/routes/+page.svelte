@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount, type Component } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
@@ -23,17 +24,17 @@
   async function handleSetup(e?: Event) {
     if (e) e.preventDefault();
     setupError = '';
-    if (password !== confirmPw) { setupError = 'Passwords do not match'; return; }
+    if (password !== confirmPw) { setupError = tr('app.passwords_do_not_match'); return; }
     try {
       await apiFetch('/setup/init', {
         method: 'POST',
         body: JSON.stringify({ token: setupToken.trim(), username, password, password_confirm: confirmPw }),
       });
-      showToast('Administrator created', 'success');
+      showToast(tr('app.administrator_created'), 'success');
       setupRequired = false;
       await handleLogin();
     } catch (err: any) {
-      setupError = err.message || 'Setup failed';
+      setupError = err.message || tr('app.setup_failed');
     }
   }
 
@@ -67,7 +68,7 @@
       const mod = await loader();
       CurrentView = mod.default;
     } catch (err: any) {
-      showToast('Failed to lazy load view', 'error');
+      showToast(tr('app.failed_to_lazy_load_view'), 'error');
     } finally {
       componentLoading = false;
     }
@@ -89,17 +90,17 @@
       // bare 401s that named no cause and offered no way back.
       token = res.access_token;
       setSession(res.access_token, res.refresh_token);
-      showToast('Signed in successfully', 'success');
+      showToast(tr('app.signed_in_successfully'), 'success');
       await loadTabModule('overview');
     } catch (err: any) {
-      authError = err.message || 'Login failed';
+      authError = err.message || tr('app.login_failed');
     }
   }
 
   function handleLogout() {
     token = '';
     clearSession();
-    showToast('Logged out', 'info');
+    showToast(tr('app.logged_out'), 'info');
   }
 
   // An unattended dashboard is full control of every server for whoever walks
@@ -132,7 +133,7 @@
     if (!token) return;
     token = '';
     authError = 'Your session expired. Please sign in again.';
-    showToast('Session expired — please sign in again', 'info');
+    showToast(tr('app.session_expired_please_sign_in_again'), 'info');
   }));
 
   onMount(async () => {
@@ -148,7 +149,7 @@
 </script>
 
 <svelte:head>
-  <title>ForgePanel Admin Dashboard</title>
+  <title>{tr('app.forgepanel_admin_dashboard')}</title>
 </svelte:head>
 
 <Toast />
@@ -160,26 +161,26 @@
         <div class="logo-box"><span class="logo">⚡</span></div>
         <h1>ForgePanel</h1>
       </div>
-      <p class="subtitle">First run — create your administrator account</p>
+      <p class="subtitle">{tr('app.first_run_create_your_administrator_account')}</p>
 
       <form onsubmit={handleSetup} data-testid="setup-form">
         <div class="form-group">
-          <label for="stoken">Setup token</label>
-          <input id="stoken" data-testid="setup-token" type="text" bind:value={setupToken} placeholder="printed on first boot" required />
+          <label for="stoken">{tr('app.setup_token')}</label>
+          <input id="stoken" data-testid="setup-token" type="text" bind:value={setupToken} placeholder={tr('app.printed_on_first_boot')} required />
         </div>
         <div class="form-group">
-          <label for="suser">Username</label>
-          <input id="suser" type="text" bind:value={username} placeholder="admin" required />
+          <label for="suser">{tr('app.username')}</label>
+          <input id="suser" type="text" bind:value={username} placeholder={tr('app.admin')} required />
         </div>
         <div class="form-group">
-          <label for="spwd">Password</label>
+          <label for="spwd">{tr('app.password')}</label>
           <input id="spwd" type="password" bind:value={password} placeholder="••••••••" required />
         </div>
         <div class="form-group">
-          <label for="scpwd">Confirm password</label>
+          <label for="scpwd">{tr('app.confirm_password')}</label>
           <input id="scpwd" type="password" bind:value={confirmPw} placeholder="••••••••" required />
         </div>
-        <button type="submit" class="btn-submit" data-testid="setup-submit">Create Administrator</button>
+        <button type="submit" class="btn-submit" data-testid="setup-submit">{tr('app.create_administrator')}</button>
       </form>
       {#if setupError}<div class="err-box" in:fade>{setupError}</div>{/if}
     </div>
@@ -193,18 +194,18 @@
         </div>
         <h1>ForgePanel</h1>
       </div>
-      <p class="subtitle">High-performance control plane</p>
+      <p class="subtitle">{tr('app.high_performance_control_plane')}</p>
 
       <form onsubmit={handleLogin}>
         <div class="form-group">
-          <label for="uname">Username</label>
-          <input id="uname" type="text" bind:value={username} placeholder="admin" required />
+          <label for="uname">{tr('app.username')}</label>
+          <input id="uname" type="text" bind:value={username} placeholder={tr('app.admin')} required />
         </div>
         <div class="form-group">
-          <label for="pwd">Password</label>
+          <label for="pwd">{tr('app.password')}</label>
           <input id="pwd" type="password" bind:value={password} placeholder="••••••••" required />
         </div>
-        <button type="submit" class="btn-submit">Sign In</button>
+        <button type="submit" class="btn-submit">{tr('app.sign_in')}</button>
       </form>
 
       {#if authError}
@@ -216,13 +217,13 @@
   <div class="app-layout" in:fade={{ duration: 150 }}>
     {#if idleWarning > 0}
       <div class="idle-banner" role="alert" data-testid="idle-warning">
-        Signing you out in {idleWarning}s — no activity detected.
+        {tr('app.signing_you_out_in_s_no', { idleWarning })}
         <!-- The click itself is the activity: the capture-phase mousedown
              listener rearms the timer and clears this banner through onResume.
              Setting idleWarning to 0 here instead would hide the banner even in
              the case where the timer did NOT rearm, which is the one case where
              the operator most needs to see it. -->
-        <button onclick={() => {}}>I'm still here</button>
+        <button onclick={() => {}}>{tr('app.i_m_still_here')}</button>
       </div>
     {/if}
     <Sidebar 
@@ -239,12 +240,12 @@
           </button>
           <div class="user-badge">
             <span class="online-indicator"></span>
-            <span>Signed in as <strong>admin</strong></span>
+            <span>{tr('app.signed_in_as')} <strong>{tr('app.admin')}</strong></span>
           </div>
         </div>
 
         <div class="nav-right">
-          <button class="logout-btn" onclick={handleLogout}>Sign Out</button>
+          <button class="logout-btn" onclick={handleLogout}>{tr('app.sign_out')}</button>
         </div>
       </header>
 
@@ -252,7 +253,7 @@
         {#if componentLoading}
           <div class="loading-state" in:fade={{ duration: 100 }}>
             <div class="spinner"></div>
-            <span>Lazy loading view module...</span>
+            <span>{tr('app.lazy_loading_view_module')}</span>
           </div>
         {:else if CurrentView}
           <div class="view-wrapper" in:fade={{ duration: 180 }}>
@@ -268,8 +269,8 @@
   .idle-banner {
     position: fixed;
     top: 0;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     z-index: 60;
     display: flex;
     justify-content: center;

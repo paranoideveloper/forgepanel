@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { AuditLog, AuditPage } from '$lib/types';
@@ -48,7 +49,7 @@
       total = res.total ?? 0;
       limit = res.limit || limit;
     } catch (err: any) {
-      loadError = err.message || 'Failed to load the audit trail';
+      loadError = err.message || tr('audit.failed_to_load_the_audit_trail');
     } finally {
       loading = false;
     }
@@ -116,8 +117,8 @@
     const line = `${e.created_at}\t${e.actor}\t${e.ip}\t${e.action}\t${e.target}`;
     navigator.clipboard
       .writeText(line)
-      .then(() => showToast('Entry copied', 'success'))
-      .catch(() => showToast('Could not copy', 'error'));
+      .then(() => showToast(tr('audit.entry_copied'), 'success'))
+      .catch(() => showToast(tr('audit.could_not_copy'), 'error'));
   }
 
   onMount(() => {
@@ -127,39 +128,39 @@
 </script>
 
 <div class="view-header">
-  <h2>Audit Trail</h2>
-  <button class="btn-primary" onclick={load}>Refresh</button>
+  <h2>{tr('audit.audit_trail')}</h2>
+  <button class="btn-primary" onclick={load}>{tr('audit.refresh')}</button>
 </div>
 
 <div class="card">
   <div class="filters">
     <label class="fg">
-      <span>Actor</span>
-      <input bind:value={fActor} placeholder="username" data-testid="filter-actor" />
+      <span>{tr('audit.actor')}</span>
+      <input bind:value={fActor} placeholder={tr('audit.username')} data-testid="filter-actor" />
     </label>
     <label class="fg">
-      <span>Action</span>
+      <span>{tr('audit.action')}</span>
       <select bind:value={fAction} data-testid="filter-action">
-        <option value="">any</option>
+        <option value="">{tr('audit.any')}</option>
         {#each actions as a}<option value={a}>{a}</option>{/each}
       </select>
     </label>
     <label class="fg">
-      <span>From</span>
+      <span>{tr('audit.from')}</span>
       <input type="datetime-local" bind:value={fSince} />
     </label>
     <label class="fg">
-      <span>To</span>
+      <span>{tr('audit.to')}</span>
       <input type="datetime-local" bind:value={fUntil} />
     </label>
-    <button class="btn-primary" onclick={applyFilters}>Apply</button>
-    <button class="btn-secondary" onclick={clearFilters}>Clear</button>
+    <button class="btn-primary" onclick={applyFilters}>{tr('audit.apply')}</button>
+    <button class="btn-secondary" onclick={clearFilters}>{tr('audit.clear')}</button>
   </div>
 </div>
 
 <div class="card table-card">
   {#if loading}
-    <p class="muted">Loading the audit trail…</p>
+    <p class="muted">{tr('audit.loading_the_audit_trail')}</p>
   {:else if loadError}
     <p class="err-text">{loadError}</p>
   {:else if entries.length === 0}
@@ -172,11 +173,11 @@
     <table>
       <thead>
         <tr>
-          <th>When</th>
-          <th>Actor</th>
+          <th>{tr('audit.when')}</th>
+          <th>{tr('audit.actor')}</th>
           <th>IP</th>
-          <th>Action</th>
-          <th>Target</th>
+          <th>{tr('audit.action')}</th>
+          <th>{tr('audit.target')}</th>
           <th></th>
         </tr>
       </thead>
@@ -194,7 +195,7 @@
                   {expanded[e.id] ? 'Hide' : 'What changed'}
                 </button>
               {/if}
-              <button class="btn-sm" onclick={() => copyRow(e)}>Copy</button>
+              <button class="btn-sm" onclick={() => copyRow(e)}>{tr('audit.copy')}</button>
             </td>
           </tr>
           {#if e.diff && expanded[e.id]}
@@ -209,13 +210,13 @@
     </table>
 
     <div class="pager">
-      <button class="btn-secondary" onclick={prev} disabled={offset <= 0}>Previous</button>
+      <button class="btn-secondary" onclick={prev} disabled={offset <= 0}>{tr('audit.previous')}</button>
       <!-- The total is what makes a page meaningful: "50 shown" says nothing
            about whether that is the whole story. -->
       <span class="muted" data-testid="pager">
-        Page {page} of {pages} · {total} {total === 1 ? 'entry' : 'entries'}
+        {tr('audit.page_of', { page, pages, total, p4: total === 1 ? 'entry' : 'entries' })}
       </span>
-      <button class="btn-secondary" onclick={next} disabled={offset + limit >= total}>Next</button>
+      <button class="btn-secondary" onclick={next} disabled={offset + limit >= total}>{tr('audit.next')}</button>
     </div>
   {/if}
 </div>
@@ -228,14 +229,14 @@
   .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.7); }
   input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px; border-radius: 8px; font: inherit; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(255,255,255,0.75); }
   .target { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Security-relevant events stand out from routine changes; the left border
      carries the signal so it is not colour alone. */
-  tr.sec td:first-child { border-left: 3px solid #d99b2b; }
-  tr.destructive td:first-child { border-left: 3px solid #f85149; }
+  tr.sec td:first-child { border-inline-start: 3px solid #d99b2b; }
+  tr.destructive td:first-child { border-inline-start: 3px solid #f85149; }
   .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.08); }
   .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
   .err-text { color: #f85149; font-size: 13px; }

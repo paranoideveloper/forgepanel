@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
 
@@ -25,7 +26,13 @@
         selectPreset(presets[0]);
       }
     } catch (_) {
-      // Fallback presets if offline
+      // Fallback presets if offline.
+      //
+      // NOT translated, deliberately. name/description normally come from the
+      // API and are rendered straight through, so translating only the offline
+      // copy would show Persian when the server is unreachable and English when
+      // it is not. Localising these belongs with the endpoint that supplies
+      // them, not here.
       presets = [
         { id: 'vless-reality', name: 'VLESS Reality (Xray)', engine: 'xray', description: 'VLESS + Vision + REALITY TLS' },
         { id: 'tuic-v5', name: 'TUIC v5 (Native)', engine: 'tuic', description: 'TUIC over QUIC with BBR' },
@@ -72,18 +79,18 @@
 </script>
 
 <svelte:head>
-  <title>ForgePanel — Config Studio</title>
+  <title>{tr('studio.forgepanel_config_studio')}</title>
 </svelte:head>
 
 <div class="studio-container">
   <header class="studio-header">
-    <h1>Config Studio</h1>
-    <p>Protocol engine testing, preset builder & live JSON preview</p>
+    <h1>{tr('studio.config_studio')}</h1>
+    <p>{tr('studio.protocol_engine_testing_preset_builder_live')}</p>
   </header>
 
   <div class="studio-grid">
     <div class="panel-card sidebar-presets">
-      <h3>Protocol Presets</h3>
+      <h3>{tr('studio.protocol_presets')}</h3>
       <div class="preset-list">
         {#each presets as p}
           <button 
@@ -100,26 +107,26 @@
     </div>
 
     <div class="panel-card config-form">
-      <h3>Configuration Options</h3>
+      <h3>{tr('studio.configuration_options')}</h3>
       <div class="form-row">
-        <label for="port">Listen Port</label>
+        <label for="port">{tr('studio.listen_port')}</label>
         <input id="port" type="number" bind:value={listenPort} oninput={generatePreview} />
       </div>
       <div class="form-row">
-        <label for="dom">SNI Domain / ServerName</label>
+        <label for="dom">{tr('studio.sni_domain_servername')}</label>
         <input id="dom" type="text" bind:value={domain} oninput={generatePreview} />
       </div>
       <div class="form-row">
-        <label for="eng">Core Engine</label>
+        <label for="eng">{tr('studio.core_engine')}</label>
         <select id="eng" bind:value={selectedEngine} onchange={generatePreview}>
-          <option value="xray">Xray-core</option>
-          <option value="tuic">TUIC v5</option>
+          <option value="xray">{tr('studio.xray_core')}</option>
+          <option value="tuic">{tr('studio.tuic_v5')}</option>
           <option value="hysteria2">Hysteria2</option>
-          <option value="sing-box">Sing-box</option>
+          <option value="sing-box">{tr('studio.sing_box')}</option>
         </select>
       </div>
 
-      <button class="btn-validate" onclick={validateConfig}>Validate JSON</button>
+      <button class="btn-validate" onclick={validateConfig}>{tr('studio.validate_json')}</button>
 
       {#if validationMsg}
         <div class="msg-box {validationMsg.type}">
@@ -129,7 +136,7 @@
     </div>
 
     <div class="panel-card json-preview">
-      <h3>Generated Config JSON</h3>
+      <h3>{tr('studio.generated_config_json')}</h3>
       <pre><code>{configJson}</code></pre>
     </div>
   </div>
@@ -160,7 +167,7 @@
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
     padding: 12px;
-    text-align: left;
+    text-align: start;
     cursor: pointer;
     color: #fff;
     position: relative;
@@ -174,7 +181,7 @@
   .engine-badge {
     position: absolute;
     top: 10px;
-    right: 10px;
+    inset-inline-end: 10px;
     font-size: 10px;
     background: rgba(255,255,255,0.1);
     padding: 2px 6px;

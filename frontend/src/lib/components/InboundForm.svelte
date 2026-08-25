@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
@@ -55,7 +56,7 @@
       else applyDefaults();
       schedulePreview();
     } catch (e: any) {
-      loadError = e.message || 'failed to load protocol schema';
+      loadError = e.message || tr('inbound.failed_to_load_protocol_schema');
     }
   });
 
@@ -139,7 +140,7 @@
       const node = buildNode(schema, proto, transport, security, values, editId ? originalNode : null);
       preview = await apiFetch('/studio/preview', { method: 'POST', body: JSON.stringify(node) });
     } catch (e: any) {
-      preview = { errors: [{ severity: 'error', message: e.message || 'preview failed' }] };
+      preview = { errors: [{ severity: 'error', message: e.message || tr('inbound.preview_failed') }] };
     } finally {
       previewing = false;
     }
@@ -166,10 +167,10 @@
         const sib = f.key.replace(/private_key$/, 'public_key');
         if (sib !== f.key) values[sib] = resp.public_key;
       }
-      showToast(`Generated ${f.label}`, 'success');
+      showToast(tr('inbound.generated_label', { label: f.label }), 'success');
       schedulePreview();
     } catch (e: any) {
-      showToast(e.message || 'keygen failed', 'error');
+      showToast(e.message || tr('inbound.keygen_failed'), 'error');
     }
   }
 
@@ -185,9 +186,9 @@
       const r = await apiFetch<{ country_code: string; flag: string }>(`/admin/geoip${q}`);
       values['country'] = r.country_code;
       schedulePreview();
-      showToast(`Detected ${r.flag} ${r.country_code}`, 'success');
+      showToast(tr('inbound.detected_flag_country_code', { flag: r.flag, country_code: r.country_code }), 'success');
     } catch (e: any) {
-      showToast(e.message || 'Could not detect country — enter it manually', 'error');
+      showToast(e.message || tr('inbound.could_not_detect_country_enter_it'), 'error');
     } finally {
       detecting = false;
     }
@@ -202,14 +203,14 @@
         // confirm=true accepts breaking changes (port/proto/transport/security)
         // the safe-edit guard would otherwise refuse.
         await apiFetch(`/admin/inbounds/${editId}?confirm=true`, { method: 'PUT', body: JSON.stringify(node) });
-        showToast(`Inbound #${editId} updated`, 'success');
+        showToast(tr('inbound.inbound_editid_updated', { editId }), 'success');
       } else {
         const created = await apiFetch<{ id: number }>('/admin/inbounds', { method: 'POST', body: JSON.stringify(node) });
-        showToast(`Inbound #${created.id} created (${proto})`, 'success');
+        showToast(tr('inbound.inbound_id_created_proto', { id: created.id, proto }), 'success');
       }
       onSaved();
     } catch (e: any) {
-      showToast(e.message || 'failed to create inbound', 'error');
+      showToast(e.message || tr('inbound.failed_to_create_inbound'), 'error');
     } finally {
       saving = false;
     }
@@ -220,20 +221,20 @@
       : previewTab === 'xray' ? preview?.xray
       : previewTab === 'singbox' ? preview?.singbox
       : preview?.clash;
-    if (text) navigator.clipboard.writeText(text).then(() => showToast('Copied', 'success'));
+    if (text) navigator.clipboard.writeText(text).then(() => showToast(tr('inbound.copied'), 'success'));
   }
 </script>
 
 {#if loadError}
   <div class="err-box" data-testid="form-error">{loadError}</div>
 {:else if !schema}
-  <div class="muted">Loading protocol schema…</div>
+  <div class="muted">{tr('inbound.loading_protocol_schema')}</div>
 {:else}
   <div class="builder">
     <div class="form-col">
       <div class="grid3">
         <div class="fg">
-          <label for="proto">Protocol</label>
+          <label for="proto">{tr('inbound.protocol')}</label>
           <select id="proto" data-testid="proto-select" bind:value={proto} onchange={onProtoChange}>
             <!-- Only protocols the panel can actually LISTEN on. SSH is
                  dialable as an egress hop and has no server side here, and
@@ -246,7 +247,7 @@
         </div>
         {#if hasTransport}
           <div class="fg">
-            <label for="transport">Transport</label>
+            <label for="transport">{tr('inbound.transport')}</label>
             <select id="transport" bind:value={transport} onchange={schedulePreview}>
               {#each current?.transports || [] as t}<option value={t}>{t}</option>{/each}
             </select>
@@ -254,7 +255,7 @@
         {/if}
         {#if securities.length}
           <div class="fg">
-            <label for="security">Security</label>
+            <label for="security">{tr('inbound.security')}</label>
             <select id="security" bind:value={security} onchange={schedulePreview}>
               {#each securities as sec}<option value={sec}>{sec}</option>{/each}
             </select>
@@ -264,22 +265,22 @@
 
       <div class="grid3">
         <div class="fg">
-          <label for="remark">Remark</label>
-          <input id="remark" data-testid="field-remark" bind:value={values['remark']} oninput={schedulePreview} placeholder="my-inbound" />
+          <label for="remark">{tr('inbound.remark')}</label>
+          <input id="remark" data-testid="field-remark" bind:value={values['remark']} oninput={schedulePreview} placeholder={tr('inbound.my_inbound')} />
         </div>
         <div class="fg">
-          <label for="port">Port</label>
+          <label for="port">{tr('inbound.port')}</label>
           <input id="port" data-testid="field-port" type="number" bind:value={values['port']} oninput={schedulePreview} />
         </div>
         <div class="fg">
-          <label for="address">Address (optional)</label>
-          <input id="address" bind:value={values['address']} oninput={schedulePreview} placeholder="auto = panel host" />
+          <label for="address">{tr('inbound.address_optional')}</label>
+          <input id="address" bind:value={values['address']} oninput={schedulePreview} placeholder={tr('inbound.auto_panel_host')} />
         </div>
         <div class="fg">
-          <label for="country">Country</label>
+          <label for="country">{tr('inbound.country')}</label>
           <div style="display:flex;gap:6px">
-            <input id="country" data-testid="field-country" bind:value={values['country']} oninput={schedulePreview} maxlength="2" placeholder="e.g. DE" title="ISO 2-letter code — the flag/name for the subscription template" style="text-transform:uppercase;flex:1" />
-            <button type="button" class="detect" onclick={detectCountry} disabled={detecting} title="Auto-detect from the address (geoip)">{detecting ? '…' : 'Detect'}</button>
+            <input id="country" data-testid="field-country" bind:value={values['country']} oninput={schedulePreview} maxlength="2" placeholder={tr('inbound.e_g_de')} title={tr('inbound.iso_2_letter_code_the_flag')} style="text-transform:uppercase;flex:1" />
+            <button type="button" class="detect" onclick={detectCountry} disabled={detecting} title={tr('inbound.auto_detect_from_the_address_geoip')}>{detecting ? '…' : 'Detect'}</button>
           </div>
         </div>
       </div>
@@ -292,7 +293,7 @@
               <div class="fg" class:wide={f.type === 'textarea' || f.type === 'kv' || f.type === 'lines'}>
                 <label for={f.key}>{f.label}</label>
                 {#if f.type === 'bool'}
-                  <label class="chk"><input type="checkbox" bind:checked={values[f.key]} onchange={schedulePreview} /> enabled</label>
+                  <label class="chk"><input type="checkbox" bind:checked={values[f.key]} onchange={schedulePreview} /> {tr('inbound.enabled')}</label>
                 {:else if f.type === 'select' || f.type === 'iselect'}
                   <select id={f.key} bind:value={values[f.key]} onchange={schedulePreview}>
                     {#each f.options || [] as o}<option value={o}>{o === '' ? '(none)' : o}</option>{/each}
@@ -304,7 +305,7 @@
                     <input id={f.key} type={f.type === 'number' ? 'number' : 'text'}
                       bind:value={values[f.key]} oninput={schedulePreview} placeholder={f.placeholder} />
                     {#if f.keygen}
-                      <button type="button" class="gen" data-testid={'gen-' + f.key} onclick={() => generate(f)}>Generate</button>
+                      <button type="button" class="gen" data-testid={'gen-' + f.key} onclick={() => generate(f)}>{tr('inbound.generate')}</button>
                     {/if}
                   </div>
                 {/if}
@@ -320,7 +321,7 @@
            away over a host permission the operator may be about to grant. -->
       {#if hopWontWork}
         <div class="hop-warning" data-testid="hop-warning">
-          <strong>Port hopping will not take effect on this host.</strong>
+          <strong>{tr('inbound.port_hopping_will_not_take_effect')}</strong>
           <span>{hopCap?.reason}</span>
           {#if hopCap?.remediation}<span>{hopCap.remediation}</span>{/if}
         </div>
@@ -338,7 +339,7 @@
             <button class:active={previewTab === t} onclick={() => previewTab = t}>{t === 'uri' ? 'Client Link' : t}</button>
           {/each}
         </div>
-        <button class="copy" onclick={copyPreview}>Copy</button>
+        <button class="copy" onclick={copyPreview}>{tr('inbound.copy')}</button>
       </div>
       {#if preview?.errors?.length}
         <div class="errors" data-testid="preview-errors">

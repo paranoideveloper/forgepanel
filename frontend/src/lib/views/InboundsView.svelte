@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
@@ -27,13 +28,13 @@
   }
   async function bulk(action: 'enable' | 'disable' | 'delete') {
     if (selected.size === 0) return;
-    if (action === 'delete' && !confirm(`Delete ${selected.size} inbound(s)?`)) return;
+    if (action === 'delete' && !confirm(tr('inbounds.delete_size_inbound_s', { size: selected.size }))) return;
     try {
       await apiFetch('/admin/inbounds/bulk', { method: 'POST', body: JSON.stringify({ action, ids: [...selected] }) });
-      showToast(`${action} ${selected.size} inbound(s)`, 'success');
+      showToast(tr('inbounds.action_size_inbound_s', { action, size: selected.size }), 'success');
       selected = new Set();
       load();
-    } catch (e: any) { showToast(e.message || 'bulk action failed', 'error'); }
+    } catch (e: any) { showToast(e.message || tr('inbounds.bulk_action_failed'), 'error'); }
   }
   let verifyResults = $state<Record<number, { pass: boolean; unprovable?: boolean; latency?: number; detail?: string }>>({});
 
@@ -55,15 +56,15 @@
       const res = await apiFetch<{ count: number; nodes: any[]; errors?: string[] }>('/import', {
         method: 'POST', body: JSON.stringify({ text: importText }),
       });
-      if (!res.count) { showToast('Nothing recognized to import', 'error'); return; }
+      if (!res.count) { showToast(tr('inbounds.nothing_recognized_to_import'), 'error'); return; }
       let ok = 0;
       for (const node of res.nodes) {
         try { await apiFetch('/admin/inbounds', { method: 'POST', body: JSON.stringify(node) }); ok++; } catch (_) {}
       }
-      showToast(`Imported ${ok}/${res.count} as inbounds`, ok ? 'success' : 'error');
+      showToast(tr('inbounds.imported_ok_count_as_inbounds', { ok, count: res.count }), ok ? 'success' : 'error');
       importText = ''; importing = false; load();
     } catch (e: any) {
-      showToast(e.message || 'import failed', 'error');
+      showToast(e.message || tr('inbounds.import_failed'), 'error');
     } finally {
       importBusy = false;
     }
@@ -74,7 +75,7 @@
     try {
       rows = await apiFetch<Row[]>('/admin/inbounds');
     } catch (e: any) {
-      showToast(e.message || 'failed to load inbounds', 'error');
+      showToast(e.message || tr('inbounds.failed_to_load_inbounds'), 'error');
     } finally {
       loading = false;
     }
@@ -94,10 +95,10 @@
   async function quickReality() {
     try {
       await apiFetch('/admin/inbounds/reality-quickstart', { method: 'POST', body: JSON.stringify({}) });
-      showToast('REALITY inbound created', 'success');
+      showToast(tr('inbounds.reality_inbound_created'), 'success');
       load();
     } catch (e: any) {
-      showToast(e.message || 'quickstart failed', 'error');
+      showToast(e.message || tr('inbounds.quickstart_failed'), 'error');
     }
   }
 
@@ -110,7 +111,7 @@
       cfgTitle = `${r.remark || r.protocol} · #${r.id}`;
       cfgOpen = true;
     } catch (e: any) {
-      showToast(e.message || 'failed to load config', 'error');
+      showToast(e.message || tr('inbounds.failed_to_load_config'), 'error');
     }
   }
 
@@ -129,40 +130,40 @@
     try {
       const res = await apiFetch<{ pass: boolean; unprovable?: boolean; latency_ms?: number; finding?: { detail?: string } }>(`/admin/inbounds/${r.id}/verify`, { method: 'POST' });
       verifyResults[r.id] = { pass: res.pass, unprovable: res.unprovable, latency: res.latency_ms, detail: res.finding?.detail };
-      if (res.unprovable) showToast(res.finding?.detail || 'Cannot verify on loopback — test from a client', 'info');
-      else showToast(res.pass ? `Verify OK (${res.latency_ms}ms)` : `Verify failed: ${res.finding?.detail || ''}`, res.pass ? 'success' : 'error');
+      if (res.unprovable) showToast(res.finding?.detail || tr('inbounds.cannot_verify_on_loopback_test_from'), 'info');
+      else showToast(res.pass ? tr('inbounds.verify_ok_ms', { ms: res.latency_ms }) : tr('inbounds.verify_failed_detail', { detail: res.finding?.detail || '' }), res.pass ? 'success' : 'error');
     } catch (e: any) {
       verifyResults[r.id] = { pass: false, detail: e.message };
-      showToast(e.message || 'verify failed', 'error');
+      showToast(e.message || tr('inbounds.verify_failed'), 'error');
     }
   }
 
   async function clone(r: Row) {
-    try { await apiFetch(`/admin/inbounds/${r.id}/clone`, { method: 'POST' }); showToast('Cloned', 'success'); load(); }
-    catch (e: any) { showToast(e.message || 'clone failed', 'error'); }
+    try { await apiFetch(`/admin/inbounds/${r.id}/clone`, { method: 'POST' }); showToast(tr('inbounds.cloned'), 'success'); load(); }
+    catch (e: any) { showToast(e.message || tr('inbounds.clone_failed'), 'error'); }
   }
   async function toggle(r: Row) {
     try { await apiFetch(`/admin/inbounds/${r.id}/toggle`, { method: 'POST' }); load(); }
-    catch (e: any) { showToast(e.message || 'toggle failed', 'error'); }
+    catch (e: any) { showToast(e.message || tr('inbounds.toggle_failed'), 'error'); }
   }
   async function del(r: Row) {
-    if (!confirm(`Delete inbound "${r.remark || r.protocol}" (:${r.port})?`)) return;
-    try { await apiFetch(`/admin/inbounds/${r.id}`, { method: 'DELETE' }); showToast('Deleted', 'info'); load(); }
-    catch (e: any) { showToast(e.message || 'delete failed', 'error'); }
+    if (!confirm(tr('inbounds.delete_inbound_p1_port', { p1: r.remark || r.protocol, port: r.port }))) return;
+    try { await apiFetch(`/admin/inbounds/${r.id}`, { method: 'DELETE' }); showToast(tr('inbounds.deleted'), 'info'); load(); }
+    catch (e: any) { showToast(e.message || tr('inbounds.delete_failed'), 'error'); }
   }
 
   function copy(text: string) {
-    navigator.clipboard.writeText(text).then(() => showToast('Copied', 'success'));
+    navigator.clipboard.writeText(text).then(() => showToast(tr('inbounds.copied'), 'success'));
   }
 
   onMount(load);
 </script>
 
 <div class="head">
-  <h2>Inbounds</h2>
+  <h2>{tr('inbounds.inbounds')}</h2>
   <div class="actions">
-    <button class="ghost" data-testid="import-toggle" onclick={() => importing = !importing}>Import</button>
-    <button class="ghost" data-testid="quick-reality" onclick={quickReality}>One-click REALITY</button>
+    <button class="ghost" data-testid="import-toggle" onclick={() => importing = !importing}>{tr('inbounds.import')}</button>
+    <button class="ghost" data-testid="quick-reality" onclick={quickReality}>{tr('inbounds.one_click_reality')}</button>
     <button class="primary" data-testid="create-inbound" onclick={() => creating = !creating}>
       {creating ? 'Close' : '+ Create Inbound'}
     </button>
@@ -171,9 +172,9 @@
 
 {#if importing}
   <div class="card" data-testid="import-panel">
-    <h3>Paste anything — links, a subscription, base64, or JSON</h3>
+    <h3>{tr('inbounds.paste_anything_links_a_subscription_base64')}</h3>
     <textarea data-testid="import-text" bind:value={importText} rows="4"
-      placeholder="vless://…&#10;vmess://…&#10;https://host/sub/token&#10;(base64 or clash/sing-box JSON)"></textarea>
+      placeholder={tr('inbounds.vless_10_vmess_10_https_host')}></textarea>
     <button class="primary" data-testid="import-run" onclick={runImport} disabled={importBusy}>
       {importBusy ? 'Importing…' : 'Parse & create inbounds'}
     </button>
@@ -182,14 +183,14 @@
 
 {#if creating}
   <div class="card creator" data-testid="inbound-creator">
-    <h3>Create a new inbound</h3>
+    <h3>{tr('inbounds.create_a_new_inbound')}</h3>
     <InboundForm onSaved={onSaved} />
   </div>
 {/if}
 
 {#if editRow}
   <div class="card creator" data-testid="inbound-editor">
-    <h3>Edit inbound #{editRow.id} — {editRow.remark || editRow.protocol}</h3>
+    <h3>{tr('inbounds.edit_inbound', { id: editRow.id, p2: editRow.remark || editRow.protocol })}</h3>
     {#key editRow.id}
       <InboundForm onSaved={onSaved} initial={editRow.node} editId={editRow.id} />
     {/key}
@@ -198,22 +199,22 @@
 
 <div class="card">
   {#if loading}
-    <p class="muted">Loading…</p>
+    <p class="muted">{tr('inbounds.loading')}</p>
   {:else if rows.length === 0}
-    <p class="muted" data-testid="inbounds-empty">No inbounds yet. Click <strong>Create Inbound</strong> or <strong>One-click REALITY</strong> to add one.</p>
+    <p class="muted" data-testid="inbounds-empty">{tr('inbounds.no_inbounds_yet_click')} <strong>{tr('inbounds.create_inbound')}</strong> {tr('inbounds.or')} <strong>{tr('inbounds.one_click_reality')}</strong> {tr('inbounds.to_add_one')}</p>
   {:else}
     {#if selected.size > 0}
       <div class="bulkbar" data-testid="bulk-bar">
-        <span>{selected.size} selected</span>
-        <button class="sm" data-testid="bulk-enable" onclick={() => bulk('enable')}>Enable</button>
-        <button class="sm" onclick={() => bulk('disable')}>Disable</button>
-        <button class="sm danger" data-testid="bulk-delete" onclick={() => bulk('delete')}>Delete</button>
+        <span>{tr('inbounds.selected', { size: selected.size })}</span>
+        <button class="sm" data-testid="bulk-enable" onclick={() => bulk('enable')}>{tr('inbounds.enable')}</button>
+        <button class="sm" onclick={() => bulk('disable')}>{tr('inbounds.disable')}</button>
+        <button class="sm danger" data-testid="bulk-delete" onclick={() => bulk('delete')}>{tr('inbounds.delete')}</button>
       </div>
     {/if}
     <div class="table-scroll">
     <table data-testid="inbounds-table">
       <thead>
-        <tr><th><input type="checkbox" data-testid="select-all" checked={selected.size === rows.length && rows.length > 0} onchange={toggleAll} /></th><th>#</th><th>Remark</th><th>Protocol</th><th>Transport</th><th>Security</th><th>Port</th><th>Status</th><th>Verify</th><th>Actions</th></tr>
+        <tr><th><input type="checkbox" data-testid="select-all" checked={selected.size === rows.length && rows.length > 0} onchange={toggleAll} /></th><th>#</th><th>{tr('inbounds.remark')}</th><th>{tr('inbounds.protocol')}</th><th>{tr('inbounds.transport')}</th><th>{tr('inbounds.security')}</th><th>{tr('inbounds.port')}</th><th>{tr('inbounds.status')}</th><th>{tr('inbounds.verify')}</th><th>{tr('inbounds.actions')}</th></tr>
       </thead>
       <tbody>
         {#each rows as r (r.id)}
@@ -234,11 +235,11 @@
               {#if r.enabled && r.not_serving_reason}
                 <span class="badge err" data-testid="not-serving"
                       title="This inbound is enabled but is NOT in the running configuration: {r.not_serving_reason}{r.not_serving_since ? ' (since ' + new Date(r.not_serving_since).toLocaleString() + ')' : ''}">
-                  ⚠ not serving
+                  {tr('inbounds.not_serving')}
                 </span>
               {/if}
               {#if r.enabled && r.reachable === false}
-                <span class="badge err" data-testid="fw-blocked" title="Port {r.port} is not allowed in the host firewall (ufw), so external clients are dropped even though Verify passes on loopback. A native install running as root opens it automatically; inside Docker or behind a VPS provider firewall the panel cannot, so allow it yourself: ufw allow {r.port} (and in your provider's firewall panel).">🔥 firewall</span>
+                <span class="badge err" data-testid="fw-blocked" title="Port {r.port} is not allowed in the host firewall (ufw), so external clients are dropped even though Verify passes on loopback. A native install running as root opens it automatically; inside Docker or behind a VPS provider firewall the panel cannot, so allow it yourself: ufw allow {r.port} (and in your provider's firewall panel).">{tr('inbounds.firewall')}</span>
               {/if}
             </td>
             <td>
@@ -249,12 +250,12 @@
               {:else}<span class="muted">—</span>{/if}
             </td>
             <td class="row-actions">
-              <button class="sm" data-testid="config-btn" onclick={() => showConfig(r)}>Config</button>
-              <button class="sm" data-testid="edit-btn" onclick={() => edit(r)}>Edit</button>
-              <button class="sm" onclick={() => verify(r)}>Verify</button>
-              <button class="sm" onclick={() => clone(r)}>Clone</button>
+              <button class="sm" data-testid="config-btn" onclick={() => showConfig(r)}>{tr('inbounds.config')}</button>
+              <button class="sm" data-testid="edit-btn" onclick={() => edit(r)}>{tr('inbounds.edit')}</button>
+              <button class="sm" onclick={() => verify(r)}>{tr('inbounds.verify')}</button>
+              <button class="sm" onclick={() => clone(r)}>{tr('inbounds.clone')}</button>
               <button class="sm" onclick={() => toggle(r)}>{r.enabled ? 'Disable' : 'Enable'}</button>
-              <button class="sm danger" onclick={() => del(r)}>Delete</button>
+              <button class="sm danger" onclick={() => del(r)}>{tr('inbounds.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -267,18 +268,18 @@
 <Modal title={'Config · ' + cfgTitle} isOpen={cfgOpen} onClose={() => cfgOpen = false}>
   {#if cfgKind === 'uri'}
     <div class="cfg">
-      <span class="lbl">Client link</span>
+      <span class="lbl">{tr('inbounds.client_link')}</span>
       <div class="uri-row">
         <code data-testid="config-uri">{cfgUri}</code>
-        <button class="sm" onclick={() => copy(cfgUri)}>Copy</button>
+        <button class="sm" onclick={() => copy(cfgUri)}>{tr('inbounds.copy')}</button>
       </div>
       {#if cfgUri}<div class="qr"><QRCode value={cfgUri} size={200} /></div>{/if}
     </div>
   {:else}
     <div class="cfg">
-      <span class="lbl">{cfgKind} config</span>
+      <span class="lbl">{tr('inbounds.config_2', { cfgKind })}</span>
       <pre data-testid="config-uri">{cfgText}</pre>
-      <button class="sm" onclick={() => copy(cfgText)}>Copy</button>
+      <button class="sm" onclick={() => copy(cfgText)}>{tr('inbounds.copy')}</button>
     </div>
   {/if}
 </Modal>
@@ -295,7 +296,7 @@
      instead of pushing the whole page sideways. */
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
   table { width: 100%; min-width: 720px; border-collapse: collapse; }
-  th, td { padding: 11px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; white-space: nowrap; }
+  th, td { padding: 11px 10px; text-align: start; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; white-space: nowrap; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; font-size: 12px; }
   .proto { background: rgba(255,122,26,0.12); color: #FF9A4A; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
   .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }

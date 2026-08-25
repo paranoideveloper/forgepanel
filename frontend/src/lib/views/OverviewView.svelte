@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { SystemHealth } from '$lib/types';
@@ -12,7 +13,7 @@
     try {
       health = await apiFetch<SystemHealth>('/admin/overview');
     } catch (err: any) {
-      showToast(err.message || 'Failed to load system status', 'error');
+      showToast(err.message || tr('overview.failed_to_load_system_status'), 'error');
     } finally {
       loading = false;
     }
@@ -32,10 +33,10 @@
 
 <div class="view-header">
   <div>
-    <h2>Dashboard Overview</h2>
-    <p class="header-desc">Real-time control-plane health & node cluster metrics</p>
+    <h2>{tr('overview.dashboard_overview')}</h2>
+    <p class="header-desc">{tr('overview.real_time_control_plane_health_node')}</p>
   </div>
-  <button class="btn-primary" onclick={loadOverview}>Refresh</button>
+  <button class="btn-primary" onclick={loadOverview}>{tr('overview.refresh')}</button>
 </div>
 
 {#if loading}
@@ -50,7 +51,7 @@
     <div class="metric-card">
       <div class="card-icon status-icon">🟢</div>
       <div class="card-info">
-        <span class="label">System Status</span>
+        <span class="label">{tr('overview.system_status')}</span>
         <span class="value ok">{health.status}</span>
       </div>
     </div>
@@ -58,7 +59,7 @@
     <div class="metric-card">
       <div class="card-icon">⚡</div>
       <div class="card-info">
-        <span class="label">Core Version</span>
+        <span class="label">{tr('overview.core_version')}</span>
         <span class="value">{health.version}</span>
       </div>
     </div>
@@ -66,24 +67,24 @@
     <div class="metric-card">
       <div class="card-icon">🌐</div>
       <div class="card-info">
-        <span class="label">Node Cluster</span>
-        <span class="value">{health.nodes_online} / {health.nodes_total} <span class="unit">Online</span></span>
+        <span class="label">{tr('overview.node_cluster')}</span>
+        <span class="value">{health.nodes_online} / {health.nodes_total} <span class="unit">{tr('overview.online')}</span></span>
       </div>
     </div>
 
     <div class="metric-card">
       <div class="card-icon">⏱️</div>
       <div class="card-info">
-        <span class="label">Uptime</span>
+        <span class="label">{tr('overview.uptime')}</span>
         <span class="value">{formatUptime(health.uptime_seconds)}</span>
       </div>
     </div>
   </div>
 
   <div class="card nav-hint-card">
-    <h3>Quick Navigation</h3>
+    <h3>{tr('overview.quick_navigation')}</h3>
     <p class="muted">
-      Access user management, remote node cluster enrollment, protocol engine configuration, and DNS tunnel features using the left navigation sidebar.
+      {tr('overview.access_user_management_remote_node_cluster')}
     </p>
   </div>
 {/if}

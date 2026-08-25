@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
   import type { User, UserGroup } from '$lib/types';
@@ -67,9 +68,9 @@
         method: 'POST',
         body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '', pattern: subSettings.pattern ?? 'off', front_domain: subSettings.front_domain ?? '', front_mode: subSettings.front_mode ?? 'none' })
       });
-      showToast('Subscription defaults saved', 'success');
+      showToast(tr('users.subscription_defaults_saved'), 'success');
     } catch (err: any) {
-      showToast(err.message || 'Failed to save', 'error');
+      showToast(err.message || tr('users.failed_to_save'), 'error');
     }
   }
 
@@ -84,9 +85,9 @@
       });
       subSettings.name_template = res.name_template ?? theme.template;
       subSettings.front_mode = res.front_mode ?? theme.front;
-      showToast(`Applied theme “${theme.label}” (${theme.front === 'none' ? 'no fronting' : theme.front.toUpperCase()})`, 'success');
+      showToast(tr('users.applied_theme_label_p2', { label: theme.label, p2: theme.front === 'none' ? tr('users.no_fronting') : theme.front.toUpperCase() }), 'success');
     } catch (err: any) {
-      showToast(err.message || 'Failed to apply theme', 'error');
+      showToast(err.message || tr('users.failed_to_apply_theme'), 'error');
     }
   }
 
@@ -98,7 +99,7 @@
       inbounds = await apiFetch<Inbound[]>('/admin/inbounds');
       subSettings = await apiFetch<SubSettings>('/admin/settings/subscription');
     } catch (err: any) {
-      showToast(err.message || 'Failed to load users', 'error');
+      showToast(err.message || tr('users.failed_to_load_users'), 'error');
     } finally {
       loading = false;
     }
@@ -114,17 +115,17 @@
           data_limit_gb: newLimitGB || 0, expire_days: newExpireDays || 0 }),
       });
       newUsername = ''; newLimitGB = 0; newExpireDays = 0;
-      showToast('User created', 'success');
+      showToast(tr('users.user_created'), 'success');
       await loadData();
-    } catch (err: any) { createErr = err.message || 'Failed to create user'; }
+    } catch (err: any) { createErr = err.message || tr('users.failed_to_create_user'); }
   }
 
   async function setStatus(user: User, status: string) {
     try {
       await apiFetch(`/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
-      showToast(`User ${status}`, 'info');
+      showToast(tr('users.user_status', { status }), 'info');
       await loadData();
-    } catch (err: any) { showToast(err.message || 'Failed to update user', 'error'); }
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_update_user'), 'error'); }
   }
 
   // Rotation is SELECTIVE. The API has always taken three independent flags,
@@ -172,34 +173,34 @@
       if (rotateSub && res?.sub_url) {
         try {
           await navigator.clipboard.writeText(res.sub_url);
-          showToast('Rotated — new subscription link copied', 'success');
+          showToast(tr('users.rotated_new_subscription_link_copied'), 'success');
         } catch {
-          showToast('Rotated — the subscription link is in the Sub dialog', 'success');
+          showToast(tr('users.rotated_the_subscription_link_is_in'), 'success');
         }
       } else {
-        showToast('Rotated', 'success');
+        showToast(tr('users.rotated'), 'success');
       }
       await loadData();
     } catch (err: any) {
-      showToast(err.message || 'Failed to rotate', 'error');
+      showToast(err.message || tr('users.failed_to_rotate'), 'error');
     } finally {
       rotating = false;
     }
   }
 
   async function deleteUser(id: number) {
-    if (!confirm('Delete this user?')) return;
+    if (!confirm(tr('users.delete_this_user'))) return;
     try {
       await apiFetch(`/admin/users/${id}`, { method: 'DELETE' });
-      showToast('User deleted', 'info');
+      showToast(tr('users.user_deleted'), 'info');
       await loadData();
-    } catch (err: any) { showToast(err.message || 'Failed to delete', 'error'); }
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_delete'), 'error'); }
   }
 
   function openSubModal(user: User) { activeSubUser = user; subModalOpen = true; }
   async function copySubUrl() {
-    try { await navigator.clipboard.writeText(subUrl); showToast('Copied', 'success'); }
-    catch (_) { showToast('Failed to copy', 'error'); }
+    try { await navigator.clipboard.writeText(subUrl); showToast(tr('users.copied'), 'success'); }
+    catch (_) { showToast(tr('users.failed_to_copy'), 'error'); }
   }
 
   // --- manage (edit + assign inbounds) ---
@@ -242,10 +243,10 @@
       if (mExpireDays > 0) patch.expire_at = new Date(Date.now() + mExpireDays * 86400_000).toISOString();
       await apiFetch(`/admin/users/${mUser.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
       await apiFetch(`/admin/users/${mUser.id}/inbounds`, { method: 'PUT', body: JSON.stringify({ inbound_ids: [...mAssigned] }) });
-      showToast('User updated + inbounds assigned', 'success');
+      showToast(tr('users.user_updated_inbounds_assigned'), 'success');
       manageOpen = false;
       await loadData();
-    } catch (err: any) { showToast(err.message || 'Failed to save', 'error'); }
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_save'), 'error'); }
   }
 
   // --- groups ---
@@ -258,7 +259,7 @@
     const s = new Set(gInbounds); if (s.has(id)) s.delete(id); else s.add(id); gInbounds = s;
   }
   async function saveGroup() {
-    if (!gName.trim()) { showToast('Group name required', 'error'); return; }
+    if (!gName.trim()) { showToast(tr('users.group_name_required'), 'error'); return; }
     try {
       if (gEditing) {
         await apiFetch(`/admin/groups/${gEditing.id}`, { method: 'PATCH',
@@ -270,13 +271,13 @@
           await apiFetch(`/admin/groups/${g.id}`, { method: 'PATCH', body: JSON.stringify({ inbound_ids: [...gInbounds] }) });
         }
       }
-      showToast('Group saved', 'success'); groupOpen = false; await loadData();
-    } catch (err: any) { showToast(err.message || 'Failed to save group', 'error'); }
+      showToast(tr('users.group_saved'), 'success'); groupOpen = false; await loadData();
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_save_group'), 'error'); }
   }
   async function deleteGroup(g: UserGroup) {
-    if (!confirm(`Delete group "${g.name}"?`)) return;
-    try { await apiFetch(`/admin/groups/${g.id}`, { method: 'DELETE' }); showToast('Group deleted', 'info'); await loadData(); }
-    catch (err: any) { showToast(err.message || 'Failed to delete group', 'error'); }
+    if (!confirm(tr('users.delete_group_name', { name: g.name }))) return;
+    try { await apiFetch(`/admin/groups/${g.id}`, { method: 'DELETE' }); showToast(tr('users.group_deleted'), 'info'); await loadData(); }
+    catch (err: any) { showToast(err.message || tr('users.failed_to_delete_group'), 'error'); }
   }
 
   function fmtBytes(b?: number) {
@@ -318,59 +319,59 @@
 </script>
 
 <div class="view-header">
-  <h2>Users &amp; Subscriptions</h2>
+  <h2>{tr('users.users_amp_subscriptions')}</h2>
 </div>
 
 {#if subSettings}
   <div class="card" data-testid="sub-settings">
-    <h3>Subscription defaults</h3>
-    <p class="hint">Applied to every generated sing-box / Xray / Clash config. Clients can still override per-link with <code>?routing=</code> and <code>?fragment=</code>.</p>
+    <h3>{tr('users.subscription_defaults')}</h3>
+    <p class="hint">{tr('users.applied_to_every_generated_sing_box')} <code>{tr('users.routing')}</code> {tr('users.and')} <code>{tr('users.fragment')}</code>.</p>
     <div class="row">
       <label class="field">
-        <span>Routing rules</span>
+        <span>{tr('users.routing_rules')}</span>
         <select bind:value={subSettings.routing_preset} data-testid="routing-preset">
           {#each subSettings.presets as p}<option value={p}>{routingLabels[p] || p}</option>{/each}
         </select>
       </label>
       <label class="field checkbox">
         <input type="checkbox" bind:checked={subSettings.fragment} data-testid="fragment-toggle" />
-        <span>TLS Fragment (Xray, DPI evasion)</span>
+        <span>{tr('users.tls_fragment_xray_dpi_evasion')}</span>
       </label>
       <label class="field">
-        <span>Pattern (unsafe-uTLS)</span>
-        <select bind:value={subSettings.pattern} data-testid="pattern-mode" title="Adds cs=/fm=/fp=unsafe to VLESS/Trojan/VMess links — the 'patterniha' anti-DPI variant">
+        <span>{tr('users.pattern_unsafe_utls')}</span>
+        <select bind:value={subSettings.pattern} data-testid="pattern-mode" title={tr('users.adds_cs_fm_fp_unsafe_to')}>
           {#each (subSettings.pattern_modes ?? ['off','only','both']) as m}<option value={m}>{m === 'off' ? 'Off (normal)' : m === 'only' ? 'Pattern only' : 'Both (normal + pattern)'}</option>{/each}
         </select>
       </label>
-      <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>Save</button>
+      <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>{tr('users.save')}</button>
     </div>
-    <p class="hint">Pattern adds <code>cs</code> (cipher-suites) + <code>fm</code> (TLS fragment) + <code>fp=unsafe</code> to VLESS/Trojan/VMess links — the anti-DPI meta. Per link: <code>?patt=1</code> (pattern) or <code>?patt=both</code>. Needs a recent Xray client (v2rayNG ≥ 1.9 / v2rayN / Husi).</p>
+    <p class="hint">{tr('users.pattern_adds')} <code>{tr('users.cs')}</code> {tr('users.cipher_suites')} <code>{tr('users.fm')}</code> {tr('users.tls_fragment')} <code>{tr('users.fp_unsafe')}</code> {tr('users.to_vless_trojan_vmess_links_the')} <code>{tr('users.patt_1')}</code> {tr('users.pattern_or')} <code>{tr('users.patt_both')}</code>{tr('users.needs_a_recent_xray_client_v2rayng')}</p>
     <div class="row" style="margin-top:10px">
       <label class="field" style="flex:1;min-width:280px">
-        <span>Config name template <span class="hint" style="font-weight:400">— blank = keep each inbound's own name</span></span>
+        <span>{tr('users.config_name_template')} <span class="hint" style="font-weight:400">{tr('users.blank_keep_each_inbound_s_own')}</span></span>
         <input bind:value={subSettings.name_template} placeholder="{'{FLAG} {NAME}'}" data-testid="name-template" />
       </label>
     </div>
-    <p class="hint">Tokens: {#each (subSettings.name_tokens ?? []) as tk}<code style="margin-right:4px">{tk}</code>{/each} — e.g. <code>{'{FLAG} {NAME} · {NET}'}</code> → <b>🇩🇪 Berlin · ws</b>. Set a country per inbound for the flag.</p>
+    <p class="hint">{tr('users.tokens', {  })} {#each (subSettings.name_tokens ?? []) as tk}<code style="margin-inline-end:4px">{tk}</code>{/each} — e.g. <code>{'{FLAG} {NAME} · {NET}'}</code> → <b>{tr('users.berlin_ws')}</b>{tr('users.set_a_country_per_inbound_for')}</p>
   </div>
 
   <div class="card" data-testid="fancy-wizard">
-    <h3>✨ Fancy config wizard</h3>
-    <p class="hint">Set a camouflage domain, pick a styled theme, and every config in the subscription is renamed and fronted behind that domain — the same look Iranian channels ship. Applies to all subscriptions; clear the theme to go back to plain names.</p>
+    <h3>{tr('users.fancy_config_wizard')}</h3>
+    <p class="hint">{tr('users.set_a_camouflage_domain_pick_a')}</p>
     <div class="row">
       <label class="field" style="flex:1;min-width:240px">
-        <span>Camouflage domain <span class="hint" style="font-weight:400">— e.g. aparat.com, taskulu.com</span></span>
-        <input bind:value={subSettings.front_domain} placeholder="aparat.com" data-testid="front-domain" />
+        <span>{tr('users.camouflage_domain')} <span class="hint" style="font-weight:400">{tr('users.e_g_aparat_com_taskulu_com')}</span></span>
+        <input bind:value={subSettings.front_domain} placeholder={tr('users.aparat_com')} data-testid="front-domain" />
       </label>
       <label class="field">
-        <span>Fronting model</span>
-        <select bind:value={subSettings.front_mode} data-testid="front-mode" title="How the domain is applied to each config">
+        <span>{tr('users.fronting_model')}</span>
+        <select bind:value={subSettings.front_mode} data-testid="front-mode" title={tr('users.how_the_domain_is_applied_to')}>
           {#each (subSettings.front_modes ?? ['none','sni','cdn']) as m}<option value={m}>{m === 'none' ? 'None (raw)' : m === 'sni' ? 'SNI + Host camouflage' : 'CDN domain-fronting'}</option>{/each}
         </select>
       </label>
-      <button class="primary" data-testid="save-front" onclick={saveSubSettings}>Save domain</button>
+      <button class="primary" data-testid="save-front" onclick={saveSubSettings}>{tr('users.save_domain')}</button>
     </div>
-    <p class="hint"><b>SNI + Host</b>: keep the real server address but present the domain as TLS SNI + Host header (works on any server / REALITY). <b>CDN</b>: set only the Host header and route through a Host-aware CDN (plaintext-WS behind a domestic CDN). Picking a theme sets the recommended model automatically.</p>
+    <p class="hint"><b>{tr('users.sni_host')}</b>{tr('users.keep_the_real_server_address_but')} <b>CDN</b>{tr('users.set_only_the_host_header_and')}</p>
     {#if subSettings.fancy_themes && subSettings.fancy_themes.length}
       <div class="theme-grid">
         {#each subSettings.fancy_themes as th}
@@ -385,25 +386,25 @@
 {/if}
 
 <div class="card">
-  <h3>Add user</h3>
+  <h3>{tr('users.add_user')}</h3>
   <div class="row">
-    <input placeholder="username" bind:value={newUsername} />
+    <input placeholder={tr('users.username')} bind:value={newUsername} />
     <select bind:value={newGroupId}>
-      <option value={undefined}>No group</option>
+      <option value={undefined}>{tr('users.no_group')}</option>
       {#each groups as g}<option value={g.id}>{g.name}</option>{/each}
     </select>
-    <input type="number" placeholder="limit GB (0=∞)" bind:value={newLimitGB} title="data limit in GB" />
-    <input type="number" placeholder="expire days (0=never)" bind:value={newExpireDays} title="expire in N days" />
-    <button class="primary" data-testid="create-user" onclick={createUser}>Create</button>
+    <input type="number" placeholder={tr('users.limit_gb_0')} bind:value={newLimitGB} title={tr('users.data_limit_in_gb')} />
+    <input type="number" placeholder={tr('users.expire_days_0_never')} bind:value={newExpireDays} title={tr('users.expire_in_n_days')} />
+    <button class="primary" data-testid="create-user" onclick={createUser}>{tr('users.create')}</button>
   </div>
   {#if createErr}<p class="err">{createErr}</p>{/if}
 </div>
 
 <div class="card">
-  {#if loading}<p class="muted">Loading…</p>
+  {#if loading}<p class="muted">{tr('users.loading')}</p>
   {:else}
     <table data-testid="users-table">
-      <thead><tr><th>User</th><th>Group</th><th>Limit</th><th>Used</th><th>Status</th><th>Sub token</th><th>Actions</th></tr></thead>
+      <thead><tr><th>{tr('users.user')}</th><th>{tr('users.group')}</th><th>{tr('users.limit')}</th><th>{tr('users.used')}</th><th>{tr('users.status')}</th><th>{tr('users.sub_token')}</th><th>{tr('users.actions')}</th></tr></thead>
       <tbody>
         {#each users as u (u.id)}
           <tr>
@@ -420,18 +421,18 @@
                    separately too: an operator seeing "active" on an account the
                    panel is deliberately refusing has no way to explain it. -->
               {#if isIPHeld(u)}
-                <span class="badge held" data-testid="ip-held" title="Over the device limit; released automatically">
-                  device limit
+                <span class="badge held" data-testid="ip-held" title={tr('users.over_the_device_limit_released_automatically')}>
+                  {tr('users.device_limit')}
                 </span>
               {/if}
             </td>
             <td><code>{u.sub_token}</code></td>
             <td class="acts">
-              <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>Manage</button>
-              <button class="sm" onclick={() => openSubModal(u)}>Sub</button>
+              <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>{tr('users.manage')}</button>
+              <button class="sm" onclick={() => openSubModal(u)}>{tr('users.sub')}</button>
               <button class="sm" onclick={() => setStatus(u, (u as any).status === 'active' ? 'disabled' : 'active')}>{(u as any).status === 'active' ? 'Disable' : 'Enable'}</button>
-              <button class="sm" data-testid="rotate" onclick={() => openRotate(u)}>Rotate</button>
-              <button class="sm danger" onclick={() => deleteUser(u.id)}>Delete</button>
+              <button class="sm" data-testid="rotate" onclick={() => openRotate(u)}>{tr('users.rotate')}</button>
+              <button class="sm danger" onclick={() => deleteUser(u.id)}>{tr('users.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -441,11 +442,11 @@
 </div>
 
 <div class="card">
-  <div class="ghead"><h3>Groups</h3><button class="sm" data-testid="new-group" onclick={openGroupNew}>+ New group</button></div>
-  {#if groups.length === 0}<p class="muted">No groups. A group bundles inbounds and assigns them to all its users.</p>
+  <div class="ghead"><h3>{tr('users.groups')}</h3><button class="sm" data-testid="new-group" onclick={openGroupNew}>{tr('users.new_group')}</button></div>
+  {#if groups.length === 0}<p class="muted">{tr('users.no_groups_a_group_bundles_inbounds')}</p>
   {:else}
     <table>
-      <thead><tr><th>Name</th><th>Description</th><th>Inbounds</th><th></th></tr></thead>
+      <thead><tr><th>{tr('users.name')}</th><th>{tr('users.description')}</th><th>{tr('users.inbounds')}</th><th></th></tr></thead>
       <tbody>
         {#each groups as g (g.id)}
           <tr>
@@ -453,8 +454,8 @@
             <td class="muted">{(g as any).description || '—'}</td>
             <td>{((g as any).inbound_ids || []).length}</td>
             <td class="acts">
-              <button class="sm" onclick={() => openGroupEdit(g)}>Edit</button>
-              <button class="sm danger" onclick={() => deleteGroup(g)}>Delete</button>
+              <button class="sm" onclick={() => openGroupEdit(g)}>{tr('users.edit')}</button>
+              <button class="sm danger" onclick={() => deleteGroup(g)}>{tr('users.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -470,34 +471,31 @@
   onClose={() => (rotateOpen = false)}
 >
   <p class="rot-intro">
-    Pick what to replace. Each one breaks something different, so they are listed
-    with what stops working.
+    {tr('users.pick_what_to_replace_each_one')}
   </p>
   <label class="rot">
     <input type="checkbox" bind:checked={rotateSub} data-testid="rotate-sub" />
     <span>
-      <strong>Subscription token</strong>
-      <em>The old subscription URL stops resolving. Configs already imported into a
-        client keep working until that client next updates.</em>
+      <strong>{tr('users.subscription_token')}</strong>
+      <em>{tr('users.the_old_subscription_url_stops_resolving')}</em>
     </span>
   </label>
   <label class="rot">
     <input type="checkbox" bind:checked={rotateUUID} data-testid="rotate-uuid" />
     <span>
       <strong>UUID</strong>
-      <em>Every VLESS/VMess config this user holds stops connecting immediately.</em>
+      <em>{tr('users.every_vless_vmess_config_this_user')}</em>
     </span>
   </label>
   <label class="rot">
     <input type="checkbox" bind:checked={rotatePassword} data-testid="rotate-password" />
     <span>
-      <strong>Password</strong>
-      <em>Every Trojan/Shadowsocks/Hysteria config this user holds stops
-        connecting immediately.</em>
+      <strong>{tr('users.password')}</strong>
+      <em>{tr('users.every_trojan_shadowsocks_hysteria_config_this')}</em>
     </span>
   </label>
   <div class="rot-actions">
-    <button class="sm" onclick={() => (rotateOpen = false)}>Cancel</button>
+    <button class="sm" onclick={() => (rotateOpen = false)}>{tr('users.cancel')}</button>
     <button
       class="sm danger"
       disabled={rotateNothing || rotating}
@@ -511,23 +509,22 @@
 
 <Modal title={'Manage · ' + (mUser?.username || '')} isOpen={manageOpen} onClose={() => manageOpen = false}>
   <div class="mgrid">
-    <label>Status<select bind:value={mStatus}><option value="active">active</option><option value="disabled">disabled</option></select></label>
-    <label>Group<select bind:value={mGroupId}><option value={undefined}>No group</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
-    <label>Data limit (GB, 0=∞)<input type="number" bind:value={mLimitGB} /></label>
-    <label>Extend expiry (days from now, 0=leave)<input type="number" bind:value={mExpireDays} /></label>
+    <label>{tr('users.status')}<select bind:value={mStatus}><option value="active">{tr('users.active')}</option><option value="disabled">{tr('users.disabled')}</option></select></label>
+    <label>{tr('users.group')}<select bind:value={mGroupId}><option value={undefined}>{tr('users.no_group')}</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
+    <label>{tr('users.data_limit_gb_0')}<input type="number" bind:value={mLimitGB} /></label>
+    <label>{tr('users.extend_expiry_days_from_now_0')}<input type="number" bind:value={mExpireDays} /></label>
     <label>
-      Devices (max addresses at once, 0=∞)
+      {tr('users.devices_max_addresses_at_once_0')}
       <input type="number" min="0" bind:value={mIPLimit} data-testid="ip-limit" />
       <!-- An address counts while it has connected within the last couple of
            minutes, not while a socket is open. Saying so here is the difference
            between an operator trusting the number and filing a bug. -->
       <small>
-        Counts distinct source addresses seen in the last couple of minutes.
-        Going over it twice in a row holds the account for five minutes.
+        {tr('users.counts_distinct_source_addresses_seen_in')}
       </small>
     </label>
   </div>
-  <h4>Assign inbounds to this user</h4>
+  <h4>{tr('users.assign_inbounds_to_this_user')}</h4>
   <div class="assign" data-testid="assign-inbounds">
     {#each inbounds as inb}
       <label class="chk">
@@ -535,37 +532,37 @@
         {inb.remark || inb.protocol} <span class="muted">:{inb.port} {inb.protocol}{mInherited.has(inb.id) ? ' (from group)' : ''}</span>
       </label>
     {/each}
-    {#if inbounds.length === 0}<p class="muted">No inbounds yet — create one in the Inbounds tab first.</p>{/if}
+    {#if inbounds.length === 0}<p class="muted">{tr('users.no_inbounds_yet_create_one_in')}</p>{/if}
   </div>
-  <button class="primary" data-testid="save-manage" onclick={saveManage}>Save</button>
+  <button class="primary" data-testid="save-manage" onclick={saveManage}>{tr('users.save')}</button>
 </Modal>
 
 <!-- Group modal -->
 <Modal title={gEditing ? 'Edit group' : 'New group'} isOpen={groupOpen} onClose={() => groupOpen = false}>
   <div class="mgrid">
-    <label>Name<input data-testid="group-name" bind:value={gName} /></label>
-    <label>Description<input bind:value={gDesc} /></label>
+    <label>{tr('users.name')}<input data-testid="group-name" bind:value={gName} /></label>
+    <label>{tr('users.description')}<input bind:value={gDesc} /></label>
   </div>
-  <h4>Inbounds in this group (assigned to all its users)</h4>
+  <h4>{tr('users.inbounds_in_this_group_assigned_to')}</h4>
   <div class="assign">
     {#each inbounds as inb}
       <label class="chk"><input type="checkbox" checked={gInbounds.has(inb.id)} onchange={() => toggleGroupInbound(inb.id)} /> {inb.remark || inb.protocol} <span class="muted">:{inb.port}</span></label>
     {/each}
   </div>
-  <button class="primary" data-testid="save-group" onclick={saveGroup}>Save group</button>
+  <button class="primary" data-testid="save-group" onclick={saveGroup}>{tr('users.save_group')}</button>
 </Modal>
 
 <!-- Sub modal -->
 <Modal title={'Subscription · ' + (activeSubUser?.username || '')} isOpen={subModalOpen} onClose={() => subModalOpen = false}>
   <div class="mgrid">
-    <label>Format<select bind:value={subFormat}><option value="v2ray">v2ray</option><option value="clash">clash</option><option value="sing-box">sing-box</option></select></label>
+    <label>{tr('users.format')}<select bind:value={subFormat}><option value="v2ray">{tr('users.v2ray')}</option><option value="clash">{tr('users.clash')}</option><option value="sing-box">sing-box</option></select></label>
   </div>
-  <div class="uri-row"><code>{subUrl}</code><button class="sm" onclick={copySubUrl}>Copy</button></div>
+  <div class="uri-row"><code>{subUrl}</code><button class="sm" onclick={copySubUrl}>{tr('users.copy')}</button></div>
   {#if subUrl}<div class="qr"><QRCode value={subUrl} size={190} /></div>{/if}
 </Modal>
 
 <style>
-  .badge.held { background: rgba(217,155,43,0.18); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); margin-left: 6px; }
+  .badge.held { background: rgba(217,155,43,0.18); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); margin-inline-start: 6px; }
   label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.5); font-size: 11px; line-height: 1.5; }
 
   .rot-intro { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0 0 14px; }
@@ -589,7 +586,7 @@
   .field.checkbox { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.85); }
   .field.checkbox input { flex: none; width: 16px; height: 16px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+  th, td { padding: 10px; text-align: start; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-size: 12px; }
   .acts { display: flex; gap: 6px; flex-wrap: wrap; }
   .sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
@@ -597,7 +594,7 @@
   .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
   .badge.off { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
-  .presence { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; cursor: help; }
+  .presence { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-inline-end: 8px; vertical-align: middle; cursor: help; }
   .presence.online { background: #27D17C; box-shadow: 0 0 6px #27D17C; }
   .presence.offline { background: rgba(255,255,255,0.22); }
   .muted { color: rgba(255,255,255,0.45); }
@@ -612,7 +609,7 @@
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
   .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
-  .theme-card { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; background: #0F1420; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; padding: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+  .theme-card { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: start; background: #0F1420; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; padding: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
   .theme-card:hover { border-color: rgba(39,209,124,0.5); background: #121a26; }
   .theme-card.active { border-color: #27D17C; background: rgba(39,209,124,0.10); }
   .theme-sample { font-size: 14px; color: #fff; word-break: break-word; }

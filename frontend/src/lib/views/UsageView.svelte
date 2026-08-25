@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import TrafficChart from '$lib/components/TrafficChart.svelte';
@@ -71,7 +72,7 @@
       await loadTop();
       await loadSeries();
     } catch (err: any) {
-      loadError = err.message || 'Failed to load usage history';
+      loadError = err.message || tr('usage.failed_to_load_usage_history');
     } finally {
       loading = false;
     }
@@ -82,7 +83,7 @@
     try {
       await loadSeries();
     } catch (err: any) {
-      showToast(err.message || 'Failed to load that series', 'error');
+      showToast(err.message || tr('usage.failed_to_load_that_series'), 'error');
     }
   }
 
@@ -113,24 +114,24 @@
 </script>
 
 <div class="view-header">
-  <h2>Usage</h2>
+  <h2>{tr('usage.usage')}</h2>
   <div class="controls">
     <div class="seg">
-      <button class:active={scope === 'user'} onclick={() => changeScope('user')} data-testid="scope-user">Users</button>
-      <button class:active={scope === 'node'} onclick={() => changeScope('node')} data-testid="scope-node">Nodes</button>
+      <button class:active={scope === 'user'} onclick={() => changeScope('user')} data-testid="scope-user">{tr('usage.users')}</button>
+      <button class:active={scope === 'node'} onclick={() => changeScope('node')} data-testid="scope-node">{tr('usage.nodes')}</button>
     </div>
     <div class="seg">
-      <button class:active={period === 'hour'} onclick={() => changePeriod('hour')} data-testid="period-hour">48 hours</button>
-      <button class:active={period === 'day'} onclick={() => changePeriod('day')} data-testid="period-day">30 days</button>
+      <button class:active={period === 'hour'} onclick={() => changePeriod('hour')} data-testid="period-hour">{tr('usage.48_hours')}</button>
+      <button class:active={period === 'day'} onclick={() => changePeriod('day')} data-testid="period-day">{tr('usage.30_days')}</button>
     </div>
-    <button class="btn-primary" onclick={load}>Refresh</button>
+    <button class="btn-primary" onclick={load}>{tr('usage.refresh')}</button>
   </div>
 </div>
 
 {#if loadError}
   <div class="card"><p class="err-text">{loadError}</p></div>
 {:else if loading}
-  <div class="card"><p class="muted">Loading usage history…</p></div>
+  <div class="card"><p class="muted">{tr('usage.loading_usage_history')}</p></div>
 {:else}
   <div class="card">
     <TrafficChart
@@ -141,16 +142,15 @@
   </div>
 
   <div class="card table-card">
-    <h3>Top consumers</h3>
+    <h3>{tr('usage.top_consumers')}</h3>
     {#if top.length === 0}
       <p class="muted" data-testid="top-empty">
-        No usage recorded yet. History starts accumulating from the first traffic poll after this
-        release.
+        {tr('usage.no_usage_recorded_yet_history_starts')}
       </p>
     {:else}
       <table>
         <thead>
-          <tr><th>{scope === 'user' ? 'User' : 'Node'}</th><th>Used</th><th></th></tr>
+          <tr><th>{scope === 'user' ? 'User' : 'Node'}</th><th>{tr('usage.used')}</th><th></th></tr>
         </thead>
         <tbody>
           {#each top as row}
@@ -158,7 +158,7 @@
               <td><strong>{nameFor(row.key)}</strong></td>
               <td class="mono">{fmt(row.bytes)}</td>
               <td>
-                <button class="btn-sm" onclick={() => pick(row.key)} data-testid="pick">Chart</button>
+                <button class="btn-sm" onclick={() => pick(row.key)} data-testid="pick">{tr('usage.chart')}</button>
               </td>
             </tr>
           {/each}
@@ -178,7 +178,7 @@
   .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .card h3 { margin: 0 0 14px; font-size: 13px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.selected td { background: rgba(255,122,26,0.08); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch, getAuthToken } from '$lib/api';
   import { showToast } from '$lib/components/Toast.svelte';
@@ -46,7 +47,7 @@
       embedded = info.embedded;
       tokenURL = tok.url;
     } catch (e: any) {
-      showToast(e?.message || 'Failed to load ForgeEdge', 'error');
+      showToast(e?.message || tr('forgeedge.failed_to_load_forgeedge'), 'error');
     } finally {
       loading = false;
     }
@@ -57,7 +58,7 @@
 
   async function deploy() {
     if (!apiToken.trim() || !accountId.trim()) {
-      showToast('Paste a Cloudflare API token and account ID first', 'error');
+      showToast(tr('forgeedge.paste_a_cloudflare_api_token_and'), 'error');
       return;
     }
     deploying = true;
@@ -70,14 +71,14 @@
         }),
       });
       lastResult = res.deployment;
-      showToast(`Deployed ${res.deployment.name} to Cloudflare`, 'success');
+      showToast(tr('forgeedge.deployed_name_to_cloudflare', { name: res.deployment.name }), 'success');
       // Push the current feed so the worker serves live configs immediately.
       if (res.id) {
         try { await apiFetch(`/admin/edge/deployments/${res.id}/push`, { method: 'POST' }); } catch (_) {}
       }
       await load();
     } catch (e: any) {
-      showToast(e?.message || 'Deploy failed', 'error');
+      showToast(e?.message || tr('forgeedge.deploy_failed'), 'error');
     } finally {
       deploying = false;
     }
@@ -86,10 +87,10 @@
   async function pushFeed(d: Deployment) {
     try {
       await apiFetch(`/admin/edge/deployments/${d.id}/push`, { method: 'POST' });
-      showToast(`Pushed the current feed to ${d.name}`, 'success');
+      showToast(tr('forgeedge.pushed_the_current_feed_to_name', { name: d.name }), 'success');
       await load();
     } catch (e: any) {
-      showToast(e?.message || 'Push failed', 'error');
+      showToast(e?.message || tr('forgeedge.push_failed'), 'error');
     }
   }
 
@@ -100,10 +101,10 @@
     warpingId = d.id;
     try {
       const res = await apiFetch<{ count: number }>(`/admin/edge/deployments/${d.id}/warp`, { method: 'POST' });
-      showToast(`Registered ${res.count} WARP account(s) on ${d.name} — WireGuard + Amnezia are now in the subscription`, 'success');
+      showToast(tr('forgeedge.registered_count_warp_account_s_on', { count: res.count, name: d.name }), 'success');
       await load();
     } catch (e: any) {
-      showToast(e?.message || 'WARP registration failed', 'error');
+      showToast(e?.message || tr('forgeedge.warp_registration_failed'), 'error');
     } finally {
       warpingId = null;
     }
@@ -130,70 +131,70 @@
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      showToast(e?.message || 'Could not fetch the .conf (register WARP first)', 'error');
+      showToast(e?.message || tr('forgeedge.could_not_fetch_the_conf_register'), 'error');
     }
   }
 
   async function destroy(d: Deployment) {
     const tok = apiToken.trim();
-    if (!tok) { showToast('Paste the Cloudflare API token above to delete a worker', 'error'); return; }
-    if (!confirm(`Delete ${d.name}? Every subscription URL it serves dies immediately.`)) return;
+    if (!tok) { showToast(tr('forgeedge.paste_the_cloudflare_api_token_above'), 'error'); return; }
+    if (!confirm(tr('forgeedge.delete_name_every_subscription_url_it', { name: d.name }))) return;
     try {
       await apiFetch(`/admin/edge/deploy/${encodeURIComponent(d.name)}?api_token=${encodeURIComponent(tok)}&account_id=${encodeURIComponent(d.account_id || accountId.trim())}`, { method: 'DELETE' });
-      showToast(`Deleted ${d.name}`, 'success');
+      showToast(tr('forgeedge.deleted_name', { name: d.name }), 'success');
       await load();
     } catch (e: any) {
-      showToast(e?.message || 'Delete failed', 'error');
+      showToast(e?.message || tr('forgeedge.delete_failed'), 'error');
     }
   }
 
-  function copy(t: string) { navigator.clipboard?.writeText(t); showToast('Copied', 'success'); }
+  function copy(t: string) { navigator.clipboard?.writeText(t); showToast(tr('forgeedge.copied'), 'success'); }
 </script>
 
 <div class="edge">
   <div class="head">
     <div>
-      <h1>☁️ ForgeEdge</h1>
-      <p class="sub">Run a Cloudflare Worker that terminates <b>VLESS &amp; Trojan over WebSocket</b> at the edge and serves the <b>same subscription your VPS does</b> — so a user's single link works even where your server IPs are throttled. One click adds free <b>Cloudflare WARP</b> + <b>AmneziaWG</b> (DPI-obfuscated WireGuard) to that subscription. No wrangler, no build: the panel ships the worker for you.</p>
+      <h1>{tr('forgeedge.forgeedge')}</h1>
+      <p class="sub">{tr('forgeedge.run_a_cloudflare_worker_that_terminates')} <b>{tr('forgeedge.vless_amp_trojan_over_websocket')}</b> {tr('forgeedge.at_the_edge_and_serves_the')} <b>{tr('forgeedge.same_subscription_your_vps_does')}</b> {tr('forgeedge.so_a_user_s_single_link')} <b>{tr('forgeedge.cloudflare_warp')}</b> + <b>AmneziaWG</b> {tr('forgeedge.dpi_obfuscated_wireguard_to_that_subscription')}</p>
     </div>
-    {#if embedded}<span class="pill ok">worker bundled ✓</span>{:else}<span class="pill warn">no bundle</span>{/if}
+    {#if embedded}<span class="pill ok">{tr('forgeedge.worker_bundled')}</span>{:else}<span class="pill warn">{tr('forgeedge.no_bundle')}</span>{/if}
   </div>
 
   {#if loading}
-    <div class="card muted">Loading…</div>
+    <div class="card muted">{tr('forgeedge.loading')}</div>
   {:else}
     <!-- Connect + deploy -->
     <div class="card">
-      <h2>Deploy a new edge</h2>
+      <h2>{tr('forgeedge.deploy_a_new_edge')}</h2>
       <ol class="steps">
-        <li>Create a scoped Cloudflare API token (opens with the exact permissions pre-filled):
-          {#if tokenURL}<a class="btn sm" href={tokenURL} target="_blank" rel="noopener">Create token ↗</a>{/if}
+        <li>{tr('forgeedge.create_a_scoped_cloudflare_api_token', {  })}
+          {#if tokenURL}<a class="btn sm" href={tokenURL} target="_blank" rel="noopener">{tr('forgeedge.create_token')}</a>{/if}
         </li>
-        <li>Find your <b>Account ID</b> on the Cloudflare dashboard sidebar, then paste both below.</li>
+        <li>{tr('forgeedge.find_your')} <b>{tr('forgeedge.account_id')}</b> {tr('forgeedge.on_the_cloudflare_dashboard_sidebar_then')}</li>
       </ol>
       <div class="grid">
-        <label>API token<input type="password" bind:value={apiToken} placeholder="Cloudflare API token" autocomplete="off" /></label>
-        <label>Account ID<input type="text" bind:value={accountId} placeholder="32-char account id" autocomplete="off" /></label>
-        <label>Worker name <span class="opt">(optional)</span><input type="text" bind:value={workerName} placeholder="auto-generated" /></label>
-        <label>Proxy IP <span class="opt">(optional relay for Cloudflare-hosted sites)</span><input type="text" bind:value={proxyIP} placeholder="host[:port]" /></label>
+        <label>{tr('forgeedge.api_token')}<input type="password" bind:value={apiToken} placeholder={tr('forgeedge.cloudflare_api_token')} autocomplete="off" /></label>
+        <label>{tr('forgeedge.account_id')}<input type="text" bind:value={accountId} placeholder={tr('forgeedge.32_char_account_id')} autocomplete="off" /></label>
+        <label>{tr('forgeedge.worker_name')} <span class="opt">{tr('forgeedge.optional')}</span><input type="text" bind:value={workerName} placeholder={tr('forgeedge.auto_generated')} /></label>
+        <label>{tr('forgeedge.proxy_ip')} <span class="opt">{tr('forgeedge.optional_relay_for_cloudflare_hosted_sites')}</span><input type="text" bind:value={proxyIP} placeholder={tr('forgeedge.host_port')} /></label>
       </div>
       <button class="btn primary" onclick={deploy} disabled={deploying}>{deploying ? 'Deploying…' : 'Deploy to Cloudflare'}</button>
-      <p class="note">The token is used only for this deploy — it is never stored on the panel.</p>
+      <p class="note">{tr('forgeedge.the_token_is_used_only_for')}</p>
 
       {#if lastResult}
         <div class="result">
-          <div class="ok-row">✓ Live at <a href={`${lastResult.origin}/${lastResult.secure_path}/panel`} target="_blank" rel="noopener">{lastResult.origin}</a></div>
-          <div class="urlrow"><span>Panel</span><code>{lastResult.origin}/{lastResult.secure_path}/panel</code><button class="btn xs" onclick={() => copy(`${lastResult!.origin}/${lastResult!.secure_path}/panel`)}>copy</button></div>
-          <div class="urlrow"><span>DoH</span><code>{lastResult.doh_url}</code><button class="btn xs" onclick={() => copy(lastResult!.doh_url)}>copy</button></div>
+          <div class="ok-row">{tr('forgeedge.live_at')} <a href={`${lastResult.origin}/${lastResult.secure_path}/panel`} target="_blank" rel="noopener">{lastResult.origin}</a></div>
+          <div class="urlrow"><span>{tr('forgeedge.panel')}</span><code>{tr('forgeedge.panel_2', { origin: lastResult.origin, secure_path: lastResult.secure_path })}</code><button class="btn xs" onclick={() => copy(`${lastResult!.origin}/${lastResult!.secure_path}/panel`)}>{tr('forgeedge.copy')}</button></div>
+          <div class="urlrow"><span>DoH</span><code>{lastResult.doh_url}</code><button class="btn xs" onclick={() => copy(lastResult!.doh_url)}>{tr('forgeedge.copy')}</button></div>
         </div>
       {/if}
     </div>
 
     <!-- Deployments -->
     <div class="card">
-      <h2>Your edges <span class="count">{deployments.length}</span></h2>
+      <h2>{tr('forgeedge.your_edges')} <span class="count">{deployments.length}</span></h2>
       {#if deployments.length === 0}
-        <p class="muted">No edges deployed yet. Deploy one above.</p>
+        <p class="muted">{tr('forgeedge.no_edges_deployed_yet_deploy_one')}</p>
       {:else}
         {#each deployments as d (d.id)}
           <div class="dep">
@@ -202,18 +203,18 @@
               <a class="dep-origin" href={panelUrl(d)} target="_blank" rel="noopener">{d.origin}</a>
               <div class="dep-meta">
                 {#if d.last_status}<span class="tag">{d.last_status}</span>{/if}
-                {#if d.last_push_at}<span class="muted">last push {new Date(d.last_push_at).toLocaleString()}</span>{/if}
+                {#if d.last_push_at}<span class="muted">{tr('forgeedge.last_push', { p1: new Date(d.last_push_at).toLocaleString() })}</span>{/if}
               </div>
             </div>
             <div class="dep-actions">
-              <button class="btn sm warp" onclick={() => registerWarp(d)} disabled={warpingId === d.id} title="Register free Cloudflare WARP and add WireGuard + AmneziaWG (DPI-obfuscated) to this edge's subscription">
+              <button class="btn sm warp" onclick={() => registerWarp(d)} disabled={warpingId === d.id} title={tr('forgeedge.register_free_cloudflare_warp_and_add')}>
                 {warpingId === d.id ? 'Registering…' : '⚡ WARP + Amnezia'}
               </button>
-              <button class="btn sm" onclick={() => downloadConf(d, true)} title="Download the AmneziaWG .conf for the Amnezia app">Amnezia .conf</button>
-              <button class="btn sm" onclick={() => downloadConf(d, false)} title="Download the plain WireGuard WARP .conf">WG .conf</button>
-              <button class="btn sm" onclick={() => pushFeed(d)}>Push feed</button>
-              <a class="btn sm" href={panelUrl(d)} target="_blank" rel="noopener">Open panel</a>
-              <button class="btn sm danger" onclick={() => destroy(d)}>Delete</button>
+              <button class="btn sm" onclick={() => downloadConf(d, true)} title={tr('forgeedge.download_the_amneziawg_conf_for_the')}>{tr('forgeedge.amnezia_conf')}</button>
+              <button class="btn sm" onclick={() => downloadConf(d, false)} title={tr('forgeedge.download_the_plain_wireguard_warp_conf')}>{tr('forgeedge.wg_conf')}</button>
+              <button class="btn sm" onclick={() => pushFeed(d)}>{tr('forgeedge.push_feed')}</button>
+              <a class="btn sm" href={panelUrl(d)} target="_blank" rel="noopener">{tr('forgeedge.open_panel')}</a>
+              <button class="btn sm danger" onclick={() => destroy(d)}>{tr('forgeedge.delete')}</button>
             </div>
           </div>
         {/each}
@@ -234,7 +235,7 @@
   .card.muted, .muted { color: var(--muted, #8a97b8); }
   h2 { font-size: 15px; margin: 0 0 12px; }
   .count { color: var(--muted, #8a97b8); font-weight: 400; }
-  .steps { margin: 0 0 14px; padding-left: 18px; color: var(--muted, #8a97b8); font-size: 13px; line-height: 1.7; }
+  .steps { margin: 0 0 14px; padding-inline-start: 18px; color: var(--muted, #8a97b8); font-size: 13px; line-height: 1.7; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
   label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted, #8a97b8); }
   .opt { color: rgba(255,255,255,.35); }

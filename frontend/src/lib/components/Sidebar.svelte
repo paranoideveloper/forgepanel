@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr, locale, setLocale, locales } from '$lib/i18n';
   import { fly, fade } from 'svelte/transition';
 
   let { activeTab, mobileOpen = $bindable(false), onTabChange } = $props<{
@@ -7,23 +8,27 @@
     onTabChange: (tab: string) => void;
   }>();
 
+  // labelKey, not label. A `const tabs` holding tr('...') results would be
+  // evaluated once at module init and keep the language it was built in —
+  // switching locale would leave the whole navigation in the old one. Storing
+  // the key and translating at render time is what makes the switch live.
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: '📊' },
-    { id: 'wizard', label: 'Setup Wizard', icon: '✨' },
-    { id: 'inbounds', label: 'Inbounds', icon: '🔌' },
-    { id: 'users', label: 'Users & Subscriptions', icon: '👥' },
-    { id: 'admins', label: 'Admins & Resellers', icon: '🛡️' },
-    { id: 'routing', label: 'Routing', icon: '🧭' },
-    { id: 'online', label: 'Online', icon: '🟢' },
-    { id: 'usage', label: 'Usage', icon: '📈' },
-    { id: 'audit', label: 'Audit Trail', icon: '📜' },
-    { id: 'nodes', label: 'Node Cluster', icon: '🌐' },
-    { id: 'studio', label: 'Config Studio', icon: '⚙️' },
-    { id: 'domains', label: 'Domains', icon: '🌍' },
-    { id: 'forgedns', label: 'ForgeDNS', icon: '🛰️' },
-    { id: 'edge', label: 'ForgeEdge', icon: '☁️' },
-    { id: 'certs', label: 'Certificates & TLS', icon: '🔒' },
-    { id: 'system', label: 'System & Security', icon: '🛠️' }
+    { id: 'overview', labelKey: 'sidebar.tab.overview', icon: '📊' },
+    { id: 'wizard', labelKey: 'sidebar.tab.wizard', icon: '✨' },
+    { id: 'inbounds', labelKey: 'sidebar.tab.inbounds', icon: '🔌' },
+    { id: 'users', labelKey: 'sidebar.tab.users', icon: '👥' },
+    { id: 'admins', labelKey: 'sidebar.tab.admins', icon: '🛡️' },
+    { id: 'routing', labelKey: 'sidebar.tab.routing', icon: '🧭' },
+    { id: 'online', labelKey: 'sidebar.tab.online', icon: '🟢' },
+    { id: 'usage', labelKey: 'sidebar.tab.usage', icon: '📈' },
+    { id: 'audit', labelKey: 'sidebar.tab.audit', icon: '📜' },
+    { id: 'nodes', labelKey: 'sidebar.tab.nodes', icon: '🌐' },
+    { id: 'studio', labelKey: 'sidebar.tab.studio', icon: '⚙️' },
+    { id: 'domains', labelKey: 'sidebar.tab.domains', icon: '🌍' },
+    { id: 'forgedns', labelKey: 'sidebar.tab.forgedns', icon: '🛰️' },
+    { id: 'edge', labelKey: 'sidebar.tab.edge', icon: '☁️' },
+    { id: 'certs', labelKey: 'sidebar.tab.certs', icon: '🔒' },
+    { id: 'system', labelKey: 'sidebar.tab.system', icon: '🛠️' }
   ];
 
   function handleSelect(tab: string) {
@@ -51,22 +56,33 @@
   </div>
 
   <nav>
-    {#each tabs as t}
+    {#each tabs as tab}
       <button 
         class="nav-btn" 
-        class:active={activeTab === t.id}
-        onclick={() => handleSelect(t.id)}
+        class:active={activeTab === tab.id}
+        onclick={() => handleSelect(tab.id)}
       >
-        <span class="icon">{t.icon}</span>
-        <span class="label">{t.label}</span>
+        <span class="icon">{tab.icon}</span>
+        <span class="label">{tr(tab.labelKey)}</span>
       </button>
     {/each}
   </nav>
 
   <div class="sidebar-footer">
+    <div class="lang-switch" role="group" aria-label={tr('sidebar.language')}>
+      {#each locales as l}
+        <button
+          class="lang-btn"
+          class:active={locale() === l.code}
+          lang={l.code}
+          aria-pressed={locale() === l.code}
+          onclick={() => setLocale(l.code)}
+        >{l.nativeName}</button>
+      {/each}
+    </div>
     <div class="status-pulse">
       <span class="pulse-dot"></span>
-      <span>Control Plane Online</span>
+      <span>{tr('sidebar.control_plane_online')}</span>
     </div>
   </div>
 </aside>
@@ -86,7 +102,7 @@
       class="mobile-drawer"
       role="dialog"
       aria-modal="true"
-      aria-label="Navigation menu"
+      aria-label={tr('sidebar.navigation_menu')}
       tabindex="-1"
       in:fly={{ x: -280, duration: 250 }}
       out:fly={{ x: -280, duration: 200 }}
@@ -102,14 +118,14 @@
       </div>
 
       <nav>
-        {#each tabs as t}
+        {#each tabs as tab}
           <button 
             class="nav-btn" 
-            class:active={activeTab === t.id}
-            onclick={() => handleSelect(t.id)}
+            class:active={activeTab === tab.id}
+            onclick={() => handleSelect(tab.id)}
           >
-            <span class="icon">{t.icon}</span>
-            <span class="label">{t.label}</span>
+            <span class="icon">{tab.icon}</span>
+            <span class="label">{tr(tab.labelKey)}</span>
           </button>
         {/each}
       </nav>
@@ -118,10 +134,31 @@
 {/if}
 
 <style>
+  .lang-switch {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .lang-btn {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .lang-btn.active {
+    color: #fff;
+    background: rgba(255, 122, 26, 0.18);
+    border-color: rgba(255, 122, 26, 0.45);
+  }
+
   .sidebar {
     width: 260px;
     background: #0D121F;
-    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    border-inline-end: 1px solid rgba(255, 255, 255, 0.07);
     padding: 24px 16px;
     display: flex;
     flex-direction: column;
@@ -170,7 +207,7 @@
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
-    text-align: left;
+    text-align: start;
   }
   .nav-btn:hover {
     background: rgba(255, 255, 255, 0.04);
@@ -221,14 +258,14 @@
     width: 280px;
     height: 100vh;
     background: #0D121F;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-inline-end: 1px solid rgba(255, 255, 255, 0.1);
     padding: 24px 16px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
   }
   .close-drawer {
-    margin-left: auto;
+    margin-inline-start: auto;
     background: none;
     border: none;
     color: rgba(255,255,255,0.6);

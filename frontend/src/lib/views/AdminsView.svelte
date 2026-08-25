@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import Modal from '$lib/components/Modal.svelte';
@@ -63,7 +64,7 @@
     try {
       admins = await apiFetch<AdminAccount[]>('/admin/admins');
     } catch (err: any) {
-      loadError = err.message || 'Failed to load admin accounts';
+      loadError = err.message || tr('admins.failed_to_load_admin_accounts');
     } finally {
       loading = false;
     }
@@ -94,10 +95,10 @@
       newPassword = '';
       newQuota = 0;
       newCreditGB = 0;
-      showToast('Account created', 'success');
+      showToast(tr('admins.account_created'), 'success');
       await load();
     } catch (err: any) {
-      createErr = err.message || 'Failed to create the account';
+      createErr = err.message || tr('admins.failed_to_create_the_account');
     }
   }
 
@@ -144,7 +145,7 @@
       );
       await load();
     } catch (err: any) {
-      editErr = err.message || 'Failed to save';
+      editErr = err.message || tr('admins.failed_to_save');
     }
   }
 
@@ -154,10 +155,10 @@
         method: 'PATCH',
         body: JSON.stringify({ disabled: !a.disabled })
       });
-      showToast(a.disabled ? 'Account enabled' : 'Account disabled and signed out', 'info');
+      showToast(a.disabled ? tr('admins.account_enabled') : tr('admins.account_disabled_and_signed_out'), 'info');
       await load();
     } catch (err: any) {
-      showToast(err.message || 'Failed to change the account', 'error');
+      showToast(err.message || tr('admins.failed_to_change_the_account'), 'error');
     }
   }
 
@@ -183,10 +184,10 @@
     try {
       await apiFetch(`/admin/admins/${deleting.id}${q}`, { method: 'DELETE' });
       deleting = null;
-      showToast('Account deleted', 'info');
+      showToast(tr('admins.account_deleted'), 'info');
       await load();
     } catch (err: any) {
-      deleteErr = err.message || 'Failed to delete the account';
+      deleteErr = err.message || tr('admins.failed_to_delete_the_account');
     }
   }
 
@@ -194,29 +195,29 @@
 </script>
 
 <div class="view-header">
-  <h2>Admins &amp; Resellers</h2>
-  <button class="btn-primary" onclick={load}>Refresh</button>
+  <h2>{tr('admins.admins_amp_resellers')}</h2>
+  <button class="btn-primary" onclick={load}>{tr('admins.refresh')}</button>
 </div>
 
 <div class="card">
-  <h3>Create Account</h3>
+  <h3>{tr('admins.create_account')}</h3>
   <div class="form-grid">
-    <input bind:value={newUsername} placeholder="Username" data-testid="new-admin-username" />
-    <input type="password" bind:value={newPassword} placeholder="Password (min 8 characters)" data-testid="new-admin-password" />
+    <input bind:value={newUsername} placeholder={tr('admins.username')} data-testid="new-admin-username" />
+    <input type="password" bind:value={newPassword} placeholder={tr('admins.password_min_8_characters')} data-testid="new-admin-password" />
     <select bind:value={newRole} data-testid="new-admin-role">
       {#each ROLES as r}<option value={r.id}>{r.id}</option>{/each}
     </select>
-    <button class="btn-primary" onclick={create}>Create</button>
+    <button class="btn-primary" onclick={create}>{tr('admins.create')}</button>
   </div>
   <p class="muted">{ROLES.find((r) => r.id === newRole)?.help}</p>
   {#if newRole === 'reseller'}
     <div class="form-grid">
       <label class="fg">
-        <span>User quota (0 = unlimited)</span>
+        <span>{tr('admins.user_quota_0_unlimited')}</span>
         <input type="number" min="0" bind:value={newQuota} data-testid="new-admin-quota" />
       </label>
       <label class="fg">
-        <span>Traffic credit GB (0 = unlimited)</span>
+        <span>{tr('admins.traffic_credit_gb_0_unlimited')}</span>
         <input type="number" min="0" bind:value={newCreditGB} />
       </label>
     </div>
@@ -226,23 +227,23 @@
 
 <div class="card table-card">
   {#if loading}
-    <p class="muted">Loading accounts…</p>
+    <p class="muted">{tr('admins.loading_accounts')}</p>
   {:else if loadError}
     <p class="err-text">{loadError}</p>
   {:else if admins.length === 0}
-    <p class="muted">No accounts yet.</p>
+    <p class="muted">{tr('admins.no_accounts_yet')}</p>
   {:else}
     <table>
       <thead>
         <tr>
-          <th>Username</th>
-          <th>Role</th>
-          <th>Customers</th>
-          <th>Quota</th>
-          <th>Traffic credit</th>
+          <th>{tr('admins.username')}</th>
+          <th>{tr('admins.role')}</th>
+          <th>{tr('admins.customers')}</th>
+          <th>{tr('admins.quota')}</th>
+          <th>{tr('admins.traffic_credit')}</th>
           <th>2FA</th>
-          <th>Status</th>
-          <th>Actions</th>
+          <th>{tr('admins.status')}</th>
+          <th>{tr('admins.actions')}</th>
         </tr>
       </thead>
       <tbody>
@@ -264,11 +265,11 @@
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-sm" onclick={() => openEdit(a)}>Edit</button>
+              <button class="btn-sm" onclick={() => openEdit(a)}>{tr('admins.edit')}</button>
               <button class="btn-sm" onclick={() => toggleDisabled(a)}>
                 {a.disabled ? 'Enable' : 'Disable'}
               </button>
-              <button class="btn-sm danger" onclick={() => openDelete(a)}>Delete</button>
+              <button class="btn-sm danger" onclick={() => openDelete(a)}>{tr('admins.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -276,8 +277,7 @@
     </table>
     {#if enabledOwners <= 1}
       <p class="muted">
-        This panel has one owner. It cannot be demoted, disabled or deleted — there is no way to
-        grant the role back from inside the panel. Promote a second account to owner first.
+        {tr('admins.this_panel_has_one_owner_it')}
       </p>
     {/if}
   {/if}
@@ -286,38 +286,35 @@
 <Modal isOpen={!!editing} title={`Edit ${editing?.username ?? ''}`} onClose={() => (editing = null)}>
   <div class="form-grid">
     <label class="fg">
-      <span>Role</span>
+      <span>{tr('admins.role')}</span>
       <select bind:value={editRole} data-testid="edit-admin-role">
         {#each ROLES as r}<option value={r.id}>{r.id}</option>{/each}
       </select>
     </label>
     <label class="fg">
-      <span>User quota (0 = unlimited)</span>
+      <span>{tr('admins.user_quota_0_unlimited')}</span>
       <input type="number" min="0" bind:value={editQuota} />
     </label>
     <label class="fg">
-      <span>Traffic credit GB (0 = unlimited)</span>
+      <span>{tr('admins.traffic_credit_gb_0_unlimited')}</span>
       <input type="number" min="0" bind:value={editCreditGB} />
     </label>
     <label class="fg">
-      <span>New password (leave blank to keep)</span>
+      <span>{tr('admins.new_password_leave_blank_to_keep')}</span>
       <input type="password" bind:value={editPassword} data-testid="edit-admin-password" />
     </label>
   </div>
   <p class="muted">
-    Changing the role or the password signs that account out everywhere, so it cannot keep acting
-    under its old authority.
+    {tr('admins.changing_the_role_or_the_password')}
   </p>
   {#if editErr}<p class="err-text">{editErr}</p>{/if}
-  <button class="btn-primary" onclick={saveEdit}>Save</button>
+  <button class="btn-primary" onclick={saveEdit}>{tr('admins.save')}</button>
 </Modal>
 
 <Modal isOpen={!!deleting} title={`Delete ${deleting?.username ?? ''}`} onClose={() => (deleting = null)}>
   {#if deleting && deleting.users_owned > 0}
     <p class="muted">
-      This account owns <strong>{deleting.users_owned}</strong> customer(s). Choose who inherits
-      them — a customer whose owner no longer exists belongs to nobody: no reseller can see them and
-      nothing can manage them, while they keep being served.
+      {tr('admins.this_account_owns')} <strong>{deleting.users_owned}</strong> {tr('admins.customer_s_choose_who_inherits_them')}
     </p>
     <select bind:value={reassignTo} data-testid="reassign-target">
       {#each admins.filter((x) => x.id !== deleting?.id) as other}
@@ -325,12 +322,12 @@
       {/each}
     </select>
   {:else}
-    <p class="muted">This account owns no customers.</p>
+    <p class="muted">{tr('admins.this_account_owns_no_customers')}</p>
   {/if}
   {#if deleteErr}<p class="err-text" data-testid="delete-error">{deleteErr}</p>{/if}
   <div class="form-grid">
-    <button class="btn-secondary" onclick={() => (deleting = null)}>Cancel</button>
-    <button class="btn-secondary danger" onclick={confirmDelete}>Delete account</button>
+    <button class="btn-secondary" onclick={() => (deleting = null)}>{tr('admins.cancel')}</button>
+    <button class="btn-secondary danger" onclick={confirmDelete}>{tr('admins.delete_account')}</button>
   </div>
 </Modal>
 
@@ -343,7 +340,7 @@
   .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.7); }
   input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th, td { text-align: start; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
   th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.dimmed { opacity: 0.55; }
   .actions-cell { display: flex; gap: 6px; }

@@ -42,7 +42,7 @@
   .toast-container {
     position: fixed;
     bottom: 24px;
-    right: 24px;
+    inset-inline-end: 24px;
     z-index: 9999;
     display: flex;
     flex-direction: column;

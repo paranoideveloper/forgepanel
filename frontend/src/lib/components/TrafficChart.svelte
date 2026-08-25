@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tr } from '$lib/i18n';
   // A usage chart drawn as plain SVG.
   //
   // No charting library: one would be the largest dependency in the panel, for
@@ -89,7 +90,7 @@
   </figcaption>
 
   {#if points.length === 0}
-    <p class="muted" data-testid="chart-empty">No usage recorded in this period.</p>
+    <p class="muted" data-testid="chart-empty">{tr('trafficchart.no_usage_recorded_in_this_period')}</p>
   {:else}
     <svg viewBox="0 0 {W} {height}" width="100%" height={height} role="img"
          aria-label="{label}: {formatBytes(total)} across {points.length} buckets">
