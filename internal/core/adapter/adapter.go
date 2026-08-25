@@ -222,6 +222,12 @@ type Options struct {
 	// then renders without one, which is exactly what the caller asked for when
 	// it only wants to LOOK at the config. Apply always uses the Plan's paths.
 	Certs func() (certPath, keyPath string)
+	// OnEngineLine, if set, receives every line the supervised core writes.
+	//
+	// This is the presence tracker's feed: Xray's access log goes to stdout,
+	// which the supervisor reads, so "who is connected from where" needs no log
+	// file and nothing on disk. It runs on the log-pump goroutine.
+	OnEngineLine func(string)
 }
 
 func (o Options) certs() (string, string) {

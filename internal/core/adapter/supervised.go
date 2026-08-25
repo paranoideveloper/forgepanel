@@ -132,6 +132,7 @@ func (a *supervised) spec() supervisor.EngineSpec {
 		RunArgs:    a.runArgs,
 		TestArgs:   a.testArgs,
 		ConfigPath: a.configPath(),
+		OnLine:     a.opts.OnEngineLine,
 	}
 }
 

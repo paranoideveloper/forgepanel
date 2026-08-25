@@ -1,0 +1,197 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { apiFetch } from '$lib/api';
+
+  // Who is connected, right now.
+  //
+  // The panel could say how many bytes a user had ever moved and nothing about
+  // whether they were connected at this moment, from where, or on which inbound.
+  // That is the first thing anyone wants when a customer says "it's not
+  // working", and the only way to spot one account shared across a dozen
+  // households.
+
+  interface Session {
+    ip: string;
+    inbound: string;
+    node: string;
+    first_seen: string;
+    last_seen: string;
+    connections: number;
+  }
+  interface OnlineUser {
+    user_id: number;
+    username: string;
+    last_seen: string;
+    addresses: number;
+    sessions: Session[];
+  }
+
+  let users = $state<OnlineUser[]>([]);
+  let ttl = $state(120);
+  let loading = $state(true);
+  let loadError = $state('');
+  let expanded = $state<Record<string, boolean>>({});
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  // Presence is only interesting while it is current, so this refreshes on its
+  // own. Ten seconds is fast enough that a reconnect shows up while the operator
+  // is still looking, and slow enough not to hammer the panel.
+  const REFRESH_MS = 10_000;
+
+  async function load(showSpinner = false) {
+    if (showSpinner) loading = true;
+    try {
+      const res = await apiFetch<{ users: OnlineUser[]; ttl_seconds: number }>('/admin/online');
+      users = res.users ?? [];
+      ttl = res.ttl_seconds || ttl;
+      loadError = '';
+    } catch (err: any) {
+      // A failed poll must not blank the list: the last good picture is more
+      // useful than an empty screen that reads as "nobody is connected".
+      loadError = err.message || 'Failed to load presence';
+    } finally {
+      loading = false;
+    }
+  }
+
+  function ago(iso: string): string {
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  }
+
+  function since(iso: string): string {
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m`;
+    return `${Math.floor(s / 3600)}h`;
+  }
+
+  function toggle(key: string) {
+    expanded = { ...expanded, [key]: !expanded[key] };
+  }
+
+  const totalSessions = $derived(users.reduce((n, u) => n + u.sessions.length, 0));
+
+  onMount(() => {
+    load(true);
+    timer = setInterval(() => load(false), REFRESH_MS);
+  });
+  // Without this the poll outlives the view and keeps requesting forever.
+  onDestroy(() => {
+    if (timer !== undefined) clearInterval(timer);
+  });
+</script>
+
+<div class="view-header">
+  <h2>Online</h2>
+  <div class="hdr-right">
+    <span class="muted" data-testid="summary">
+      {users.length} {users.length === 1 ? 'user' : 'users'} · {totalSessions}
+      {totalSessions === 1 ? 'address' : 'addresses'}
+    </span>
+    <button class="btn-primary" onclick={() => load(true)}>Refresh</button>
+  </div>
+</div>
+
+{#if loadError}
+  <div class="card"><p class="err-text">{loadError}</p></div>
+{/if}
+
+<div class="card">
+  {#if loading}
+    <p class="muted">Loading…</p>
+  {:else if users.length === 0}
+    <p class="muted" data-testid="empty">
+      Nobody is connected. A user counts as online for {ttl} seconds after their
+      last connection, so someone idle in a quiet tab may drop off this list
+      without having disconnected.
+    </p>
+  {:else}
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Addresses</th>
+          <th>Last seen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each users as u (u.username)}
+          <tr>
+            <td>
+              <span class="dot"></span>
+              <strong>{u.username}</strong>
+            </td>
+            <!-- The address count is what an operator scans for: one account on
+                 eight addresses is a shared account. -->
+            <td>
+              <span class="count" class:many={u.addresses > 3}>{u.addresses}</span>
+            </td>
+            <td class="mono">{ago(u.last_seen)}</td>
+            <td>
+              <button class="btn-sm" data-testid="toggle" onclick={() => toggle(u.username)}>
+                {expanded[u.username] ? 'Hide' : 'Where from'}
+              </button>
+            </td>
+          </tr>
+          {#if expanded[u.username]}
+            <tr class="detail">
+              <td colspan="4">
+                <table class="inner">
+                  <thead>
+                    <tr><th>Address</th><th>Inbound</th><th>Node</th><th>Connected</th><th>Conns</th></tr>
+                  </thead>
+                  <tbody>
+                    {#each u.sessions as sess}
+                      <tr>
+                        <td class="mono">{sess.ip}</td>
+                        <td>{sess.inbound || '—'}</td>
+                        <td>{sess.node || '—'}</td>
+                        <td class="mono">{since(sess.first_seen)}</td>
+                        <td class="mono">{sess.connections}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+          {/if}
+        {/each}
+      </tbody>
+    </table>
+    <p class="foot muted">
+      Presence is inferred from the last {ttl} seconds of connections and is never
+      written to disk.
+    </p>
+  {/if}
+</div>
+
+<style>
+  .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; gap: 12px; flex-wrap: wrap; }
+  .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
+  .hdr-right { display: flex; align-items: center; gap: 12px; }
+  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-right: 8px; }
+  .count { display: inline-block; min-width: 24px; text-align: center; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+  /* Many simultaneous addresses is the signal worth noticing, so it is marked
+     by weight and border as well as colour. */
+  .count.many { background: rgba(217,155,43,0.18); color: #d99b2b; font-weight: 700; border: 1px solid rgba(217,155,43,0.4); }
+  .detail td { background: rgba(255,255,255,0.02); padding-top: 0; }
+  .inner th, .inner td { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(255,255,255,0.75); }
+  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
+  .foot { margin: 14px 0 0; font-size: 12px; }
+  .err-text { color: #f85149; font-size: 13px; }
+  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+</style>

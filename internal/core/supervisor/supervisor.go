@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -34,6 +35,16 @@ type EngineSpec struct {
 	RunArgs    []string // args to run with a config, e.g. ["run","-c"] or ["run","-c"]
 	TestArgs   []string // args to validate a config, e.g. ["run","-test","-c"] / ["check","-c"]
 	ConfigPath string   // where the config file is written
+
+	// OnLine, if set, receives every line the engine writes.
+	//
+	// This is how connection metadata reaches the presence tracker without a
+	// log file: Xray's access log is pointed at stdout, which this process
+	// already reads, so there is nothing to rotate and nothing growing on disk.
+	// It runs on the log-pump goroutine and MUST NOT block or panic — doing
+	// either takes the engine's output, and therefore its crash diagnostics,
+	// with it.
+	OnLine func(string)
 }
 
 // Process supervises one EngineSpec.
@@ -48,6 +59,10 @@ type Process struct {
 	logs     *ring
 	cancel   context.CancelFunc
 	done     chan struct{} // closed when the current supervise goroutine exits
+
+	// observerDead is set when the OnLine hook panics, retiring it for the life
+	// of this Process rather than letting it panic on every subsequent line.
+	observerDead atomic.Bool
 }
 
 // NewProcess creates a supervised process (not started).
@@ -177,9 +192,37 @@ func logHint(logs *ring) string {
 
 func (p *Process) pump(r interface{ Read([]byte) (int, error) }) {
 	sc := bufio.NewScanner(r)
+	// Access-log lines carry a full destination address and can be long; the
+	// default 64KiB token limit is generous but a single overlong line would
+	// otherwise stop the scanner and silently kill logging for the rest of the
+	// process's life.
+	sc.Buffer(make([]byte, 0, 64*1024), 512*1024)
 	for sc.Scan() {
-		p.logs.add(sc.Text())
+		line := sc.Text()
+		p.logs.add(line)
+		if p.spec.OnLine != nil && !p.observerDead.Load() {
+			p.observe(line)
+		}
 	}
+}
+
+// observe hands a line to the OnLine hook, containing any panic.
+//
+// The hook is supplied by another subsystem and runs on the goroutine that
+// drains the engine's output pipe. A panic here would kill that pump, the
+// process's logs would stop, and the crash reason for the NEXT failure would be
+// missing — a diagnostic blackout caused by a bug in an unrelated feature.
+func (p *Process) observe(line string) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.logs.add(fmt.Sprintf("[forgepanel] log observer panicked and was disabled: %v", r))
+			// Atomic, not a nil assignment: stdout and stderr are pumped on two
+			// goroutines at once, so writing to the shared spec here would be a
+			// data race — and one that only fires while handling another bug.
+			p.observerDead.Store(true)
+		}
+	}()
+	p.spec.OnLine(line)
 }
 
 func (p *Process) sleep(ctx context.Context, d time.Duration) bool {

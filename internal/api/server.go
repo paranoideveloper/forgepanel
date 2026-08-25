@@ -513,6 +513,7 @@ func (s *Server) routes() {
 			admin.GET("/backup/status", s.handleBackupStatus)
 
 			// Usage history, from the rollups written alongside billing.
+			admin.GET("/online", s.handleOnlineUsers)
 			admin.GET("/traffic/series", s.handleTrafficSeries)
 			admin.GET("/traffic/top", s.handleTopConsumers)
 			admin.GET("/audit", s.handleListAudit)

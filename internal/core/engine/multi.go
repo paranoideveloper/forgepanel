@@ -192,7 +192,13 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 	}
 
 	xrayCfg := jobj{
-		"log":      jobj{"loglevel": "warning"},
+		// access:"" sends the access log to STDOUT, which the supervisor already
+		// reads. That is what feeds the presence tracker: who is connected, from
+		// which address, on which inbound. A file would have to be rotated,
+		// would grow without bound on a busy node, and would leave connection
+		// metadata on disk after a restart — none of which buys anything, since
+		// the panel owns the process's output pipe already.
+		"log":      jobj{"loglevel": "warning", "access": ""},
 		"api":      jobj{"tag": "api", "services": []string{"HandlerService", "StatsService"}},
 		"stats":    jobj{},
 		"policy":   jobj{"levels": jobj{"0": jobj{"statsUserUplink": statsUsed, "statsUserDownlink": statsUsed}}, "system": jobj{"statsInboundUplink": true, "statsInboundDownlink": true}},

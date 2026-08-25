@@ -69,6 +69,10 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 			cp, kp, _ := ensureSelfSignedFor(c.dataDir)
 			return cp, kp
 		},
+		// Every line the core writes is offered to the presence tracker. The
+		// generated Xray config sends its access log to stdout precisely so this
+		// works with no log file to rotate and no connection metadata on disk.
+		OnEngineLine: c.presence.ObserveLine(LocalNodeName),
 	}, c.brook, c.awg)
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/core/adapter"
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
+	"github.com/forgepanel/forgepanel/internal/core/online"
 	"github.com/forgepanel/forgepanel/internal/core/porthop"
 	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -60,6 +61,12 @@ type Controller struct {
 	sbStatsErrMu sync.Mutex
 	sbStatsErr   string
 
+	// presence tracks who is connected right now, fed by the engines' own access
+	// log lines through the supervisor's OnLine hook. It is in-memory only: this
+	// is connection metadata, and a panel that writes it down turns any
+	// compromise into a history of everyone's activity.
+	presence *online.Tracker
+
 	mu      sync.Mutex
 	brook   *BrookManager
 	awg     *AWGManager
@@ -84,6 +91,7 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	c := &Controller{
 		dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins,
 		brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New(),
+		presence: online.NewTracker(0),
 	}
 	// Built once. A failure here is stored rather than panicked on: the panel
 	// still has to start so an operator can reach the UI and see why.
@@ -397,4 +405,49 @@ func validateResult(err error) string {
 		return err.Error()
 	}
 	return "valid"
+}
+
+// LocalNodeName labels sessions served by the cores this panel runs itself, so
+// the explorer can tell them apart from sessions reported by remote nodes.
+const LocalNodeName = "local"
+
+// Presence returns who is connected right now, most recently seen first.
+//
+// The list is derived from the engines' access logs and expires on its own, so
+// it reflects the last couple of minutes rather than everything ever seen.
+func (c *Controller) Presence() []online.Presence {
+	if c.presence == nil {
+		return nil
+	}
+	return c.presence.Snapshot()
+}
+
+// ActiveAddresses returns how many distinct source addresses a user is currently
+// connecting from — the quantity a per-user IP limit is enforced against.
+func (c *Controller) ActiveAddresses(user string) int {
+	if c.presence == nil {
+		return 0
+	}
+	return c.presence.AddressCount(user)
+}
+
+// ObservePresenceLine feeds one engine log line to the presence tracker.
+//
+// The engines reach the tracker through the supervisor's OnLine hook, which
+// needs a running core. This is the same path without one, so presence can be
+// exercised against real captured log lines rather than by reaching into the
+// tracker's internals — a test that bypasses the parser proves nothing about
+// whether the parser works.
+func (c *Controller) ObservePresenceLine(node, line string) {
+	if c.presence != nil {
+		c.presence.ObserveLine(node)(line)
+	}
+}
+
+// ForgetPresence drops what is known about a user, for when they are deleted or
+// their credentials are rotated: those sessions are no longer theirs.
+func (c *Controller) ForgetPresence(user string) {
+	if c.presence != nil {
+		c.presence.Forget(user)
+	}
 }

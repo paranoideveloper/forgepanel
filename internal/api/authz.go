@@ -139,6 +139,17 @@ var adminAuthzRules = []authzRule{
 	// tenants and are refused there.
 	{methods: get, path: "/api/admin/traffic", roles: tenantMgmt},
 
+	// --- who is connected right now ---------------------------------------
+	//
+	// "Is my customer actually connected, and from where" is the support
+	// question a reseller asks most, so this is tenant management like the rest
+	// of their job — but the handler scopes it to the users they own, and
+	// sessions it cannot attribute to any user are withheld from them entirely.
+	// A source address is the most sensitive field the panel holds: it locates
+	// a person. One tenant learning another's is a privacy breach, not a
+	// cosmetic leak.
+	{methods: get, path: "/api/admin/online", exact: true, roles: tenantMgmt},
+
 	// --- the audit trail --------------------------------------------------
 	//
 	// Entries name the actor, their IP and what they did, across every admin.
