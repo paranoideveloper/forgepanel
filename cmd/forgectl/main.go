@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/forgepanel/forgepanel/internal/backup"
@@ -263,12 +262,11 @@ func cmdBackup(args []string) error {
 	path := fs.Arg(0)
 	switch args[0] {
 	case "create":
-		files := []string{
-			filepath.Join(cfg.DataDir, "forgepanel.db"),
-			filepath.Join(cfg.DataDir, "secrets.json"),
-			filepath.Join(cfg.DataDir, "panel.json"),
-		}
-		blob, err := backup.Create(cfg.MasterKey, files)
+		// One list, shared with the panel's own backup endpoint. Hardcoding it
+		// here is why the certificates were outside every CLI backup while the
+		// package doc claimed otherwise.
+		files := backup.PanelFiles(cfg.DataDir)
+		blob, err := backup.CreateFrom(cfg.MasterKey, cfg.DataDir, files)
 		if err != nil {
 			return err
 		}

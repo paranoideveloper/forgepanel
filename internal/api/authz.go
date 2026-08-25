@@ -124,6 +124,14 @@ var adminAuthzRules = []authzRule{
 	{path: "/api/admin/edge/feed-token", roles: ownerAdmin},
 	{path: "/api/admin/dns/credentials", roles: ownerAdmin},
 
+	// --- backup: owner only -------------------------------------------------
+	//
+	// A backup carries the database, secrets.json (the master key and the token
+	// signing secret) and the issued certificates. Anyone who can download one
+	// can stand up a panel indistinguishable from this one, so it sits at the
+	// same bar as importing a certificate or moving the panel address.
+	{path: "/api/admin/backup", roles: ownerOnly},
+
 	// --- usage history ------------------------------------------------------
 	//
 	// A reseller may chart their own customers, and the handler scopes each

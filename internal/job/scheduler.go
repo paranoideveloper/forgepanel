@@ -5,7 +5,10 @@
 package job
 
 import (
+	"strings"
+
 	"context"
+	"github.com/forgepanel/forgepanel/internal/backup"
 	"sync"
 	"time"
 
@@ -40,11 +43,14 @@ type Scheduler struct {
 	// unusable amount of hourly data or destroy the long-range chart.
 	rollupHourlyRetention time.Duration
 	rollupDailyRetention  time.Duration
-	reloadHook            func()                                     // called after a mutation to reapply engine configs
-	pollTraffic           func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
-	cancel                context.CancelFunc
-	wg                    sync.WaitGroup
-	now                   func() time.Time // injectable clock (tests use a controllable one)
+	// Scheduled backups. A backup that happens only when someone remembers is
+	// not a backup policy.
+	backupEvery func() (dataDir, master string, every time.Duration, keep int)
+	reloadHook  func()                                     // called after a mutation to reapply engine configs
+	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	now         func() time.Time // injectable clock (tests use a controllable one)
 }
 
 // Config configures a Scheduler.
@@ -62,6 +68,9 @@ type Config struct {
 	// Zero keeps everything for that resolution.
 	RollupHourlyRetention time.Duration
 	RollupDailyRetention  time.Duration
+	// BackupConfig supplies the scheduled-backup settings at run time, so an
+	// operator changing them does not require a restart. Nil disables them.
+	BackupConfig func() (dataDir, master string, every time.Duration, keep int)
 	// PollTraffic returns the engine's per-user counters. The scheduler always
 	// calls it with reset=false and accounts by subtraction against a stored
 	// snapshot: a destructive read makes the in-flight value the only copy of
@@ -87,6 +96,7 @@ func New(cfg Config) *Scheduler {
 		auditRetention:        cfg.AuditRetention,
 		rollupHourlyRetention: cfg.RollupHourlyRetention,
 		rollupDailyRetention:  cfg.RollupDailyRetention,
+		backupEvery:           cfg.BackupConfig,
 		now:                   time.Now,
 	}
 }
@@ -111,8 +121,35 @@ func (s *Scheduler) Start() {
 		s.loop(ctx, time.Hour, func() {
 			s.pruneAudit()
 			s.pruneRollups()
+			s.runScheduledBackup()
 		})
 	}()
+}
+
+// runScheduledBackup takes a backup when one is due.
+//
+// Due-ness is judged from the newest backup on disk rather than from a timer
+// held in memory, so a panel that restarts every hour still produces daily
+// backups instead of one per restart — and a panel that was down for a week
+// takes one immediately when it returns.
+func (s *Scheduler) runScheduledBackup() {
+	if s.backupEvery == nil {
+		return
+	}
+	dataDir, master, every, keep := s.backupEvery()
+	if every <= 0 || strings.TrimSpace(master) == "" || dataDir == "" {
+		return
+	}
+	last, _, err := backup.LatestLocal(dataDir)
+	if err == nil && !last.IsZero() && s.now().Sub(last) < every {
+		return
+	}
+	if _, err := backup.WriteLocal(master, dataDir, s.now()); err != nil {
+		// Nothing to escalate to from here; the next hour retries, and the
+		// backup status endpoint shows the age of the newest one.
+		return
+	}
+	_, _ = backup.PruneLocal(dataDir, keep)
 }
 
 // pruneRollups enforces the usage-history retention windows.

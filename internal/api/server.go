@@ -185,6 +185,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		// year to show.
 		RollupHourlyRetention: 31 * 24 * time.Hour,
 		RollupDailyRetention:  730 * 24 * time.Hour,
+		// A daily local backup, keeping a week. Read from cfg at run time so
+		// changing it does not need a restart.
+		BackupConfig: func() (string, string, time.Duration, int) {
+			return cfg.DataDir, cfg.MasterKey, 24 * time.Hour, 7
+		},
 		PollTraffic: func(reset bool) (map[string]int64, error) {
 			if s.engine == nil {
 				return nil, nil
@@ -500,6 +505,13 @@ func (s *Server) routes() {
 			admin.GET("/quota", s.handleQuota)
 			// The audit trail. Entries carry the actor, their IP and what they
 			// did across every admin, so this is owner/admin only.
+			// Backup. A backup contains the database, the master key and the
+			// certificates — everything needed to impersonate this panel — so
+			// it is owner-only, like the other whole-panel material.
+			admin.POST("/backup", s.handleCreateBackup)
+			admin.POST("/backup/verify", s.handleVerifyBackup)
+			admin.GET("/backup/status", s.handleBackupStatus)
+
 			// Usage history, from the rollups written alongside billing.
 			admin.GET("/traffic/series", s.handleTrafficSeries)
 			admin.GET("/traffic/top", s.handleTopConsumers)
