@@ -150,6 +150,12 @@ var adminAuthzRules = []authzRule{
 	// cosmetic leak.
 	{methods: get, path: "/api/admin/online", exact: true, roles: tenantMgmt},
 
+	// --- foreign-panel import ---------------------------------------------
+	//
+	// Reads an arbitrary path on the host and writes inbounds and users across
+	// the whole panel. Owner only.
+	{path: "/api/admin/migrate", roles: ownerOnly},
+
 	// --- config profiles --------------------------------------------------
 	//
 	// A profile writes inbounds across the whole fleet, which is infrastructure

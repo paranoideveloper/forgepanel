@@ -605,6 +605,10 @@ func (s *Server) routes() {
 			admin.DELETE("/tokens/:id", s.handleRevokeAPIToken)
 
 			// Config profiles: one protocol definition deployed to N nodes.
+			// Foreign-panel import: preview writes nothing, apply is atomic.
+			admin.POST("/migrate/preview", s.handleMigratePreview)
+			admin.POST("/migrate/apply", s.handleMigrateApply)
+
 			admin.GET("/profiles", s.handleListProfiles)
 			admin.POST("/profiles", s.handleSaveProfile)
 			admin.PUT("/profiles/:id", s.handleSaveProfile)
