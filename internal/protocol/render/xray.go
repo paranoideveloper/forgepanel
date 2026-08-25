@@ -191,8 +191,17 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 	if !n.Protocol.UsesTransport() {
 		return nil
 	}
-	ss := jobj{"network": networkName(n.Transport.Network)}
-	t := n.Transport
+	return xrayStream(n.Transport, n.Security, n.SNI(), inbound)
+}
+
+// xrayStream builds a streamSettings object from a transport + security pair.
+// It is split out of xrayStreamSettings because XHTTP's downloadSettings is a
+// COMPLETE second streamSettings (its own transport and its own TLS/REALITY
+// layer) and must be rendered by exactly the same code -- a hand-rolled second
+// implementation is how the download leg silently ends up with a different TLS
+// shape from the upload leg.
+func xrayStream(t model.Transport, sec model.Security, sni string, inbound bool) jobj {
+	ss := jobj{"network": networkName(t.Network)}
 	switch t.Network {
 	case model.NetTCP:
 		if t.HeaderObfs != nil && t.HeaderObfs.Type == "http" {
@@ -234,38 +243,7 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 		}
 		ss["grpcSettings"] = g
 	case model.NetXHTTP:
-		xh := jobj{"path": firstNonEmpty(t.Path, "/"), "mode": firstNonEmpty(t.XHTTPMode, "auto")}
-		if t.Host != "" {
-			xh["host"] = t.Host
-		}
-		if t.XPaddingB != "" {
-			xh["xPaddingBytes"] = t.XPaddingB
-		}
-		if x := t.XMux; x != nil {
-			xm := jobj{}
-			if x.MaxConcurrency != "" {
-				xm["maxConcurrency"] = x.MaxConcurrency
-			}
-			if x.MaxConnections != "" {
-				xm["maxConnections"] = x.MaxConnections
-			}
-			if x.CMaxReuseTimes != "" {
-				xm["cMaxReuseTimes"] = x.CMaxReuseTimes
-			}
-			if x.CMaxLifetimeMs != "" {
-				xm["cMaxLifetimeMs"] = x.CMaxLifetimeMs
-			}
-			if x.HMaxRequestTime != "" {
-				xm["hMaxRequestTimes"] = x.HMaxRequestTime
-			}
-			if x.HKeepAlivePeriod > 0 {
-				xm["hKeepAlivePeriod"] = x.HKeepAlivePeriod
-			}
-			if len(xm) > 0 {
-				xh["xmux"] = xm
-			}
-		}
-		ss["xhttpSettings"] = xh
+		ss["xhttpSettings"] = xrayXHTTPSettings(t, inbound)
 	case model.NetH2:
 		h2 := jobj{"path": firstNonEmpty(t.Path, "/")}
 		if t.Host != "" {
@@ -285,34 +263,34 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 		ss["quicSettings"] = jobj{"security": firstNonEmpty(t.QUICSecurity, "none"), "key": t.QUICKey, "header": jobj{"type": "none"}}
 	}
 
-	switch n.Security.Type {
+	switch sec.Type {
 	case model.SecTLS:
 		ss["security"] = "tls"
-		tls := jobj{"serverName": n.SNI()}
-		if len(n.Security.ALPN) > 0 {
-			tls["alpn"] = n.Security.ALPN
+		tls := jobj{"serverName": sni}
+		if len(sec.ALPN) > 0 {
+			tls["alpn"] = sec.ALPN
 		}
-		if n.Security.Fingerprint != "" {
-			tls["fingerprint"] = n.Security.Fingerprint
+		if sec.Fingerprint != "" {
+			tls["fingerprint"] = sec.Fingerprint
 		}
-		if n.Security.MinVersion != "" {
-			tls["minVersion"] = n.Security.MinVersion
+		if sec.MinVersion != "" {
+			tls["minVersion"] = sec.MinVersion
 		}
-		if n.Security.MaxVersion != "" {
-			tls["maxVersion"] = n.Security.MaxVersion
+		if sec.MaxVersion != "" {
+			tls["maxVersion"] = sec.MaxVersion
 		}
-		if n.Security.CipherSuites != "" {
-			tls["cipherSuites"] = n.Security.CipherSuites
+		if sec.CipherSuites != "" {
+			tls["cipherSuites"] = sec.CipherSuites
 		}
 		// Xray 26 removed "allowInsecure"; skip-verify is now pinnedPeerCertSha256.
-		if len(n.Security.PinSHA256) > 0 {
-			tls["pinnedPeerCertSha256"] = n.Security.PinSHA256[0]
+		if len(sec.PinSHA256) > 0 {
+			tls["pinnedPeerCertSha256"] = sec.PinSHA256[0]
 		}
 		ss["tlsSettings"] = tls
 	case model.SecReality:
 		ss["security"] = "reality"
-		r := n.Security.Reality
-		rs := jobj{"show": false, "fingerprint": firstNonEmpty(n.Security.Fingerprint, "chrome")}
+		r := sec.Reality
+		rs := jobj{"show": false, "fingerprint": firstNonEmpty(sec.Fingerprint, "chrome")}
 		if r != nil {
 			// A server inbound carries privateKey; a client outbound carries
 			// publicKey. Emitting both makes Xray's REALITY outbound treat the
@@ -326,7 +304,7 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 					rs["publicKey"] = r.PublicKey
 				}
 			}
-			rs["serverName"] = n.SNI()
+			rs["serverName"] = sni
 			sid := r.ShortID
 			if sid == "" && len(r.ShortIDs) > 0 {
 				sid = r.ShortIDs[0]
@@ -366,6 +344,121 @@ func xrayStreamSettings(n *model.Node, inbound bool) jobj {
 			}
 		}
 		ss["realitySettings"] = rs
+	}
+	return ss
+}
+
+// xrayXHTTPSettings renders the full modern xhttpSettings object. Every key
+// below exists in the pinned Xray's XHTTP schema (verified against the binary);
+// keys are omitted when unset so the emitted config stays the operator's own
+// configuration rather than a wall of defaults that hides what was chosen.
+func xrayXHTTPSettings(t model.Transport, inbound bool) jobj {
+	xh := jobj{"path": firstNonEmpty(t.Path, "/"), "mode": firstNonEmpty(t.XHTTPMode, model.XHTTPModeAuto)}
+	if t.Host != "" {
+		xh["host"] = t.Host
+	}
+	if len(t.Headers) > 0 {
+		h := jobj{}
+		for k, v := range t.Headers {
+			h[k] = v
+		}
+		xh["headers"] = h
+	}
+
+	setStr := func(key, val string) {
+		if val != "" {
+			xh[key] = val
+		}
+	}
+	setInt := func(key string, val int) {
+		if val > 0 {
+			xh[key] = val
+		}
+	}
+	setStr("xPaddingBytes", t.XPaddingB)
+	if t.XPaddingObfsMode {
+		// The padding key/header/placement/method family is only read when
+		// obfuscated padding is on, so emitting it otherwise would advertise a
+		// configuration the core is not actually applying.
+		xh["xPaddingObfsMode"] = true
+		setStr("xPaddingKey", t.XPaddingKey)
+		setStr("xPaddingHeader", t.XPaddingHeader)
+		setStr("xPaddingPlacement", t.XPaddingPlacement)
+		setStr("xPaddingMethod", t.XPaddingMethod)
+	}
+	if t.NoGRPCHeader {
+		xh["noGRPCHeader"] = true
+	}
+	if t.NoSSEHeader {
+		xh["noSSEHeader"] = true
+	}
+	setStr("scMaxEachPostBytes", t.SCMaxEachPostBytes)
+	setStr("scMinPostsIntervalMs", t.SCMinPostsIntervalMs)
+	setInt("scMaxBufferedPosts", t.SCMaxBufferedPosts)
+	setStr("scStreamUpServerSecs", t.SCStreamUpServerSecs)
+	setStr("sessionPlacement", t.SessionPlacement)
+	setStr("sessionKey", t.SessionKey)
+	setStr("seqPlacement", t.SeqPlacement)
+	setStr("seqKey", t.SeqKey)
+	setStr("uplinkDataPlacement", t.UplinkDataPlacement)
+	setStr("uplinkDataKey", t.UplinkDataKey)
+	setStr("uplinkHTTPMethod", t.UplinkHTTPMethod)
+	setInt("uplinkChunkSize", t.UplinkChunkSize)
+
+	// serverMaxHeaderBytes caps what the LISTENER will accept; on a client
+	// outbound it is meaningless and only widens the config fingerprint.
+	if inbound {
+		setInt("serverMaxHeaderBytes", t.ServerMaxHeaderBytes)
+	}
+
+	if x := t.XMux; x != nil {
+		xm := jobj{}
+		if x.MaxConcurrency != "" {
+			xm["maxConcurrency"] = x.MaxConcurrency
+		}
+		if x.MaxConnections != "" {
+			xm["maxConnections"] = x.MaxConnections
+		}
+		if x.CMaxReuseTimes != "" {
+			xm["cMaxReuseTimes"] = x.CMaxReuseTimes
+		}
+		if x.HMaxRequestTime != "" {
+			xm["hMaxRequestTimes"] = x.HMaxRequestTime
+		}
+		if x.HMaxReusableSecs != "" {
+			xm["hMaxReusableSecs"] = x.HMaxReusableSecs
+		}
+		if x.HKeepAlivePeriod > 0 {
+			xm["hKeepAlivePeriod"] = x.HKeepAlivePeriod
+		}
+		if len(xm) > 0 {
+			xh["xmux"] = xm
+		}
+	}
+
+	// downloadSettings splits the download direction onto its own stream. The
+	// core only honours it on the CLIENT side, and refuses it outright in
+	// stream-one mode -- Validate rejects that combination before we get here.
+	if d := t.XHTTPDownload; d != nil && !inbound {
+		xh["downloadSettings"] = xrayDownloadSettings(d)
+	}
+	return xh
+}
+
+// xrayDownloadSettings renders XHTTP's download leg: a streamSettings object
+// plus the address/port it dials, which is what lets the download ride a
+// different host (direct, or a second CDN) from the upload.
+func xrayDownloadSettings(d *model.XHTTPDownload) jobj {
+	t := d.Transport
+	// A download leg never carries a further download leg; the core has no
+	// nesting and a self-referential transport would recurse forever here.
+	t.XHTTPDownload = nil
+	ss := xrayStream(t, d.Security, d.SNI(), false)
+	if d.Address != "" {
+		ss["address"] = d.Address
+	}
+	if d.Port > 0 {
+		ss["port"] = d.Port
 	}
 	return ss
 }
