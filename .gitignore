@@ -5,6 +5,8 @@ node_modules/
 web/dist/
 *.db
 .env
+# Reference clones, not part of the product. (The licence for the sing-box we
+# build and distribute is a PRODUCT file and lives in licenses/, not here.)
 third_party/
 
 # build artifacts / local run state

@@ -100,6 +100,15 @@ func (m *Manager) Ensure(e Engine) (string, error) {
 	case EngineXray:
 		return p, m.installXray(p)
 	case EngineSingbox:
+		// Prefer the build ForgePanel ships: it is the only one that can report
+		// per-user traffic for the protocols sing-box serves. Falling back to
+		// upstream is deliberate — the panel works either way, those protocols
+		// are simply unmetered, and the metering health subsystem says so.
+		if adopted, err := adoptForgePanelSingbox(p, runtime.GOARCH); err != nil {
+			return "", err
+		} else if adopted {
+			return p, nil
+		}
 		return p, m.installSingbox(p)
 	case EngineBrook:
 		return p, m.installBrook(p)
@@ -129,6 +138,15 @@ var pinnedSHA256 = map[string]string{
 	"Xray-linux-64.zip":                   "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
 	"Xray-linux-arm64-v8a.zip":            "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
 	"sing-box-1.13.15-linux-amd64.tar.gz": "a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f",
+	// The sing-box ForgePanel builds and ships (scripts/build-singbox.sh): the
+	// same upstream version, the official tag set plus with_v2ray_api, built
+	// reproducibly. These are NOT the upstream archives above and must never
+	// share an entry with them — they are different artifacts.
+	//
+	// Reproduce with:  TARGETS="amd64 arm64" scripts/build-singbox.sh
+	// and compare; two independent builds are byte-identical.
+	"sing-box-1.13.15-linux-amd64":        "bb4d1b057836e2d955020b4be6c8084023cb6c91f330b50e485e6b8b02dc7563",
+	"sing-box-1.13.15-linux-arm64":        "f163bae1ac31e80fed67a9e51463ef943ed4a13ffba35db591546220073eab0a",
 	"sing-box-1.13.15-linux-arm64.tar.gz": "f0810bbb5722ae36635687c421019defcc8b328d31a0b3c287901f331747ca93",
 	"brook_linux_amd64":                   "7853250042877716376fab14a3a99be44bf242cd69dec11cfa71fada915db372",
 	"brook_linux_arm64":                   "5c720698f811ecc265311574140c20d912037ca36aecccd7e8536d03e581a2db",

@@ -85,6 +85,39 @@ that looked like a QR code and decoded to nothing. `tools/qrverify/verify_qr.py`
 re-establishes the property that matters by decoding the panel's output back to
 its input with an independent decoder.
 
+## sing-box — GPL-3.0, distributed as a compiled binary
+
+ForgePanel ships a compiled sing-box. This is the only GPL work the project
+conveys, and it is worth being precise about why that is safe and what it
+obliges.
+
+**Why we build it.** Per-user traffic counters for the protocols only sing-box
+serves — Hysteria2, TUIC, AnyTLS, ShadowTLS, WireGuard — exist solely in a build
+carrying `with_v2ray_api`, and the official release archives are not built with
+it. On an official binary those protocols are unmetered and their users' quotas
+cannot be enforced, silently.
+
+**Why ForgePanel stays MIT.** The panel *runs* sing-box as a separate program: it
+starts a subprocess and talks to it over a local socket. It does not link the
+code or include any part of it. Two separate works distributed together is mere
+aggregation, and the GPL does not reach across it. What the GPL does govern is
+the sing-box **binary** we convey, and those obligations are met in full:
+
+| Obligation | How it is met |
+|---|---|
+| Keep notices intact | `licenses/sing-box/LICENSE` is shipped as a release asset and installed beside the binary; the build refuses to run without it |
+| Provide corresponding source | Unmodified upstream `v1.13.15`; source URL and the complete build recipe are in `licenses/sing-box/NOTICE.md` |
+| Let recipients verify | The build is reproducible — two independent runs are byte-identical — and the checksum the panel enforces is published |
+| Respect the naming clause | Installed as `sing-box-forgepanel`, never presented as ForgePanel's own work or as endorsed by upstream |
+
+**No modification.** Nothing is patched, added or removed. Only build tags
+differ, and only by addition: the official set plus `with_v2ray_api`. The build
+script verifies the resulting tag set and fails on any difference, because
+quietly losing `with_gvisor` or `with_tailscale` would remove capabilities
+operators rely on without anything reporting it.
+
+Full detail, including how to rebuild and compare: `licenses/sing-box/NOTICE.md`.
+
 ## Reference material used for behaviour only
 
 The platform programme studies a corpus of proxy-panel projects to identify

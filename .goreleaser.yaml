@@ -18,6 +18,14 @@ before:
     # them by name; generate the checksum next to the script so `sha256sum -c`
     # works from the download directory.
     - sh -c 'sha256sum install.sh > install.sh.sha256'
+    # Build the sing-box ForgePanel ships. Per-user counters for the protocols
+    # only sing-box serves (hysteria2, tuic, anytls, shadowtls, wireguard) exist
+    # only in a build carrying with_v2ray_api, which the official release
+    # archives are not — so on an official binary those protocols are UNMETERED
+    # and their users' quotas cannot be enforced. The script pins the same
+    # upstream version, keeps the official tag set, and builds reproducibly:
+    # rebuild it yourself and the checksum matches.
+    - sh -c 'TARGETS="amd64 arm64" ./scripts/build-singbox.sh dist/singbox'
 
 builds:
   - id: forgepanel
@@ -196,6 +204,14 @@ release:
     # operator can wire it up without cloning the repo (docs/EDGE_BOT.md).
     - glob: ./packaging/systemd/forgeedge-bot.service
     - glob: ./packaging/forgeedge-bot.env.example
+    # The sing-box we build, per architecture, plus its checksums. install.sh
+    # places it beside the panel binary, where binmgr finds and verifies it.
+    - glob: ./dist/singbox/sing-box-*-linux-*
+    - glob: ./dist/singbox/checksums.txt
+      name_template: singbox-checksums.txt
+    # sing-box is GPL-3.0; conveying the binary requires its notices.
+    - glob: ./dist/singbox/sing-box-LICENSE
+    - glob: ./dist/singbox/sing-box-NOTICE.md
   prerelease: auto
   footer: |
     ## Install

@@ -25,6 +25,12 @@ SERVICE="forgepanel"
 BIN_PATH="/usr/local/bin/forgepanel"
 CTL_PATH="/usr/local/bin/forgectl"
 NODE_PATH="/usr/local/bin/forgenode"
+# The sing-box ForgePanel builds. It lives beside the panel rather than on PATH
+# as plain "sing-box", so it can never shadow or be confused with an operator's
+# own sing-box installation. binmgr looks here, verifies it against a pinned
+# checksum, and falls back to the upstream build when it is absent.
+SINGBOX_DIR="/usr/local/lib/forgepanel"
+SINGBOX_PATH="${SINGBOX_DIR}/sing-box-forgepanel"
 UNIT_PATH="/etc/systemd/system/forgepanel.service"
 ENV_DIR="/etc/forgepanel"
 ENV_FILE="${ENV_DIR}/forgepanel.env"
@@ -958,6 +964,32 @@ step_install() {
     info "Downloading ${asset} (${VERSION})..."
     download_to "${base}/${asset}" "${tmp}/${asset}" || die "Download failed: ${base}/${asset}"
   done
+
+  # The metered sing-box build. Its absence is NOT fatal: the panel runs on the
+  # upstream build, the sing-box protocols are simply not metered, and the
+  # panel's "Traffic metering" health card says so. Failing the whole install
+  # over it would be a worse trade for an operator who does not sell metered
+  # plans.
+  SINGBOX_ASSET=""
+  if download_to "${base}/singbox-checksums.txt" "${tmp}/singbox-checksums.txt"; then
+    SINGBOX_ASSET="$(awk -v a="linux-${ARCH}" '$2 ~ a {print $2}' "${tmp}/singbox-checksums.txt" | head -1)"
+  fi
+  if [[ -n "$SINGBOX_ASSET" ]]; then
+    info "Downloading ${SINGBOX_ASSET} (metered sing-box)..."
+    if download_to "${base}/${SINGBOX_ASSET}" "${tmp}/${SINGBOX_ASSET}"; then
+      if verify_release_asset "${tmp}/${SINGBOX_ASSET}" "$SINGBOX_ASSET" "${tmp}/singbox-checksums.txt"; then
+        ok "Metered sing-box verified."
+      else
+        warn "sing-box checksum mismatch; continuing WITHOUT it (those protocols will be unmetered)."
+        SINGBOX_ASSET=""
+      fi
+    else
+      warn "Could not download the metered sing-box; continuing without it."
+      SINGBOX_ASSET=""
+    fi
+  else
+    warn "This release ships no metered sing-box for linux-${ARCH}; hysteria2/tuic/anytls/shadowtls/wireguard will be unmetered."
+  fi
   download_to "${base}/checksums.txt" "${tmp}/checksums.txt" || die "Release checksums are unavailable; aborting before changing this host."
   for asset in "forgepanel-linux-${ARCH}" "forgectl-linux-${ARCH}" "forgenode-linux-${ARCH}"; do
     verify_release_asset "${tmp}/${asset}" "$asset" "${tmp}/checksums.txt" || die "Checksum verification failed for ${asset}."
@@ -982,10 +1014,11 @@ step_install() {
   backup_dir="${DATA_DIR}/install-backups/$(date -u '+%Y%m%dT%H%M%SZ')"
   mkdir -p "$backup_dir"
   chmod 0700 "$backup_dir"
-  local bin_backup ctl_backup node_backup unit_backup env_backup
+  local bin_backup ctl_backup node_backup sb_backup unit_backup env_backup
   bin_backup=$(backup_existing "$BIN_PATH" "${backup_dir}/forgepanel")
   ctl_backup=$(backup_existing "$CTL_PATH" "${backup_dir}/forgectl")
   node_backup=$(backup_existing "$NODE_PATH" "${backup_dir}/forgenode")
+  sb_backup=$(backup_existing "$SINGBOX_PATH" "${backup_dir}/sing-box-forgepanel")
   unit_backup=$(backup_existing "$UNIT_PATH" "${backup_dir}/forgepanel.service")
   env_backup=$(backup_existing "$ENV_FILE" "${backup_dir}/forgepanel.env")
   if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then was_active=1; fi
@@ -996,6 +1029,9 @@ step_install() {
     restore_or_remove "$BIN_PATH" "$bin_backup"
     restore_or_remove "$CTL_PATH" "$ctl_backup"
     restore_or_remove "$NODE_PATH" "$node_backup"
+    # Ours too: a rolled-back install that leaves a metered core behind would
+    # pair the previous panel with a sing-box it never verified.
+    restore_or_remove "$SINGBOX_PATH" "$sb_backup"
     restore_or_remove "$UNIT_PATH" "$unit_backup"
     restore_or_remove "$ENV_FILE" "$env_backup"
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -1011,6 +1047,17 @@ step_install() {
   install_atomic "${tmp}/forgepanel-linux-${ARCH}" "$BIN_PATH" || rollback_install
   install_atomic "${tmp}/forgectl-linux-${ARCH}" "$CTL_PATH" || rollback_install
   install_atomic "${tmp}/forgenode-linux-${ARCH}" "$NODE_PATH" || rollback_install
+  if [[ -n "${SINGBOX_ASSET:-}" ]]; then
+    install -d -m 0755 "$SINGBOX_DIR"
+    install_atomic "${tmp}/${SINGBOX_ASSET}" "$SINGBOX_PATH" || rollback_install
+    # sing-box is GPL-3.0. Conveying the binary requires keeping its notices
+    # intact, so they are installed beside it, not merely referenced.
+    for note in sing-box-LICENSE sing-box-NOTICE.md; do
+      if download_to "${base}/${note}" "${tmp}/${note}"; then
+        install -m 0644 "${tmp}/${note}" "${SINGBOX_DIR}/${note}" || true
+      fi
+    done
+  fi
   write_unit || rollback_install
   systemctl daemon-reload || rollback_install
 
@@ -1058,7 +1105,8 @@ step_install() {
   local resources=(
     --resource "binary:${BIN_PATH}:$(created_flag "$bin_backup")"
     --resource "cli:${CTL_PATH}:$(created_flag "$ctl_backup")"
-    --resource "node:${NODE_PATH}:$(created_flag "$node_backup")"
+    --resource "node:${NODE_PATH}:$(created_flag "$node_backup")" \
+    --resource "singbox:${SINGBOX_PATH}:$(created_flag "$sb_backup")"
     --resource "unit:${UNIT_PATH}:$(created_flag "$unit_backup")"
     --resource "env:${ENV_FILE}:$(created_flag "$env_backup")"
     --resource "data_dir:${DATA_DIR}:$(created_flag "$data_marker")"
@@ -1066,6 +1114,7 @@ step_install() {
   [[ -n "$bin_backup" ]] && resources+=(--backup "${BIN_PATH}=${bin_backup}")
   [[ -n "$ctl_backup" ]] && resources+=(--backup "${CTL_PATH}=${ctl_backup}")
   [[ -n "$node_backup" ]] && resources+=(--backup "${NODE_PATH}=${node_backup}")
+  [[ -n "$sb_backup" ]] && resources+=(--backup "${SINGBOX_PATH}=${sb_backup}")
   [[ -n "$unit_backup" ]] && resources+=(--backup "${UNIT_PATH}=${unit_backup}")
   [[ -n "$env_backup" ]] && resources+=(--backup "${ENV_FILE}=${env_backup}")
   "$CTL_PATH" lifecycle record-install --method curl --version "$VERSION" --data "$DATA_DIR" --manifest "$MANIFEST_PATH" "${resources[@]}" || rollback_install
