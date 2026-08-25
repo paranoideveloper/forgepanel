@@ -655,3 +655,37 @@ func TestSubscriptionNameTemplate(t *testing.T) {
 		t.Fatalf("templated remark = %q, want %q", nodes[0].Remark, want)
 	}
 }
+
+// The header used to hardcode "upload=0" and report the whole total under
+// download, because the engine's separate uplink/downlink counters were summed
+// before anything could see them. Clients display these two numbers verbatim.
+func TestSubscriptionUserinfoReportsBothHalves(t *testing.T) {
+	s, _ := adminAPI(t)
+	u := &store.User{Username: "hdr", SubToken: "hdrtok", Status: store.StatusActive,
+		UsedTraffic: 1000, UploadTraffic: 300, DownloadTraffic: 700, DataLimit: 5000}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	got := s.subscriptionUserinfo("hdrtok")
+	if !strings.Contains(got, "upload=300") || !strings.Contains(got, "download=700") {
+		t.Fatalf("userinfo = %q, want upload=300 and download=700", got)
+	}
+}
+
+func TestSubscriptionUserinfoAlwaysSumsToTheBilledTotal(t *testing.T) {
+	s, _ := adminAPI(t)
+	// A remote node billed 1000 with no split available, so only part of the
+	// usage is attributed.
+	u := &store.User{Username: "part", SubToken: "parttok", Status: store.StatusActive,
+		UsedTraffic: 1000, UploadTraffic: 200, DownloadTraffic: 100, DataLimit: 0}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	got := s.subscriptionUserinfo("parttok")
+	// upload + download MUST equal the billed total, because that is what every
+	// client shows as "used". Reporting only the attributed halves (200+100)
+	// would show the user less usage than they have actually been charged for.
+	if !strings.Contains(got, "upload=200") || !strings.Contains(got, "download=800") {
+		t.Fatalf("userinfo = %q, want upload=200 and download=800 (the unattributed remainder)", got)
+	}
+}

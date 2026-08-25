@@ -21,9 +21,9 @@ func TestQuotaEnforcement(t *testing.T) {
 	s := New(Config{
 		DB:         db,
 		ReloadHook: func() { reloaded = true },
-		PollTraffic: func(reset bool) (map[string]int64, error) {
+		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
 			// Report traffic that exceeds the 1000-byte limit.
-			return map[string]int64{UserEmail(u.ID): 1500}, nil
+			return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: 1500}}, nil
 		},
 	})
 	s.pollAndAccount()
@@ -182,8 +182,8 @@ func TestLastSeenStampedOnTraffic(t *testing.T) {
 
 	s := New(Config{
 		DB: db,
-		PollTraffic: func(reset bool) (map[string]int64, error) {
-			return map[string]int64{UserEmail(active.ID): 4096}, nil // only 'active' moved bytes
+		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
+			return map[string]store.TrafficSplit{UserEmail(active.ID): store.TrafficSplit{Down: 4096}}, nil // only 'active' moved bytes
 		},
 	})
 	s.pollAndAccount()
@@ -218,8 +218,8 @@ func TestOnHoldClockStartsOnFirstTraffic(t *testing.T) {
 	}
 
 	start := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
-		return map[string]int64{UserEmail(u.ID): 1024}, nil
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+		return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: 1024}}, nil
 	}})
 	s.now = func() time.Time { return start }
 
@@ -254,8 +254,8 @@ func TestOnHoldClockIsNotRestartedByLaterTraffic(t *testing.T) {
 
 	start := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	now := start
-	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
-		return map[string]int64{UserEmail(u.ID): 512}, nil
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+		return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: 512}}, nil
 	}})
 	s.now = func() time.Time { return now }
 
@@ -276,8 +276,8 @@ func TestActiveUserGetsNoFirstConnectStamp(t *testing.T) {
 	u := &store.User{Username: "act", Status: store.StatusActive, SubToken: "at1"}
 	_ = db.CreateUser(u)
 
-	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
-		return map[string]int64{UserEmail(u.ID): 2048}, nil
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+		return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: 2048}}, nil
 	}})
 	s.pollAndAccount()
 
@@ -303,13 +303,13 @@ func TestTrafficIsNotLostWhenACycleIsInterrupted(t *testing.T) {
 	// The engine's counter keeps climbing; it is never reset by the panel.
 	cumulative := int64(0)
 	reads := 0
-	s := New(Config{DB: db, PollTraffic: func(reset bool) (map[string]int64, error) {
+	s := New(Config{DB: db, PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
 		if reset {
 			t.Fatal("the poller must never ask the engine to reset its counters: " +
 				"that makes the read the only copy of the data")
 		}
 		reads++
-		return map[string]int64{UserEmail(u.ID): cumulative}, nil
+		return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: cumulative}}, nil
 	}})
 
 	cumulative = 1000
@@ -345,8 +345,8 @@ func TestEngineRestartCountsFromZeroInsteadOfLosingUsage(t *testing.T) {
 	_ = db.CreateUser(u)
 
 	cumulative := int64(5000)
-	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
-		return map[string]int64{UserEmail(u.ID): cumulative}, nil
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+		return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: cumulative}}, nil
 	}})
 	s.pollAndAccount()
 
@@ -373,8 +373,8 @@ func TestEngineRestartCountsFromZeroInsteadOfLosingUsage(t *testing.T) {
 // them as a single delta.
 func TestUnknownCounterIsStillSnapshotted(t *testing.T) {
 	db, _ := store.Open(":memory:")
-	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
-		return map[string]int64{"u99999": 4242}, nil
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+		return map[string]store.TrafficSplit{"u99999": store.TrafficSplit{Down: 4242}}, nil
 	}})
 	s.pollAndAccount()
 
@@ -396,9 +396,11 @@ func TestQuotaStillTripsAndOnlyReloadsOnTheTransition(t *testing.T) {
 	reloads := 0
 	cumulative := int64(1500)
 	s := New(Config{
-		DB:          db,
-		ReloadHook:  func() { reloads++ },
-		PollTraffic: func(bool) (map[string]int64, error) { return map[string]int64{UserEmail(u.ID): cumulative}, nil },
+		DB:         db,
+		ReloadHook: func() { reloads++ },
+		PollTraffic: func(bool) (map[string]store.TrafficSplit, error) {
+			return map[string]store.TrafficSplit{UserEmail(u.ID): store.TrafficSplit{Down: cumulative}}, nil
+		},
 	})
 
 	s.pollAndAccount()

@@ -27,7 +27,7 @@ func TestBillingAlsoWritesHistory(t *testing.T) {
 	s, u := rollupStore(t)
 	at := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
 
-	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 5000, 5000, at, nil); err != nil {
+	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 5000, 5000, TrafficSplit{}, at, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.UserByID(u.ID)
@@ -55,7 +55,7 @@ func TestHourlyAndDailyAreBothRecorded(t *testing.T) {
 	day := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
 	for i, h := range []int{1, 5, 9} {
 		at := day.Add(time.Duration(h) * time.Hour)
-		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 100, int64(100*(i+1)), at, nil); err != nil {
+		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 100, int64(100*(i+1)), TrafficSplit{}, at, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestSameBucketAccumulates(t *testing.T) {
 	s, u := rollupStore(t)
 	at := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	for i := 1; i <= 4; i++ {
-		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 250, int64(250*i), at.Add(time.Duration(i)*time.Minute), nil); err != nil {
+		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 250, int64(250*i), TrafficSplit{}, at.Add(time.Duration(i)*time.Minute), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestSameBucketAccumulates(t *testing.T) {
 func TestNodeTrafficIsAttributedToTheNode(t *testing.T) {
 	s, u := rollupStore(t)
 	at := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
-	if _, _, err := s.ApplyTrafficDeltaAt(NodeScope(7), "u1", u.ID, 800, 800, at, nil); err != nil {
+	if _, _, err := s.ApplyTrafficDeltaAt(NodeScope(7), "u1", u.ID, 800, 800, TrafficSplit{}, at, nil); err != nil {
 		t.Fatal(err)
 	}
 	pts, _ := s.TrafficSeries(SeriesQuery{Period: PeriodHour, Scope: ScopeNode, Key: "7"})
@@ -112,7 +112,7 @@ func TestNodeTrafficIsAttributedToTheNode(t *testing.T) {
 func TestLocalTrafficIsNotAttributedToAnyNode(t *testing.T) {
 	s, u := rollupStore(t)
 	at := time.Now()
-	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 400, 400, at, nil); err != nil {
+	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 400, 400, TrafficSplit{}, at, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"0", "1", "local"} {
@@ -143,7 +143,7 @@ func TestSeriesIsOldestFirst(t *testing.T) {
 	base := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 4; i++ {
 		_, _, _ = s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 10, int64(10*(i+1)),
-			base.Add(time.Duration(i)*time.Hour), nil)
+			TrafficSplit{}, base.Add(time.Duration(i)*time.Hour), nil)
 	}
 	pts, _ := s.TrafficSeries(SeriesQuery{Period: PeriodHour, Scope: ScopeUser, Key: UserRollupKey(u.ID)})
 	for i := 1; i < len(pts); i++ {
@@ -176,7 +176,7 @@ func TestTopConsumersRanksByUsage(t *testing.T) {
 		if err := s.CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "k", u.ID, bytes, bytes, at, nil); err != nil {
+		if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "k", u.ID, bytes, bytes, TrafficSplit{}, at, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -197,7 +197,7 @@ func TestTopConsumersRanksByUsage(t *testing.T) {
 func TestPruneUsesSeparateClocksPerResolution(t *testing.T) {
 	s, u := rollupStore(t)
 	old := time.Now().Add(-60 * 24 * time.Hour)
-	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 10, 10, old, nil); err != nil {
+	if _, _, err := s.ApplyTrafficDeltaAt(ScopeLocalEngine, "u1", u.ID, 10, 10, TrafficSplit{}, old, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Prune hourly older than 30 days; keep daily for a year.

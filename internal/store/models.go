@@ -138,6 +138,16 @@ type User struct {
 	// an operator set a limit, the panel accepted it, and it did nothing. That
 	// is worse than not offering the field, because the operator believes the
 	// account is capped.
+	// UploadTraffic and DownloadTraffic are the ATTRIBUTED halves of UsedTraffic.
+	//
+	// Their sum can be LESS than UsedTraffic, and that is not a bug: a remote
+	// node reports one combined counter per user with no split available, so its
+	// bytes are billed (UsedTraffic is authoritative) while remaining
+	// unattributed here. Deriving one half by subtraction instead would silently
+	// present unknown traffic as though it had been measured.
+	UploadTraffic   int64 `json:"upload_traffic"`
+	DownloadTraffic int64 `json:"download_traffic"`
+
 	IPLimit int `json:"ip_limit"`
 	// IPLimitedUntil is set when a user is over their IP limit, and excludes
 	// them from every generated core config until it passes.

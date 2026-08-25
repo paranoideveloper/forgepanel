@@ -196,7 +196,7 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		BackupConfig: func() (string, string, time.Duration, int) {
 			return cfg.DataDir, cfg.MasterKey, 24 * time.Hour, 7
 		},
-		PollTraffic: func(reset bool) (map[string]int64, error) {
+		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
 			if s.engine == nil {
 				return nil, nil
 			}
@@ -204,9 +204,14 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 			if err != nil {
 				return nil, err
 			}
-			out := make(map[string]int64, len(stats))
+			// The engine reports uplink and downlink SEPARATELY and this used to
+			// sum them here, before anything else could see the two halves. The
+			// panel then had one number, so every subscription reported
+			// "upload=0" and put the whole total under download — a figure every
+			// client displays verbatim.
+			out := make(map[string]store.TrafficSplit, len(stats))
 			for email, ut := range stats {
-				out[email] = ut.Uplink + ut.Downlink
+				out[email] = store.TrafficSplit{Up: ut.Uplink, Down: ut.Downlink}
 			}
 			return out, nil
 		},

@@ -31,9 +31,9 @@ func TestLifetimeTrafficAccumulationAndReset(t *testing.T) {
 
 	sched := job.New(job.Config{
 		DB: s,
-		PollTraffic: func(reset bool) (map[string]int64, error) {
-			return map[string]int64{
-				email: 2 * 1024 * 1024 * 1024, // 2 GB
+		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
+			return map[string]store.TrafficSplit{
+				email: {Down: 2 * 1024 * 1024 * 1024}, // 2 GB
 			}, nil
 		},
 	})

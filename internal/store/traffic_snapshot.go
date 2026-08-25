@@ -54,6 +54,19 @@ func (TrafficSnapshot) TableName() string { return "traffic_snapshots" }
 // ScopeLocalEngine is the panel's own engine counters.
 const ScopeLocalEngine = "local"
 
+// UpScope and DownScope are the per-half baselines for a scope.
+//
+// The uplink and downlink counters need their OWN baselines: a delta is the
+// difference from the last observation, and the combined baseline cannot produce
+// one for either half. Apportioning the total delta by the cumulative ratio
+// instead would put a guessed number in a column an operator reads as measured.
+//
+// Separate rows rather than extra columns because the total is what quotas are
+// enforced on and it must keep its exact current shape — this adds to the
+// accounting, it does not restructure it.
+func UpScope(scope string) string   { return scope + ":up" }
+func DownScope(scope string) string { return scope + ":down" }
+
 // TrafficSnapshots returns every stored counter value for a scope, keyed by
 // counter key.
 func (s *Store) TrafficSnapshots(scope string) (map[string]int64, error) {
@@ -84,13 +97,27 @@ func (s *Store) TrafficSnapshots(scope string) (map[string]int64, error) {
 // It returns the user's usage after the update, and whether the update pushed
 // them over their data limit, so the caller can enforce without a second read.
 func (s *Store) ApplyTrafficDelta(scope, key string, userID uint, delta, cumulative int64, stamp func(*User)) (used int64, limited bool, err error) {
-	return s.ApplyTrafficDeltaAt(scope, key, userID, delta, cumulative, time.Now(), stamp)
+	return s.ApplyTrafficDeltaAt(scope, key, userID, delta, cumulative, TrafficSplit{}, time.Now(), stamp)
 }
+
+// TrafficSplit is one observation's uplink/downlink breakdown.
+//
+// A zero split means "this source did not report one" — NOT "no traffic". Remote
+// nodes send a single combined counter, so their bytes are billed without a
+// split, and inventing one would make guessed numbers indistinguishable from
+// measured ones.
+type TrafficSplit struct {
+	Up   int64
+	Down int64
+}
+
+// Total is the combined byte count, which is the quantity quotas are enforced on.
+func (t TrafficSplit) Total() int64 { return t.Up + t.Down }
 
 // ApplyTrafficDeltaAt is ApplyTrafficDelta with an explicit observation time,
 // which is what places the usage in the right history bucket. Tests drive it;
 // production passes time.Now().
-func (s *Store) ApplyTrafficDeltaAt(scope, key string, userID uint, delta, cumulative int64, at time.Time, stamp func(*User)) (used int64, limited bool, err error) {
+func (s *Store) ApplyTrafficDeltaAt(scope, key string, userID uint, delta, cumulative int64, split TrafficSplit, at time.Time, stamp func(*User)) (used int64, limited bool, err error) {
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var u User
 		if err := tx.First(&u, userID).Error; err != nil {
@@ -103,6 +130,22 @@ func (s *Store) ApplyTrafficDeltaAt(scope, key string, userID uint, delta, cumul
 				u.UsedTraffic = maxInt64
 			} else {
 				u.UsedTraffic += delta
+			}
+			// The attributed halves, saturating for the same reason. They are
+			// recorded only when the source actually reported them.
+			if split.Up > 0 {
+				if maxInt64-split.Up < u.UploadTraffic {
+					u.UploadTraffic = maxInt64
+				} else {
+					u.UploadTraffic += split.Up
+				}
+			}
+			if split.Down > 0 {
+				if maxInt64-split.Down < u.DownloadTraffic {
+					u.DownloadTraffic = maxInt64
+				} else {
+					u.DownloadTraffic += split.Down
+				}
 			}
 		}
 		if stamp != nil {

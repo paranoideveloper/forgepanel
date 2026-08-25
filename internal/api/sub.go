@@ -359,9 +359,21 @@ func (s *Server) handleSub(c *gin.Context) {
 }
 
 // subscriptionUserinfo builds the SIP008-style Subscription-Userinfo header from
-// the user's real DB record. ForgePanel accounts a single combined byte total,
-// so it is reported under download with upload=0; total is the data limit (0 =
-// unlimited, which clients show as no cap); expire is the unix expiry (0 = never).
+// the user's real DB record.
+//
+// upload and download here MUST sum to the usage quotas are enforced on, because
+// that is the number every client displays. So upload is the attributed uplink
+// and download is everything else — not the attributed downlink. The difference
+// matters: a remote node reports one combined counter with no split, and
+// presenting only the attributed halves would show a user less usage than they
+// have actually been billed for.
+//
+// It used to hardcode upload=0 and put the whole total under download, because
+// the engine's separate uplink/downlink counters were summed before anything
+// could see them.
+//
+// total is the data limit (0 = unlimited, which clients show as no cap); expire
+// is the unix expiry (0 = never).
 func (s *Server) subscriptionUserinfo(token string) string {
 	if s.db == nil {
 		return "upload=0; download=0; total=0; expire=0"
@@ -374,8 +386,14 @@ func (s *Server) subscriptionUserinfo(token string) string {
 	if u.ExpireAt != nil {
 		expire = u.ExpireAt.Unix()
 	}
-	return fmt.Sprintf("upload=0; download=%d; total=%d; expire=%d",
-		u.UsedTraffic, u.DataLimit, expire)
+	up := u.UploadTraffic
+	if up > u.UsedTraffic {
+		// Cannot happen from the accounting path, but a hand-edited row must not
+		// produce a negative download that clients render as nonsense.
+		up = u.UsedTraffic
+	}
+	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d",
+		up, u.UsedTraffic-up, u.DataLimit, expire)
 }
 
 // xraySubscription renders a complete, runnable Xray CLIENT config: a local

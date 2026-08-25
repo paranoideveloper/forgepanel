@@ -18,7 +18,7 @@ func TestTrafficSeriesIsServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Now().Add(-2 * time.Hour)
-	if _, _, err := s.db.ApplyTrafficDeltaAt(store.ScopeLocalEngine, "k", u.ID, 4096, 4096, at, nil); err != nil {
+	if _, _, err := s.db.ApplyTrafficDeltaAt(store.ScopeLocalEngine, "k", u.ID, 4096, 4096, store.TrafficSplit{}, at, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,7 +50,7 @@ func TestTopConsumersIsServed(t *testing.T) {
 		if err := s.db.CreateUser(u); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.db.ApplyTrafficDeltaAt(store.ScopeLocalEngine, "k", u.ID, bytes, bytes, at, nil); err != nil {
+		if _, _, err := s.db.ApplyTrafficDeltaAt(store.ScopeLocalEngine, "k", u.ID, bytes, bytes, store.TrafficSplit{}, at, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

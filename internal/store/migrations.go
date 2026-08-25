@@ -37,6 +37,7 @@ const (
 	migVIPLimit       uint64 = 7
 	migVRouting       uint64 = 8
 	migVNotServing    uint64 = 9
+	migVTrafficSplit  uint64 = 10
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -149,6 +150,21 @@ func migrations() []migrate.Migration {
 			// silently never serves.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Inbound{}})
+				return err
+			},
+		},
+		{
+			Version: migVTrafficSplit,
+			Name:    "user_upload_download_split",
+			Rollback: "safe to drop. The columns hold the ATTRIBUTED halves of usage; UsedTraffic " +
+				"remains authoritative and is what quotas are enforced on, so losing them costs " +
+				"the breakdown and never a byte of billing.",
+			// Adds users.upload_traffic / download_traffic. Without the migration
+			// the columns do not exist, every accounting transaction fails, and
+			// traffic stops being billed at all — which is why this is a
+			// migration and not an opportunistic write.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&User{}})
 				return err
 			},
 		},

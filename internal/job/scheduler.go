@@ -46,8 +46,8 @@ type Scheduler struct {
 	// Scheduled backups. A backup that happens only when someone remembers is
 	// not a backup policy.
 	backupEvery func() (dataDir, master string, every time.Duration, keep int)
-	reloadHook  func()                                     // called after a mutation to reapply engine configs
-	pollTraffic func(reset bool) (map[string]int64, error) // email -> up+down delta bytes
+	reloadHook  func()                                                  // called after a mutation to reapply engine configs
+	pollTraffic func(reset bool) (map[string]store.TrafficSplit, error) // email -> uplink/downlink
 	// activeAddresses reports how many distinct source addresses a user is
 	// currently connecting from. Nil disables IP-limit enforcement entirely,
 	// which is the honest behaviour when there is no presence source: acting on
@@ -88,7 +88,7 @@ type Config struct {
 	// user keeps being served, with nothing to show for it.
 	// TestTrafficIsNotLostWhenACycleIsInterrupted fails if this is ever called
 	// with reset=true.
-	PollTraffic func(reset bool) (map[string]int64, error)
+	PollTraffic func(reset bool) (map[string]store.TrafficSplit, error)
 	// ActiveAddresses reports a user's current distinct source-address count.
 	// Nil disables IP-limit enforcement rather than enforcing against zero.
 	ActiveAddresses func(email string) int
@@ -294,6 +294,10 @@ func (s *Scheduler) pollAndAccount() {
 	if err != nil || len(totals) == 0 {
 		return
 	}
+	prevUp, upErr := s.db.TrafficSnapshots(store.UpScope(store.ScopeLocalEngine))
+	prevDown, downErr := s.db.TrafficSnapshots(store.DownScope(store.ScopeLocalEngine))
+	splitUsable := upErr == nil && downErr == nil
+
 	prev, err := s.db.TrafficSnapshots(store.ScopeLocalEngine)
 	if err != nil {
 		// Without the baseline every cumulative total would read as a fresh
@@ -305,7 +309,11 @@ func (s *Scheduler) pollAndAccount() {
 
 	changed := false
 	now := s.now()
-	for email, total := range totals {
+	for email, obs := range totals {
+		// The billed quantity is unchanged: the combined counter against the
+		// combined baseline, exactly as before. The split is computed alongside
+		// and never feeds the total, so an error in it cannot mis-bill anyone.
+		total := obs.Total()
 		delta := store.TrafficDelta(prev[email], total)
 		u := s.userForEmail(email)
 		if u == nil {
@@ -327,7 +335,19 @@ func (s *Scheduler) pollAndAccount() {
 		// true on every subsequent cycle for an already-limited user, which
 		// would restart the engines forever.
 		tripped := false
-		_, _, err := s.db.ApplyTrafficDelta(store.ScopeLocalEngine, email, u.ID, delta, total,
+		split := store.TrafficSplit{}
+		if splitUsable {
+			split.Up = store.TrafficDelta(prevUp[email], obs.Up)
+			split.Down = store.TrafficDelta(prevDown[email], obs.Down)
+			// The half baselines advance whatever happens below. They are
+			// bookkeeping for a breakdown, not for billing, so a failure to
+			// advance them must never hold up or repeat a charge — and leaving
+			// them behind would count the same bytes into the breakdown again on
+			// the next cycle.
+			_ = s.db.SetTrafficSnapshot(store.UpScope(store.ScopeLocalEngine), email, obs.Up)
+			_ = s.db.SetTrafficSnapshot(store.DownScope(store.ScopeLocalEngine), email, obs.Down)
+		}
+		_, _, err := s.db.ApplyTrafficDeltaAt(store.ScopeLocalEngine, email, u.ID, delta, total, split, now,
 			func(user *store.User) {
 				// A non-zero delta means the user moved traffic: they are live.
 				seen := now
