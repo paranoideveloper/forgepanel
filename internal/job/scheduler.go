@@ -56,6 +56,7 @@ type Scheduler struct {
 	activeAddresses func(email string) int
 	auditHook       func(action, target string, seen, limit int)
 	ipLimits        *ipLimitState
+	reminders       *reminderState
 	maintenance     func()
 	notify          func(event, subject, message string)
 
@@ -131,6 +132,7 @@ func New(cfg Config) *Scheduler {
 		activeAddresses:       cfg.ActiveAddresses,
 		auditHook:             cfg.AuditIPLimit,
 		ipLimits:              newIPLimitState(),
+		reminders:             newReminderState(),
 		maintenance:           cfg.Maintenance,
 		notify:                cfg.Notify,
 		now:                   time.Now,
@@ -457,9 +459,18 @@ func (s *Scheduler) sweepAt(now time.Time) {
 		if ps, ok := resetPeriodStart(now, u); ok {
 			if applied, _ := s.db.ResetUserUsageCAS(u.ID, ps, now); applied {
 				changed = true
+				// A new period starts with a clean slate, or the latch that
+				// stops duplicate warnings becomes the thing that stops the
+				// user ever being warned again.
+				s.clearReminders(u.ID)
 			}
 		}
 	}
+	// Warn people BEFORE they are cut off. Runs on the same pass because it reads
+	// the same rows, and an extra query per sweep to say the same thing would be
+	// waste.
+	s.checkReminders(now, users)
+
 	// IP-limit enforcement runs on the same sweep so a hold and a release cost
 	// ONE engine reload between them, not one per user. It is deliberately after
 	// the lifecycle steps: a user who just expired should not also be recorded as
