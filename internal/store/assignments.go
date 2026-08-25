@@ -281,21 +281,6 @@ func (s *Store) DefaultGroup() *Group {
 	return &g
 }
 
-// DeleteUserCascade removes a user and their direct assignments together, so no
-// orphan assignment rows survive to be re-applied to a recycled ID.
-func (s *Store) DeleteUserCascade(userID uint) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var u User
-		if err := tx.First(&u, userID).Error; err == nil && u.Username != "" {
-			_ = tx.Where("username = ?", u.Username).Delete(&NodeClientTraffic{}).Error
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&UserInbound{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&User{}, userID).Error
-	})
-}
-
 // InboundsForUser returns the effective inbound IDs a user may connect through.
 // This is what subscriptions render.
 func (s *Store) InboundsForUser(userID uint) ([]uint, error) {
