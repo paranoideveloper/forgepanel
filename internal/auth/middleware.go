@@ -31,6 +31,14 @@ func (s *Signer) SessionValid(claims *Claims) bool {
 // and stashes the claims in the gin context.
 func (s *Signer) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Already authenticated by another mechanism (an API token). Verifying
+		// its value as a JWT would fail and reject a request that has been
+		// properly authenticated — so the chain defers to whoever got here
+		// first rather than each layer insisting on its own credential type.
+		if _, ok := ClaimsFrom(c); ok {
+			c.Next()
+			return
+		}
 		tok := bearer(c)
 		if tok == "" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "authentication required"})
@@ -96,6 +104,17 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 // door, and this door was one nobody was using. Deleting it removes the
 // vulnerability class instead of mitigating it, and there is a test that the
 // cookie is no longer accepted.
+// SetClaims installs already-verified claims on the request.
+//
+// Used by the API-token path, which authenticates by a completely different
+// mechanism and then reuses every downstream authorisation check unchanged. That
+// reuse is the point: a second authorisation path is a second thing to get
+// wrong, and the one that disagrees with the router grants too much.
+func SetClaims(c *gin.Context, claims *Claims) { c.Set(ctxKey, claims) }
+
+// Bearer returns the raw bearer value, whatever kind of credential it is.
+func Bearer(c *gin.Context) string { return bearer(c) }
+
 func bearer(c *gin.Context) string {
 	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")

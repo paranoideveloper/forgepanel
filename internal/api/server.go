@@ -485,7 +485,10 @@ func (s *Server) routes() {
 			// s.authz() enforces the RBAC the panel already modelled but never
 			// mounted: authentication proves who you are, this proves you may
 			// perform the action. See internal/api/authz.go.
-			admin := api.Group("/admin", s.signer.Middleware(), s.authz())
+			// apiTokenAuth runs FIRST and only claims requests whose bearer value
+			// is shaped like one of our tokens; everything else falls through to
+			// the JWT middleware untouched.
+			admin := api.Group("/admin", s.apiTokenAuth(), s.signer.Middleware(), s.authz())
 			admin.GET("/me", s.handleMe)
 			admin.GET("/inbounds", s.handleListInbounds)
 			// portCollisionGuard runs BEFORE the handler writes the row. Two
@@ -584,6 +587,14 @@ func (s *Server) routes() {
 			admin.GET("/backup/status", s.handleBackupStatus)
 
 			// Usage history, from the rollups written alongside billing.
+			// API tokens. tenantMgmt rather than owner-only: a reseller
+			// automating their own customer management is the ordinary case, and
+			// a token can never exceed the authority of the account that minted
+			// it (see clampRole).
+			admin.GET("/tokens", s.handleListAPITokens)
+			admin.POST("/tokens", s.handleCreateAPIToken)
+			admin.DELETE("/tokens/:id", s.handleRevokeAPIToken)
+
 			admin.GET("/online", s.handleOnlineUsers)
 
 			// Routing: named outbounds and the ordered rules that select between

@@ -38,6 +38,7 @@ const (
 	migVRouting       uint64 = 8
 	migVNotServing    uint64 = 9
 	migVTrafficSplit  uint64 = 10
+	migVAPITokens     uint64 = 11
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -165,6 +166,18 @@ func migrations() []migrate.Migration {
 			// migration and not an opportunistic write.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&User{}})
+				return err
+			},
+		},
+		{
+			Version: migVAPITokens,
+			Name:    "scoped_api_tokens",
+			Rollback: "safe to drop, but it REVOKES EVERY ISSUED TOKEN: the secrets are not stored " +
+				"anywhere else and cannot be recovered, so every integration using one has to be " +
+				"issued a new token by hand.",
+			// Machine credentials narrower than a full-privilege admin JWT.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&APIToken{}})
 				return err
 			},
 		},

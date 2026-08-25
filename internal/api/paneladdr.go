@@ -216,6 +216,10 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		return
 	}
 	if s.db != nil && req.Domain != nil {
+		// Best-effort MIRROR. settings.Apply already persisted the authoritative
+		// value to panel.json and reported any failure; this copy only spares
+		// other readers a file parse, so losing it costs a lookup, not the
+		// setting.
 		_ = s.db.SetSetting("public_address", *req.Domain)
 	}
 	s.writePublicURLFile()
@@ -291,6 +295,10 @@ func (s *Server) recordACMEOutcome(domain string, issueErr error) {
 	} else {
 		p.ACME.RenewalError = ""
 	}
+	// Best-effort: this writes renewal BOOKKEEPING, not the certificate. A
+	// failure here loses the record of when renewal last ran, and the
+	// certificate itself is already issued and on disk. Failing the renewal over
+	// an unwritable status field would be the tail wagging the dog.
 	_ = s.cfg.SavePanel()
 }
 

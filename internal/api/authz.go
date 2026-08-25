@@ -150,6 +150,15 @@ var adminAuthzRules = []authzRule{
 	// cosmetic leak.
 	{methods: get, path: "/api/admin/online", exact: true, roles: tenantMgmt},
 
+	// --- API tokens -------------------------------------------------------
+	//
+	// A reseller automating their own customer management is the ordinary case,
+	// and a token can never exceed the authority of the account that minted it,
+	// so this does not widen anyone's reach. Listing is scoped in the handler:
+	// enumerating another tenant's credentials would reveal what integrations
+	// they run and when each was last used.
+	{path: "/api/admin/tokens", roles: tenantMgmt},
+
 	// --- routing ----------------------------------------------------------
 	//
 	// A routing rule can send any user's traffic anywhere, or stop it entirely,
