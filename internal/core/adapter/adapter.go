@@ -228,6 +228,14 @@ type Options struct {
 	// which the supervisor reads, so "who is connected from where" needs no log
 	// file and nothing on disk. It runs on the log-pump goroutine.
 	OnEngineLine func(string)
+	// HotApply, keyed by engine name, is offered the old and new configs before
+	// the supervisor falls back to restarting that core. Returning true means the
+	// change reached the RUNNING core and no restart is needed.
+	//
+	// Keyed by engine because only Xray can do this today: sing-box has no
+	// equivalent handler API in the builds the panel ships, and claiming
+	// otherwise would leave its users out of sync with its config.
+	HotApply map[string]func(oldCfg, newCfg []byte) (bool, error)
 }
 
 func (o Options) certs() (string, string) {

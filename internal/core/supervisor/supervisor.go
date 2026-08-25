@@ -45,6 +45,20 @@ type EngineSpec struct {
 	// either takes the engine's output, and therefore its crash diagnostics,
 	// with it.
 	OnLine func(string)
+
+	// HotApply, if set, is offered the old and new configs before Apply falls
+	// back to restarting the process. Returning true means the change was
+	// applied to the RUNNING core and no restart is needed.
+	//
+	// This exists because every user mutation — creating one customer, disabling
+	// one account — restarted every core and dropped every other user's
+	// connections with it. On a panel with real traffic that is an outage per
+	// edit.
+	//
+	// It is offered the raw configs rather than a diff so the decision of "is
+	// this change hot-appliable" belongs to the engine that knows, and so a
+	// change it does not understand can safely decline.
+	HotApply func(oldCfg, newCfg []byte) (bool, error)
 }
 
 // Process supervises one EngineSpec.
@@ -99,10 +113,49 @@ func (p *Process) Apply(newConfig []byte) error {
 		p.setState(StateInvalid, err.Error())
 		return err
 	}
+
+	// Read the live config BEFORE it is replaced: it is the only record of what
+	// the running process is actually serving, and the hot path needs both sides
+	// to work out what changed. A read failure is not fatal — it just means no
+	// hot apply, which is the behaviour that was there before.
+	old, oldErr := os.ReadFile(p.spec.ConfigPath)
+
+	// The config is written FIRST, so that whatever happens next the file on
+	// disk matches what the core should be serving. If a hot apply succeeds and
+	// the process later crashes, the supervisor restarts it from this file and
+	// the users are still there; if the order were reversed, a crash between the
+	// two would silently revert the change.
 	if err := os.Rename(tmp, p.spec.ConfigPath); err != nil {
 		return err
 	}
+
+	if p.spec.HotApply != nil && oldErr == nil && p.Status().State == StateRunning {
+		applied, err := p.hotApply(old, newConfig)
+		if err != nil {
+			// Fall through to a restart: a hot apply that half-worked leaves the
+			// core disagreeing with its own config, and a restart is the one
+			// action that always reconciles them. Recorded so an operator can
+			// see WHY the restart happened rather than wondering.
+			p.logs.add("[forgepanel] hot apply failed, restarting: " + err.Error())
+		} else if applied {
+			return nil
+		}
+	}
 	return p.restart()
+}
+
+// hotApply calls the engine's hook, containing any panic.
+//
+// A panic here would otherwise take down the goroutine applying a reload, and
+// the panel would report neither success nor failure for the change.
+func (p *Process) hotApply(old, next []byte) (applied bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			applied = false
+			err = fmt.Errorf("hot apply panicked: %v", r)
+		}
+	}()
+	return p.spec.HotApply(old, next)
 }
 
 // Start launches the process using the already-written config.

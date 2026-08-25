@@ -73,6 +73,12 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 		// generated Xray config sends its access log to stdout precisely so this
 		// works with no log file to rotate and no connection metadata on disk.
 		OnEngineLine: c.presence.ObserveLine(LocalNodeName),
+		// Only Xray. A user mutation used to restart BOTH cores and drop every
+		// connection on them; where the change is nothing but which users exist,
+		// Xray can take it on the running instance instead.
+		HotApply: map[string]func(old, next []byte) (bool, error){
+			model.EngineXray: c.xrayHotApply,
+		},
 	}, c.brook, c.awg)
 }
 

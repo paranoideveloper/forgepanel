@@ -211,13 +211,10 @@ func parseStatsQuery(out []byte) (map[string]*UserTraffic, int) {
 	return res, skipped
 }
 
-// RemoveUser hot-removes a user from a live inbound via the Xray HandlerService
-// gRPC (spec §6: "Never restart Xray to add a user"). Best-effort: if it fails
-// the caller falls back to a regenerate-and-reload.
-func (c *Controller) RemoveUser(inboundTag, email string) error {
-	bin := c.bins.Path(binmgr.EngineXray)
-	cmd := exec.Command(bin, "api", "rmu",
-		"--server=127.0.0.1:"+strconv.Itoa(c.xrayAPIPort),
-		"-tag", inboundTag, email)
-	return cmd.Run()
-}
+// RemoveUser was here: a hot-remove helper with ZERO callers, so the promise it
+// carried ("never restart Xray to add a user") was never kept by anything. It
+// also discarded the CLI's output and returned only the exit status, which for
+// `xray api` is not enough to tell success from a silent no-op.
+//
+// The working version is in hotuser.go, reached automatically from the reload
+// path rather than needing a caller to remember it.

@@ -133,6 +133,7 @@ func (a *supervised) spec() supervisor.EngineSpec {
 		TestArgs:   a.testArgs,
 		ConfigPath: a.configPath(),
 		OnLine:     a.opts.OnEngineLine,
+		HotApply:   a.opts.HotApply[a.name],
 	}
 }
 
