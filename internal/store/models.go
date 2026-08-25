@@ -278,7 +278,8 @@ func (e *EdgeDeployment) StatusURL() string {
 func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}, &TrafficRollup{},
-		&Outbound{}, &RoutingRule{}, &APIToken{}}
+		&Outbound{}, &RoutingRule{}, &APIToken{},
+		&Profile{}, &ProfileBinding{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

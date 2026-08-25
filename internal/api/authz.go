@@ -150,6 +150,12 @@ var adminAuthzRules = []authzRule{
 	// cosmetic leak.
 	{methods: get, path: "/api/admin/online", exact: true, roles: tenantMgmt},
 
+	// --- config profiles --------------------------------------------------
+	//
+	// A profile writes inbounds across the whole fleet, which is infrastructure
+	// rather than tenant management.
+	{path: "/api/admin/profiles", roles: ownerAdmin},
+
 	// --- API tokens -------------------------------------------------------
 	//
 	// A reseller automating their own customer management is the ordinary case,

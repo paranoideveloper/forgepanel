@@ -248,6 +248,20 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	// A row a profile binding owns is rewritten on the next sync, so a direct
+	// edit here would be silently reverted — the operator watches it succeed and
+	// finds out later. Refuse, and say where the change belongs.
+	if b, err := s.db.BindingByInbound(id); err == nil && b != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "this inbound is managed by a config profile; editing it here would be " +
+				"overwritten by the next profile sync",
+			"code":       "profile_managed",
+			"profile_id": b.ProfileID,
+			"remediation": "edit the profile to change every node at once, or the binding to change " +
+				"this node's port or public host",
+		})
+		return
+	}
 	// Excluding this inbound's own id, or widening a range on an existing
 	// inbound would report it as conflicting with itself.
 	if msg := s.portHopConflict(&n, id); msg != "" {

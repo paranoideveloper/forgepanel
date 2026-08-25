@@ -39,6 +39,7 @@ const (
 	migVNotServing    uint64 = 9
 	migVTrafficSplit  uint64 = 10
 	migVAPITokens     uint64 = 11
+	migVProfiles      uint64 = 12
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -178,6 +179,18 @@ func migrations() []migrate.Migration {
 			// Machine credentials narrower than a full-privilege admin JWT.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&APIToken{}})
+				return err
+			},
+		},
+		{
+			Version: migVProfiles,
+			Name:    "config_profiles",
+			Rollback: "safe to drop, but the inbound rows the bindings own are LEFT BEHIND: they " +
+				"keep serving under a definition the panel can no longer edit as a group. Delete " +
+				"the profiles through the API first if you intend to remove them.",
+			// One protocol definition deployed to many nodes.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Profile{}, &ProfileBinding{}})
 				return err
 			},
 		},

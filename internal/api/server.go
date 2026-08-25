@@ -604,6 +604,15 @@ func (s *Server) routes() {
 			admin.POST("/tokens", s.handleCreateAPIToken)
 			admin.DELETE("/tokens/:id", s.handleRevokeAPIToken)
 
+			// Config profiles: one protocol definition deployed to N nodes.
+			admin.GET("/profiles", s.handleListProfiles)
+			admin.POST("/profiles", s.handleSaveProfile)
+			admin.PUT("/profiles/:id", s.handleSaveProfile)
+			admin.DELETE("/profiles/:id", s.handleDeleteProfile)
+			admin.POST("/profiles/bindings", s.handleSaveBinding)
+			admin.PUT("/profiles/bindings/:id", s.handleSaveBinding)
+			admin.DELETE("/profiles/bindings/:id", s.handleDeleteBinding)
+
 			admin.GET("/online", s.handleOnlineUsers)
 
 			// Routing: named outbounds and the ordered rules that select between
