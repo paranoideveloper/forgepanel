@@ -514,14 +514,21 @@ type Node struct {
 	// deployments need: a client reaches a nearby entry, and the traffic exits
 	// somewhere else entirely.
 	//
-	// It holds a client URI for the next hop in any protocol the panel can
-	// parse, so a chain is configured with the same link an operator would paste
-	// into a client app. Empty means the inbound egresses directly, which is
-	// exactly what every existing inbound already does.
+	// It holds client URIs for the hops, in any protocol the panel can parse, so
+	// a chain is configured with the same links an operator would paste into a
+	// client app. Index 0 is dialled by this server and each later hop is
+	// reached THROUGH the one before it, so a three-entry chain is
+	// client -> entry -> transit -> exit -> internet. Empty means the inbound
+	// egresses directly, which is exactly what every existing inbound does.
 	//
-	// This is a SERVER-side secret: it carries the upstream hop's credentials,
-	// so it must never be exported into a subscription or a client link.
-	Egress string `json:"egress,omitempty"`
+	// A bare string is still accepted and still emitted for a one-hop chain, so
+	// stored inbounds and imported links from before chains existed are
+	// unaffected. See internal/protocol/model/egress.go.
+	//
+	// This is SERVER-side secret material: it carries every upstream hop's
+	// credentials, so it must never be exported into a subscription or a client
+	// link.
+	Egress EgressChain `json:"egress,omitempty"`
 
 	// Domain is the single source of truth an operator sets once; it CASCADES to
 	// the SNI, the transport Host / gRPC authority, the exported client address
@@ -655,7 +662,7 @@ func (n *Node) Validate() error {
 	// AmneziaWG inbound used to succeed and then do nothing: the operator saw a
 	// configured upstream hop while the traffic left the machine directly. See
 	// SupportsEgress for which engines have a routing table to attach it to.
-	if strings.TrimSpace(n.Egress) != "" && !SupportsEgress(n.Protocol) {
+	if !n.Egress.Empty() && !SupportsEgress(n.Protocol) {
 		return fmt.Errorf("%s: cannot relay through an upstream hop — %s has no per-inbound "+
 			"routing table, so the chain would be stored and then ignored while traffic exits directly",
 			n.Protocol, EngineFor(n.Protocol))

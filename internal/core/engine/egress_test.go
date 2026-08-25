@@ -16,7 +16,7 @@ func chainNode(remark string, port int, egress string) *model.Node {
 		Port:     port,
 		UUID:     "b831381d-6324-4d53-ad4f-8cda48b30811",
 		Remark:   remark,
-		Egress:   egress,
+		Egress:   chainOf(egress),
 	}
 	n.Normalize()
 	return n
@@ -193,13 +193,21 @@ func TestBrokenUpstreamSkipsTheInboundRatherThanExitingDirectly(t *testing.T) {
 // API, stored, rendered in the UI and then dropped on the floor by the builder:
 // the inbound exited directly with nothing logged. These tests pin the fix.
 
+// chainOf builds a chain from one URI, treating "" as no chain at all.
+func chainOf(uri string) model.EgressChain {
+	if strings.TrimSpace(uri) == "" {
+		return nil
+	}
+	return model.EgressChain{uri}
+}
+
 func sbChainNode(proto model.Protocol, remark string, port int, egress string) *model.Node {
 	n := &model.Node{
 		Protocol: proto,
 		Address:  "0.0.0.0",
 		Port:     port,
 		Remark:   remark,
-		Egress:   egress,
+		Egress:   chainOf(egress),
 		Password: "hunter2hunter2",
 		UUID:     "b831381d-6324-4d53-ad4f-8cda48b30811",
 		Security: model.Security{Type: "tls", ServerName: "example.com"},
@@ -313,7 +321,7 @@ func TestWireGuardEndpointRefusesAnEgressInsteadOfIgnoringIt(t *testing.T) {
 		Address:  "0.0.0.0",
 		Port:     20504,
 		Remark:   "wg",
-		Egress:   upstreamVLESS,
+		Egress:   model.EgressChain{upstreamVLESS},
 	}
 	n.Normalize()
 	b, err := BuildMulti([]InboundSpec{{Node: n}}, 10099, "", "")

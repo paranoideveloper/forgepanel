@@ -85,10 +85,11 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			if len(sp.Clients) > 0 {
 				statsUsed = true
 			}
-			if uri := strings.TrimSpace(n.Egress); uri != "" {
-				tag, ok := egressTag[uri]
+			if !n.Egress.Empty() {
+				key := n.Egress.Key()
+				tag, ok := egressTag[key]
 				if !ok {
-					out, err := egressOutbound(uri, len(egressTag))
+					outs, err := xrayChainOutbounds(n.Egress, len(egressTag))
 					if err != nil {
 						// A broken upstream must not silently become a direct
 						// exit: that would leak traffic straight out of the box
@@ -96,9 +97,13 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 						b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "egress: " + err.Error()})
 						continue
 					}
-					tag, _ = out["tag"].(string)
-					egressTag[uri] = tag
-					egressOutbounds = append(egressOutbounds, out)
+					// Route to the LAST hop: each hop dials through the one
+					// before it, so the exit is the tag traffic is sent to.
+					tag, _ = outs[len(outs)-1]["tag"].(string)
+					egressTag[key] = tag
+					for _, o := range outs {
+						egressOutbounds = append(egressOutbounds, o)
+					}
 				}
 				egressRules = append(egressRules, jobj{
 					"type": "field", "inboundTag": []string{n.Tag}, "outboundTag": tag,
@@ -108,7 +113,7 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			b.XrayN++
 		case "sing-box":
 			if render.IsSingboxEndpoint(n) { // WireGuard -> endpoints[]
-				if strings.TrimSpace(n.Egress) != "" {
+				if !n.Egress.Empty() {
 					// A WireGuard endpoint is a kernel/userspace tunnel device,
 					// not a routed inbound: sing-box has nowhere to attach a
 					// per-inbound detour. Accepting the chain and ignoring it
@@ -135,17 +140,20 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 			if len(sp.Clients) > 0 {
 				applySingboxUsers(ins[0], n, sp.Clients)
 			}
-			if uri := strings.TrimSpace(n.Egress); uri != "" {
-				tag, ok := sbEgressTag[uri]
+			if !n.Egress.Empty() {
+				key := n.Egress.Key()
+				tag, ok := sbEgressTag[key]
 				if !ok {
-					out, err := singboxEgressOutbound(uri, len(sbEgressTag))
+					outs, err := singboxChainOutbounds(n.Egress, len(sbEgressTag))
 					if err != nil {
 						b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "egress: " + err.Error()})
 						continue
 					}
-					tag, _ = out["tag"].(string)
-					sbEgressTag[uri] = tag
-					sbEgressOutbounds = append(sbEgressOutbounds, out)
+					tag, _ = outs[len(outs)-1]["tag"].(string)
+					sbEgressTag[key] = tag
+					for _, o := range outs {
+						sbEgressOutbounds = append(sbEgressOutbounds, o)
+					}
 				}
 				// A protocol may render as SEVERAL inbounds (ShadowTLS is a
 				// handshake listener plus the detour it fronts). Every one of

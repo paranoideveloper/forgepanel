@@ -12,7 +12,7 @@ import (
 type Field struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
-	Type    string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int), kv (map[string]string)
+	Type    string   `json:"type"`              // text, number, bool, textarea, select, iselect (int select), csv ([]string), csvint ([]int), kv (map[string]string), lines ([]string, one per line), lines ([]string, one per line)
 	Options []string `json:"options,omitempty"` // for select
 	Default any      `json:"default,omitempty"`
 	Keygen  string   `json:"keygen,omitempty"` // reality|uuid|shortid|ss2022|wireguard|password
@@ -64,11 +64,14 @@ func (s *Server) handleSchema(c *gin.Context) {
 // fields it knew about and the chain was not one of them.
 func commonFields() []Field {
 	return []Field{
-		{Key: "egress", Label: "Relay through upstream hop", Type: "text",
-			Ph: "vless://…  ss://…  trojan://…",
-			Help: "paste a share link; this inbound's traffic leaves through that server " +
-				"instead of this one. Empty = exit directly. A hop that cannot be parsed " +
-				"stops the inbound rather than letting it exit directly."},
+		// A chain is not csv: a share link's query string can contain commas, so
+		// splitting on them would cut a hop in half. One hop per line.
+		{Key: "egress", Label: "Relay chain (one hop per line)", Type: "lines",
+			Ph: "vless://…  (dialled first)\ntrojan://…\nss://…  (the exit)",
+			Help: "paste one share link per hop, in order. This server dials the FIRST line; " +
+				"each later hop is reached THROUGH the one above it; the last line is where " +
+				"traffic reaches the internet. One line = a single relay. Empty = exit directly. " +
+				"A hop that cannot be parsed stops the inbound rather than letting it exit directly."},
 	}
 }
 

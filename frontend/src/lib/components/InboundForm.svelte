@@ -65,7 +65,16 @@
         // A kv map must go back to "Name: value" lines; assigning the object
         // straight into a textarea renders "[object Object]" and then saves
         // that string as the header set.
-        values[f.key] = f.type === 'kv' ? formatKV(v) : Array.isArray(v) ? v.join(',') : v;
+        // A `lines` field joins with newlines, not commas: its values are share
+        // links that legitimately contain commas.
+        values[f.key] =
+          f.type === 'kv'
+            ? formatKV(v)
+            : f.type === 'lines'
+              ? (Array.isArray(v) ? v.join('\n') : String(v))
+              : Array.isArray(v)
+                ? v.join(',')
+                : v;
       }
     }
   }
@@ -257,7 +266,7 @@
           <h4>{sec.section}</h4>
           <div class="fields">
             {#each sec.fields as f}
-              <div class="fg" class:wide={f.type === 'textarea' || f.type === 'kv'}>
+              <div class="fg" class:wide={f.type === 'textarea' || f.type === 'kv' || f.type === 'lines'}>
                 <label for={f.key}>{f.label}</label>
                 {#if f.type === 'bool'}
                   <label class="chk"><input type="checkbox" bind:checked={values[f.key]} onchange={schedulePreview} /> enabled</label>
@@ -265,7 +274,7 @@
                   <select id={f.key} bind:value={values[f.key]} onchange={schedulePreview}>
                     {#each f.options || [] as o}<option value={o}>{o === '' ? '(none)' : o}</option>{/each}
                   </select>
-                {:else if f.type === 'textarea' || f.type === 'kv'}
+                {:else if f.type === 'textarea' || f.type === 'kv' || f.type === 'lines'}
                   <textarea id={f.key} bind:value={values[f.key]} oninput={schedulePreview} placeholder={f.placeholder}></textarea>
                 {:else}
                   <div class="with-gen">

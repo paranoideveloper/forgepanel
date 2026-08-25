@@ -4,7 +4,7 @@
 // key -> value and this module assembles/reads the nested node.
 
 export type FieldType =
-  | 'text' | 'number' | 'bool' | 'textarea' | 'select' | 'iselect' | 'csv' | 'csvint' | 'kv';
+  | 'text' | 'number' | 'bool' | 'textarea' | 'select' | 'iselect' | 'csv' | 'csvint' | 'kv' | 'lines';
 
 export interface Field {
   key: string;
@@ -78,6 +78,17 @@ export function coerce(type: FieldType, v: unknown): unknown {
       return String(v).split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n));
     case 'kv':
       return typeof v === 'object' ? v : parseKV(String(v));
+    case 'lines': {
+      // One value per line, NOT comma-separated: these carry share links whose
+      // query strings contain commas, and splitting on those would cut a hop in
+      // half and produce two unusable fragments.
+      if (Array.isArray(v)) return v.length ? v : undefined;
+      const out = String(v)
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return out.length ? out : undefined;
+    }
     default:
       return v;
   }

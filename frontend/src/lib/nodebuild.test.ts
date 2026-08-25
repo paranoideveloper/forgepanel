@@ -138,3 +138,68 @@ describe('buildNode edit preservation', () => {
     expect(out.protocol).toBe('vless');
   });
 });
+
+// Multi-hop chains: one hop per LINE, never comma-separated. A share link's
+// query string contains commas (alpn=h2,http/1.1 among others), so splitting on
+// them would cut a hop in half and yield two unusable fragments.
+describe('lines fields carry a chain', () => {
+  const chainSchema: Schema = {
+    protocols: [
+      {
+        proto: 'vless',
+        label: 'VLESS',
+        engine: 'xray',
+        fields: [{ key: 'uuid', label: 'UUID', type: 'text' }],
+        transports: ['tcp'],
+        securities: ['none'],
+        chainable: true
+      }
+    ],
+    common: [{ key: 'egress', label: 'Relay chain', type: 'lines' }],
+    transports: { tcp: [] },
+    securities: { none: [] },
+    fingerprints: ['chrome']
+  };
+
+  const base = { remark: 'r', port: 443, address: 'a', uuid: 'u' };
+
+  it('splits on newlines and preserves commas inside a hop', () => {
+    const hop = 'trojan://pw@203.0.113.5:443?security=tls&alpn=h2,http/1.1&sni=x.example#hop';
+    const out = buildNode(chainSchema, 'vless', 'tcp', 'none', {
+      ...base,
+      egress: `vless://a@203.0.113.1:443#one\n${hop}\nss://b@203.0.113.9:8388#exit`
+    });
+    expect(out.egress).toEqual([
+      'vless://a@203.0.113.1:443#one',
+      hop,
+      'ss://b@203.0.113.9:8388#exit'
+    ]);
+    // The comma-bearing hop must survive whole.
+    expect(out.egress[1]).toContain('alpn=h2,http/1.1');
+  });
+
+  it('drops blank lines so a trailing newline does not break the chain', () => {
+    const out = buildNode(chainSchema, 'vless', 'tcp', 'none', {
+      ...base,
+      egress: 'vless://a@203.0.113.1:443#one\n\n  \nss://b@203.0.113.9:8388#exit\n'
+    });
+    expect(out.egress).toHaveLength(2);
+  });
+
+  it('treats an empty chain as no chain rather than one blank hop', () => {
+    const out = buildNode(chainSchema, 'vless', 'tcp', 'none', { ...base, egress: '   \n  ' });
+    expect(out.egress).toBeUndefined();
+  });
+
+  it('is not offered for a protocol whose engine cannot honour it', () => {
+    const noChain: Schema = {
+      ...chainSchema,
+      protocols: [{ ...chainSchema.protocols[0], chainable: false }]
+    };
+    const out = buildNode(noChain, 'vless', 'tcp', 'none', {
+      ...base,
+      egress: 'vless://a@203.0.113.1:443#one'
+    });
+    expect(out.egress).toBeUndefined();
+  });
+});

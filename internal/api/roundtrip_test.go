@@ -57,8 +57,10 @@ func fullXHTTPNode() *model.Node {
 		Port:     443,
 		Country:  "NL",
 		UUID:     "b831381d-6324-4d53-ad4f-8cda48b30811",
-		Egress: "vless://11111111-2222-4333-8444-555555555555@203.0.113.50:443?security=reality" +
-			"&sni=www.cloudflare.com&fp=chrome&pbk=xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU&sid=0123abcd&type=tcp#hop",
+		Egress: model.EgressChain{
+			"vless://11111111-2222-4333-8444-555555555555@203.0.113.50:443?security=reality" +
+				"&sni=www.cloudflare.com&fp=chrome&pbk=xh8kL1s5H8k6VYwB4nCq3rJ0mE9xZQ7YtA2sD4fG6hU&sid=0123abcd&type=tcp#hop",
+		},
 		Transport: model.Transport{
 			Network:              model.NetXHTTP,
 			Path:                 "/up",
@@ -240,8 +242,8 @@ func TestEditingAnInboundPreservesEveryField(t *testing.T) {
 	want := *stored
 	got.Tag, want.Tag = "", ""
 
-	if got.Egress != want.Egress {
-		t.Errorf("EGRESS LOST: the chain is the whole reason the inbound exists\n got %q\nwant %q", got.Egress, want.Egress)
+	if got.Egress.Key() != want.Egress.Key() {
+		t.Errorf("EGRESS LOST: the chain is the whole reason the inbound exists\n got %v\nwant %v", got.Egress, want.Egress)
 	}
 	if !reflect.DeepEqual(got.Transport.XMux, want.Transport.XMux) {
 		t.Errorf("xmux lost or altered:\n got %+v\nwant %+v", got.Transport.XMux, want.Transport.XMux)
