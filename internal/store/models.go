@@ -239,7 +239,7 @@ func (e *EdgeDeployment) StatusURL() string {
 // AllModels is the migration set.
 func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{}, &NodeClientTraffic{},
-		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}}
+		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

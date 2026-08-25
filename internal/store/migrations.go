@@ -31,6 +31,7 @@ const (
 	migVBaseline      uint64 = 1
 	migVAlignLegacy   uint64 = 2
 	migVRepairOrphans uint64 = 3
+	migVTrafficSnaps  uint64 = 4
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -59,6 +60,21 @@ func migrations() []migrate.Migration {
 			Rollback: "irreversible. The rows it removes point at objects that no longer exist, " +
 				"so restoring them would restore the corruption; recover from a backup instead.",
 			Up: func(tx *gorm.DB) error { _, err := repairOrphans(tx); return err },
+		},
+		{
+			Version: migVTrafficSnaps,
+			Name:    "traffic_snapshots",
+			Rollback: "safe to drop. The table holds only the last cumulative counter value seen " +
+				"per user; losing it makes the next poll treat each counter's current total as one " +
+				"delta, which over-counts once and then settles.",
+			// Adds the table behind downtime-safe accounting. Without it the
+			// poller has no baseline, so it would fall back to reading the
+			// engine's counters destructively — the pattern that loses a whole
+			// cycle's traffic whenever the panel is killed mid-cycle.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&TrafficSnapshot{}})
+				return err
+			},
 		},
 	}
 }

@@ -35,8 +35,14 @@ func TestFreshDatabaseRecordsTheWholeRegistry(t *testing.T) {
 	if rep.Adopted {
 		t.Fatal("an empty database was adopted instead of built from the baseline")
 	}
-	if rep.Version != migVRepairOrphans || len(rep.Applied) != len(migrations()) {
-		t.Fatalf("registry did not fully apply: %+v", rep)
+	// The expected version is the LAST entry in the registry, not a constant
+	// repeated here: hardcoding it means every new migration fails this test
+	// with a message about the wrong thing.
+	all := migrations()
+	want := all[len(all)-1].Version
+	if rep.Version != want || len(rep.Applied) != len(all) {
+		t.Fatalf("registry did not fully apply: reached version %d of %d, applied %d of %d\n%+v",
+			rep.Version, want, len(rep.Applied), len(all), rep)
 	}
 	rows, err := migrate.MigrationStatus(db)
 	if err != nil {
@@ -392,7 +398,7 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // the change up from the baseline, but a database already at the current version
 // only ever gets it from a migration. When this test fails, add the migration
 // that carries the change to existing databases, then update this constant.
-const modelSchemaFingerprintPinned = "b104b6a82476cdd9d5ef96fc3a29d032469616da6aa3a771e70d39fff7e73142"
+const modelSchemaFingerprintPinned = "59df01697a9ab8cc0fa7b202066b099a76a1a165991e4988dcad65f2a2f0d6c8"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

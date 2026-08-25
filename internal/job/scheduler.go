@@ -40,10 +40,18 @@ type Scheduler struct {
 
 // Config configures a Scheduler.
 type Config struct {
-	DB          *store.Store
-	PollEvery   time.Duration
-	SweepEvery  time.Duration
-	ReloadHook  func()
+	DB         *store.Store
+	PollEvery  time.Duration
+	SweepEvery time.Duration
+	ReloadHook func()
+	// PollTraffic returns the engine's per-user counters. The scheduler always
+	// calls it with reset=false and accounts by subtraction against a stored
+	// snapshot: a destructive read makes the in-flight value the only copy of
+	// the data, so a panel killed mid-cycle loses that traffic for good, and
+	// usage only ever fails downward — quotas stop tripping and an exhausted
+	// user keeps being served, with nothing to show for it.
+	// TestTrafficIsNotLostWhenACycleIsInterrupted fails if this is ever called
+	// with reset=true.
 	PollTraffic func(reset bool) (map[string]int64, error)
 }
 
@@ -105,38 +113,89 @@ func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {
 	}
 }
 
-// pollAndAccount reads traffic deltas, adds them to each user's UsedTraffic, and
-// enforces data limits within the cycle (spec §11).
+// pollAndAccount reads the engine's cumulative counters, converts them to
+// per-user deltas against the last stored snapshot, and enforces data limits
+// within the cycle (spec §11).
+//
+// It reads WITHOUT resetting. The previous form asked the engine to read and
+// zero in one call, which made the in-flight value the only copy: a panel killed
+// between the read and the write lost that traffic permanently, and a failed
+// SaveUser lost it silently per user. Losing usage always fails the same
+// direction — quotas never trip and an exhausted user keeps being served — so
+// nothing looks wrong from the outside.
+//
+// Reading cumulatively makes the cycle idempotent: a re-read after a crash
+// returns the same number and the delta is recomputed rather than lost. The
+// snapshot advances in the SAME transaction as the usage it accounts for, so a
+// crash between the two cannot double-count either.
 func (s *Scheduler) pollAndAccount() {
 	if s.db == nil || s.pollTraffic == nil {
 		return
 	}
-	deltas, err := s.pollTraffic(true) // reset counters => value is the delta
-	if err != nil || len(deltas) == 0 {
+	totals, err := s.pollTraffic(false) // cumulative, non-destructive
+	if err != nil || len(totals) == 0 {
 		return
 	}
+	prev, err := s.db.TrafficSnapshots(store.ScopeLocalEngine)
+	if err != nil {
+		// Without the baseline every cumulative total would read as a fresh
+		// delta and usage would be inflated by the engine's whole lifetime.
+		// Skipping the cycle keeps the numbers correct; the next one recovers,
+		// because nothing was reset.
+		return
+	}
+
 	changed := false
-	for email, bytes := range deltas {
-		if bytes <= 0 {
-			continue
-		}
+	now := s.now()
+	for email, total := range totals {
+		delta := store.TrafficDelta(prev[email], total)
 		u := s.userForEmail(email)
 		if u == nil {
+			// Remember it anyway: an unknown key that later resolves to a user
+			// must not hand them the counter's entire history as one delta.
+			_ = s.db.SetTrafficSnapshot(store.ScopeLocalEngine, email, total)
 			continue
 		}
-		if 9223372036854775807-bytes < u.UsedTraffic {
-			u.UsedTraffic = 9223372036854775807
-		} else {
-			u.UsedTraffic += bytes
+		if delta <= 0 {
+			// No usage, but the snapshot still has to track a counter that was
+			// reset to a lower value, or the next real delta is measured from a
+			// baseline that no longer exists.
+			if total != prev[email] {
+				_ = s.db.SetTrafficSnapshot(store.ScopeLocalEngine, email, total)
+			}
+			continue
 		}
-		// A non-zero delta means the user moved traffic this cycle: they are live.
-		seen := s.now()
-		u.LastSeenAt = &seen
-		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
-			u.Status = store.StatusLimited
+		// Only a TRANSITION into limited warrants a reload. `limited` alone is
+		// true on every subsequent cycle for an already-limited user, which
+		// would restart the engines forever.
+		tripped := false
+		_, _, err := s.db.ApplyTrafficDelta(store.ScopeLocalEngine, email, u.ID, delta, total,
+			func(user *store.User) {
+				// A non-zero delta means the user moved traffic: they are live.
+				seen := now
+				user.LastSeenAt = &seen
+				// An on-hold user's clock starts at FIRST USE, and this is the
+				// only place that observation exists. sweep() reads
+				// FirstConnectAt to materialise ExpireAt; nothing wrote it, so
+				// on-hold users never activated and never expired. Stamped once,
+				// or a later cycle would push the expiry further out.
+				if user.Status == store.StatusOnHold && user.FirstConnectAt == nil {
+					first := now
+					user.FirstConnectAt = &first
+				}
+				if user.DataLimit > 0 && user.UsedTraffic >= user.DataLimit && user.Status == store.StatusActive {
+					user.Status = store.StatusLimited
+					tripped = true
+				}
+			})
+		if err != nil {
+			// The snapshot did not move either, so this delta is recomputed next
+			// cycle rather than silently dropped.
+			continue
+		}
+		if tripped {
 			changed = true
 		}
-		_ = s.db.SaveUser(u)
 	}
 	if changed && s.reloadHook != nil {
 		s.reloadHook()

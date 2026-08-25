@@ -259,6 +259,13 @@ func (s *Server) accountNodeTraffic(deltas map[string]int64) {
 		}
 		now := time.Now()
 		u.LastSeenAt = &now
+		// First use starts an on-hold user's clock, on this plane too. A user
+		// whose only traffic is remote must not stay on hold forever just
+		// because the panel never served them directly.
+		if u.Status == store.StatusOnHold && u.FirstConnectAt == nil {
+			first := now
+			u.FirstConnectAt = &first
+		}
 		if u.DataLimit > 0 && u.UsedTraffic >= u.DataLimit && u.Status == store.StatusActive {
 			u.Status = store.StatusLimited
 			changed = true

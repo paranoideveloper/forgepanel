@@ -197,3 +197,223 @@ func TestLastSeenStampedOnTraffic(t *testing.T) {
 		t.Fatal("a user with no traffic delta must not be marked seen")
 	}
 }
+
+// The on-hold plan type was entirely inert. sweep() reads FirstConnectAt to
+// materialise ExpireAt = FirstConnectAt + OnHoldDuration, and NOTHING wrote it,
+// so an on-hold user stayed on hold forever: never activated, never expired,
+// never billed. TestOnHoldTransition above did not catch it because it sets
+// FirstConnectAt by hand — which is precisely the field the product could not
+// set for itself.
+//
+// This drives the real path: a fresh on-hold user, traffic observed, then a
+// sweep.
+func TestOnHoldClockStartsOnFirstTraffic(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "hold", Status: store.StatusOnHold, OnHoldDuration: 3600, SubToken: "ht2"}
+	if err := db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if u.FirstConnectAt != nil {
+		t.Fatal("a fresh on-hold user must not already have a first-connect stamp")
+	}
+
+	start := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
+		return map[string]int64{UserEmail(u.ID): 1024}, nil
+	}})
+	s.now = func() time.Time { return start }
+
+	s.pollAndAccount()
+
+	got, _ := db.UserByID(u.ID)
+	if got.FirstConnectAt == nil {
+		t.Fatalf("first traffic did not start the on-hold clock, so the user can never activate")
+	}
+	if !got.FirstConnectAt.Equal(start) {
+		t.Fatalf("first-connect stamp = %v, want %v", got.FirstConnectAt, start)
+	}
+
+	// And the sweep must now do its half of the job.
+	s.sweepAt(start.Add(time.Minute))
+	got, _ = db.UserByID(u.ID)
+	if got.Status != store.StatusActive {
+		t.Fatalf("on-hold user did not activate after first use, status = %s", got.Status)
+	}
+	if got.ExpireAt == nil || !got.ExpireAt.Equal(start.Add(time.Hour)) {
+		t.Fatalf("expiry = %v, want first-connect + 1h (%v)", got.ExpireAt, start.Add(time.Hour))
+	}
+}
+
+// The stamp must be taken ONCE. Re-stamping on every cycle would push the
+// expiry further out each time the user sent a packet, so the plan would never
+// end.
+func TestOnHoldClockIsNotRestartedByLaterTraffic(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "hold2", Status: store.StatusOnHold, OnHoldDuration: 3600, SubToken: "ht3"}
+	_ = db.CreateUser(u)
+
+	start := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	now := start
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
+		return map[string]int64{UserEmail(u.ID): 512}, nil
+	}})
+	s.now = func() time.Time { return now }
+
+	s.pollAndAccount()
+	now = start.Add(30 * time.Minute)
+	s.pollAndAccount()
+
+	got, _ := db.UserByID(u.ID)
+	if !got.FirstConnectAt.Equal(start) {
+		t.Fatalf("the clock restarted on later traffic: %v, want %v", got.FirstConnectAt, start)
+	}
+}
+
+// An ACTIVE user has no hold to start, and stamping one would be meaningless
+// state on a row that never reads it.
+func TestActiveUserGetsNoFirstConnectStamp(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "act", Status: store.StatusActive, SubToken: "at1"}
+	_ = db.CreateUser(u)
+
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
+		return map[string]int64{UserEmail(u.ID): 2048}, nil
+	}})
+	s.pollAndAccount()
+
+	got, _ := db.UserByID(u.ID)
+	if got.FirstConnectAt != nil {
+		t.Fatalf("an active user was given an on-hold stamp: %v", got.FirstConnectAt)
+	}
+	if got.LastSeenAt == nil {
+		t.Fatalf("last-seen should still be stamped for an active user")
+	}
+}
+
+// The poller used to read the engine's counters with -reset: one call both read
+// the numbers and zeroed them, making the in-flight value the only copy. A panel
+// killed between the read and the write lost that traffic permanently. Reading
+// cumulatively makes a cycle idempotent — a re-read returns the same number and
+// the delta is recomputed.
+func TestTrafficIsNotLostWhenACycleIsInterrupted(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "t", Status: store.StatusActive, SubToken: "tt1"}
+	_ = db.CreateUser(u)
+
+	// The engine's counter keeps climbing; it is never reset by the panel.
+	cumulative := int64(0)
+	reads := 0
+	s := New(Config{DB: db, PollTraffic: func(reset bool) (map[string]int64, error) {
+		if reset {
+			t.Fatal("the poller must never ask the engine to reset its counters: " +
+				"that makes the read the only copy of the data")
+		}
+		reads++
+		return map[string]int64{UserEmail(u.ID): cumulative}, nil
+	}})
+
+	cumulative = 1000
+	s.pollAndAccount()
+	got, _ := db.UserByID(u.ID)
+	if got.UsedTraffic != 1000 {
+		t.Fatalf("first cycle: used=%d, want 1000", got.UsedTraffic)
+	}
+
+	// A cycle that reads the same total again must add nothing. Under the old
+	// destructive read this could not even be expressed.
+	s.pollAndAccount()
+	got, _ = db.UserByID(u.ID)
+	if got.UsedTraffic != 1000 {
+		t.Fatalf("a repeated read double-counted: used=%d, want 1000", got.UsedTraffic)
+	}
+
+	// More traffic: only the increment counts.
+	cumulative = 2500
+	s.pollAndAccount()
+	got, _ = db.UserByID(u.ID)
+	if got.UsedTraffic != 2500 {
+		t.Fatalf("second cycle: used=%d, want 2500", got.UsedTraffic)
+	}
+}
+
+// The panel restarts the engine on every config change, and its counters come
+// back at zero. Treating that as a negative delta — or as nothing — would
+// discard real usage on the most common event in a running panel.
+func TestEngineRestartCountsFromZeroInsteadOfLosingUsage(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "r", Status: store.StatusActive, SubToken: "rt1"}
+	_ = db.CreateUser(u)
+
+	cumulative := int64(5000)
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
+		return map[string]int64{UserEmail(u.ID): cumulative}, nil
+	}})
+	s.pollAndAccount()
+
+	// Engine restarted: the counter is back near zero and climbing again.
+	cumulative = 300
+	s.pollAndAccount()
+
+	got, _ := db.UserByID(u.ID)
+	if got.UsedTraffic != 5300 {
+		t.Fatalf("usage after an engine restart = %d, want 5300 (5000 before + 300 since)", got.UsedTraffic)
+	}
+
+	// And the new baseline must be the post-restart value, not the old one.
+	cumulative = 800
+	s.pollAndAccount()
+	got, _ = db.UserByID(u.ID)
+	if got.UsedTraffic != 5800 {
+		t.Fatalf("usage after the restart baseline settled = %d, want 5800", got.UsedTraffic)
+	}
+}
+
+// A counter whose key resolves to no user must still be remembered. Otherwise,
+// if that key later becomes a real user, the counter's entire history lands on
+// them as a single delta.
+func TestUnknownCounterIsStillSnapshotted(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	s := New(Config{DB: db, PollTraffic: func(bool) (map[string]int64, error) {
+		return map[string]int64{"u99999": 4242}, nil
+	}})
+	s.pollAndAccount()
+
+	snaps, err := db.TrafficSnapshots(store.ScopeLocalEngine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snaps["u99999"] != 4242 {
+		t.Fatalf("an unknown counter was not recorded: %v", snaps)
+	}
+}
+
+// Crossing the data limit must still stop the user, and must do it once.
+func TestQuotaStillTripsAndOnlyReloadsOnTheTransition(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	u := &store.User{Username: "q", Status: store.StatusActive, DataLimit: 1000, SubToken: "qt1"}
+	_ = db.CreateUser(u)
+
+	reloads := 0
+	cumulative := int64(1500)
+	s := New(Config{
+		DB:          db,
+		ReloadHook:  func() { reloads++ },
+		PollTraffic: func(bool) (map[string]int64, error) { return map[string]int64{UserEmail(u.ID): cumulative}, nil },
+	})
+
+	s.pollAndAccount()
+	got, _ := db.UserByID(u.ID)
+	if got.Status != store.StatusLimited {
+		t.Fatalf("a user past their limit should be limited, got %s", got.Status)
+	}
+	if reloads != 1 {
+		t.Fatalf("crossing the limit should reload once, got %d", reloads)
+	}
+
+	// Still over, still limited — but nothing changed, so no further reloads.
+	cumulative = 2000
+	s.pollAndAccount()
+	if reloads != 1 {
+		t.Fatalf("an already-limited user triggered another reload: %d", reloads)
+	}
+}
