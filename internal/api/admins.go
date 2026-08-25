@@ -142,6 +142,11 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "no such admin"})
 		return
 	}
+	// Snapshot BEFORE the handler edits a in place. This is the most
+	// security-relevant diff in the panel: a role change, a raised quota or a
+	// granted traffic credit is a privilege escalation that looks identical to
+	// legitimate use unless the trail records what the value WAS.
+	before := *a
 	// Pointers so "not sent" and "sent as zero" are distinguishable: a quota of
 	// 0 means unlimited, and treating an omitted field as 0 would silently make
 	// every edit remove the limit.
@@ -224,7 +229,7 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 		_ = s.db.BumpAdminSessionEpoch(a.ID)
 		s.audit(c, "sessions.revoke", a.Username)
 	}
-	s.audit(c, "admin.update", a.Username)
+	s.auditWithDiff(c, "admin.update", a.Username, jsonOrNil(&before), jsonOrNil(a))
 	c.JSON(200, s.adminToView(*a))
 }
 

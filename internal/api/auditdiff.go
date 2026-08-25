@@ -200,3 +200,23 @@ func (s *Server) auditWithDiff(c *gin.Context, action, target string, before, af
 	}
 	s.db.Audit(al)
 }
+
+// auditNote records an action with a plain-language note in the Diff column.
+//
+// For mutations where a before/after comparison says nothing useful but the
+// SHAPE of the change matters. A credential rotation is the example: the values
+// must never be recorded, and "credentials reset" alone cannot answer whether
+// someone handed out a fresh subscription link or invalidated every config the
+// user held — three very different blast radii.
+func (s *Server) auditNote(c *gin.Context, action, target, note string) {
+	if s.db == nil {
+		return
+	}
+	claims, _ := auth.ClaimsFrom(c)
+	al := &store.AuditLog{IP: c.ClientIP(), Action: action, Target: target, Diff: note}
+	if claims != nil {
+		al.AdminID = claims.AdminID
+		al.Actor = claims.Username
+	}
+	s.db.Audit(al)
+}

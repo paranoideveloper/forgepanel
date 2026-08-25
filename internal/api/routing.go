@@ -15,6 +15,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -115,16 +116,16 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 
 // jsonOrNil marshals a value for the audit diff, returning nil for a nil
 // pointer so a creation reads as "created" rather than as a change from "null".
+//
+// Reflection rather than a type switch: the switch only knew two types, so every
+// other caller's nil pointer marshalled to the literal "null" and the diff
+// reported a creation as a change from a JSON null.
 func jsonOrNil(v any) []byte {
-	switch t := v.(type) {
-	case *store.Outbound:
-		if t == nil {
-			return nil
-		}
-	case *store.RoutingRule:
-		if t == nil {
-			return nil
-		}
+	if v == nil {
+		return nil
+	}
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return nil
 	}
 	b, err := json.Marshal(v)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -205,10 +206,14 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 		}
 		return
 	}
-	s.audit(c, "user.update", u.Username)
+	// The BEFORE copy is already in hand (userOr404 loaded it) and the AFTER copy
+	// is loaded below anyway, so recording what actually changed costs one
+	// reordering. "alice edited a user" is not an answer to "who raised that
+	// quota"; secret-bearing fields are recorded as changed without their values.
+	fresh, _ := s.db.UserByID(u.ID)
+	s.auditWithDiff(c, "user.update", u.Username, jsonOrNil(u), jsonOrNil(fresh))
 	s.startBackground(s.reloadEngines)
 
-	fresh, _ := s.db.UserByID(u.ID)
 	a, _ := s.db.UserAssignments(u.ID)
 	c.JSON(200, gin.H{"user": fresh, "assignments": a, "updated_at": fresh.UpdatedAt})
 }
@@ -333,7 +338,20 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	s.audit(c, "user.credentials.reset", u.Username)
+	// WHICH credentials, never their values. "credentials reset" alone cannot
+	// answer whether someone rotated a subscription link or invalidated every
+	// config the user held — three very different blast radii.
+	rotated := []string{}
+	if req.UUID {
+		rotated = append(rotated, "uuid")
+	}
+	if req.Password {
+		rotated = append(rotated, "password")
+	}
+	if req.SubToken {
+		rotated = append(rotated, "sub_token")
+	}
+	s.auditNote(c, "user.credentials.reset", u.Username, "rotated: "+strings.Join(rotated, ", "))
 	s.startBackground(s.reloadEngines)
 	fresh, _ := s.db.UserByID(u.ID)
 	c.JSON(200, gin.H{"user": fresh, "sub_url": subURL(c, fresh.SubToken)})
@@ -378,6 +396,9 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Snapshot BEFORE the handler edits g in place, or the diff compares the new
+	// value against itself and reports that nothing changed.
+	before := *g
 	var req struct {
 		Name        *string    `json:"name"`
 		Description *string    `json:"description"`
@@ -435,7 +456,7 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 			return
 		}
 	}
-	s.audit(c, "group.update", g.Name)
+	s.auditWithDiff(c, "group.update", g.Name, jsonOrNil(&before), jsonOrNil(g))
 	s.startBackground(s.reloadEngines)
 	fresh, _ := s.db.GroupByID(g.ID)
 	members, _ := s.db.UsersInGroup(g.ID)

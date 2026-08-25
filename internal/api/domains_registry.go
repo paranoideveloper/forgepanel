@@ -72,6 +72,9 @@ func (s *Server) handleCreateDomain(c *gin.Context) {
 
 func (s *Server) handleUpdateDomain(c *gin.Context) {
 	id := parseID(c)
+	// Read the CURRENT row before anything is written, so the trail can say what
+	// the domain was pointed at before someone repointed it.
+	before, _ := s.db.DomainByID(id)
 	var req map[string]any
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -102,8 +105,9 @@ func (s *Server) handleUpdateDomain(c *gin.Context) {
 			return
 		}
 	}
-	s.audit(c, "domain.update", strconv.FormatUint(uint64(id), 10))
 	d, _ := s.db.DomainByID(id)
+	s.auditWithDiff(c, "domain.update", strconv.FormatUint(uint64(id), 10),
+		jsonOrNil(before), jsonOrNil(d))
 	c.JSON(200, d)
 }
 
