@@ -256,10 +256,23 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 	}
 }
 
-// logHint appends the last stderr line to a crash error so the panel surfaces the
-// engine's own reason (e.g. "address already in use") instead of a bare exit code.
+// logHint turns a crash into something an operator can act on.
+//
+// It prefers a DIAGNOSED cause over the raw output. Xray's errors are five
+// clauses deep and end in the one phrase that matters, so the raw tail — which
+// is what this used to return — made the operator do the reading. Falling back
+// to that tail is still right when nothing matches: a real message beats a
+// generic one.
 func logHint(logs *ring) string {
-	lines := logs.snapshot()
+	// A wider window than the crash line alone: the cause is often logged a few
+	// lines before the process finally gives up.
+	lines := logs.snapshotN(60)
+	if d, ok := Diagnose(lines); ok {
+		if d.Remedy != "" {
+			return ": " + d.Cause + " — " + d.Remedy
+		}
+		return ": " + d.Cause
+	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		if s := lines[i]; s != "" {
 			return ": " + tail(s)
@@ -354,10 +367,17 @@ func (p *Process) Status() Status {
 	if p.cmd != nil && p.cmd.Process != nil {
 		pid = p.cmd.Process.Pid
 	}
-	return Status{
+	st := Status{
 		Engine: p.spec.Name, State: p.state, PID: pid,
 		Restarts: p.restarts, LastError: p.lastErr, RecentLogs: p.logs.snapshot(),
 	}
+	// A wider window than RecentLogs: the cause is often logged well before the
+	// process finally gives up, and the panel showing "what it means" next to
+	// "what it said" is the difference between a support ticket and a fix.
+	if d, ok := Diagnose(p.logs.snapshotN(60)); ok {
+		st.Diagnosis = &d
+	}
+	return st
 }
 
 // Status is a snapshot of a supervised process.
@@ -368,6 +388,12 @@ type Status struct {
 	Restarts   int      `json:"restarts"`
 	LastError  string   `json:"last_error,omitempty"`
 	RecentLogs []string `json:"recent_logs,omitempty"`
+	// Diagnosis names the recognised cause of a failure, when there is one.
+	//
+	// Separate from LastError on purpose: LastError is what the engine said, and
+	// this is what it means. Replacing one with the other would lose the exact
+	// text an operator needs to search for when the diagnosis is not enough.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
 }
 
 func (p *Process) setState(s State, err string) {
@@ -402,7 +428,14 @@ type ring struct {
 	size int
 }
 
-func newRing(size int) *ring { return &ring{size: size} }
+func newRing(size int) *ring {
+	if size <= 0 {
+		// A zero size makes add's modulo divide by zero, on the goroutine that
+		// drains the engine's output.
+		size = 1
+	}
+	return &ring{size: size}
+}
 
 func (r *ring) add(line string) {
 	r.mu.Lock()
@@ -415,21 +448,40 @@ func (r *ring) add(line string) {
 	r.n++
 }
 
-func (r *ring) snapshot() []string {
+// snapshotN returns the most recent n lines, OLDEST FIRST.
+//
+// The previous version sliced the backing array by index — buf[len-20:len] —
+// which is only the newest 20 lines until the buffer wraps. After that, add
+// overwrites from the start, so the newest entries live at the LOW indices and
+// that slice returns a window from some arbitrary earlier moment. The visible
+// symptom was a crash hint quoting a line that had nothing to do with the crash,
+// which is worse than no hint: it sends the operator after the wrong problem.
+func (r *ring) snapshotN(n int) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	last := 20
-	if len(r.buf) < last {
-		last = len(r.buf)
+
+	held := r.n
+	if held > r.size {
+		held = r.size
 	}
-	out := make([]string, 0, last)
-	for i := len(r.buf) - last; i < len(r.buf); i++ {
-		if i >= 0 {
-			out = append(out, r.buf[i])
-		}
+	if held > len(r.buf) {
+		held = len(r.buf)
+	}
+	if n > held {
+		n = held
+	}
+	if n <= 0 {
+		return nil
+	}
+	out := make([]string, 0, n)
+	// Entry k counting from the oldest still held sits at (r.n-held+k) % size.
+	for k := held - n; k < held; k++ {
+		out = append(out, r.buf[(r.n-held+k)%r.size])
 	}
 	return out
 }
+
+func (r *ring) snapshot() []string { return r.snapshotN(20) }
 
 // ValidateBytes writes candidate config to path and runs the engine validator on
 // it, without applying it. Used by Config Doctor.
