@@ -51,6 +51,15 @@ type PoolRepo interface {
 	ListPoolEntries(pool string) ([]PoolEntry, error)
 	PutPoolEntry(pool string, entry PoolEntry) error
 	DeletePoolEntry(pool, domain string) error
+	// ListPoolNames returns every pool that has entries.
+	//
+	// Without it a pool could only be reached by NAME, so nothing could sweep
+	// them: the rotate handler's own comment says "rotating with no config just
+	// health-checks and retires, which is a legitimate scheduled operation" —
+	// and no scheduler could enumerate what to run it against. A pool whose
+	// domains had all been blocked stayed that way until an operator happened
+	// to open the page, which is the exact failure the pool exists to prevent.
+	ListPoolNames() ([]string, error)
 }
 
 // ProbeResult is one health probe outcome.

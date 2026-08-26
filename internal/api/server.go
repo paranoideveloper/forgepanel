@@ -77,6 +77,12 @@ type Server struct {
 	// notifier pushes operator alerts. Nil when Telegram is not configured, and
 	// every method on it is a safe no-op in that state, so no call site checks.
 	notifier *telegram.Notifier
+
+	// poolProber overrides how the scheduled rotation-pool sweep health-checks a
+	// domain. Nil means a real TLS handshake, which is what production wants and
+	// what a test must not do. It lives on the Server rather than in a package
+	// variable so two panels in one process cannot share one.
+	poolProber dns.Prober
 	stop     context.CancelFunc
 
 	lifecycleMu sync.Mutex

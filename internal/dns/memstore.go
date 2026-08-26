@@ -82,6 +82,22 @@ func (m *MemStore) ListPoolEntries(pool string) ([]PoolEntry, error) {
 	return out, nil
 }
 
+// ListPoolNames implements PoolRepo.
+func (m *MemStore) ListPoolNames() ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, 0, len(m.pools))
+	for name, entries := range m.pools {
+		// Only pools that hold something, matching the SQL store: an empty map
+		// entry left behind by the last removal is not a pool to sweep.
+		if len(entries) > 0 {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // PutPoolEntry implements PoolRepo.
 func (m *MemStore) PutPoolEntry(pool string, entry PoolEntry) error {
 	m.mu.Lock()

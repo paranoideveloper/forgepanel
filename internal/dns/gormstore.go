@@ -147,6 +147,16 @@ func (g *GormStore) ListPoolEntries(pool string) ([]PoolEntry, error) {
 	return out, nil
 }
 
+// ListPoolNames implements PoolRepo.
+func (g *GormStore) ListPoolNames() ([]string, error) {
+	var names []string
+	if err := g.db.Model(&DNSPoolEntry{}).
+		Distinct().Order("pool asc").Pluck("pool", &names).Error; err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
 // PutPoolEntry implements PoolRepo with an upsert.
 func (g *GormStore) PutPoolEntry(pool string, entry PoolEntry) error {
 	row := DNSPoolEntry{

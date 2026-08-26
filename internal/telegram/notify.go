@@ -32,6 +32,9 @@ const (
 	EventNodeDown     Event = "node-down"
 	EventCertExpiry   Event = "cert-expiry"
 	EventSecurity     Event = "security"
+	// EventPoolExhausted is a DNS rotation pool with no healthy domain left.
+	// Whatever it fronts is unreachable, and rotating is the only way out.
+	EventPoolExhausted Event = "pool-exhausted"
 )
 
 // RepeatAfter is how long a still-active alert waits before saying so again.
