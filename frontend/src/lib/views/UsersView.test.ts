@@ -239,3 +239,60 @@ describe('UsersView credential rotation', () => {
     expect(posted).toEqual({ uuid: false, password: false, sub_token: true });
   });
 });
+
+// The subscription dialog offered v2ray, Clash and sing-box, hardcoded in the
+// component. The endpoint renders ten: Surge, Loon, Quantumult X, Clash.Meta,
+// Xray JSON, plain links and a JSON dump were all complete renderers reachable
+// only by typing the URL by hand, which no operator would guess to do.
+describe('UsersView subscription formats', () => {
+  beforeEach(() => {
+    stubApi();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function openSubDialog(formats?: string[]) {
+    const settings = formats ? { ...subSettings, formats } : subSettings;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'POST') return { ok: true, json: async () => ({}) } as Response;
+      const table: Record<string, any> = {
+        '/api/admin/users': [user],
+        '/api/admin/groups': [],
+        '/api/admin/inbounds': [],
+        '/api/admin/settings/subscription': settings
+      };
+      return { ok: true, json: async () => table[String(url)] ?? {} } as Response;
+    };
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(screen.getByTestId('open-sub'));
+    return (await screen.findByTestId('sub-format')) as HTMLSelectElement;
+  }
+
+  it('offers every format the server says it can render', async () => {
+    const sel = await openSubDialog([
+      'v2ray', 'clash', 'clash-meta', 'sing-box', 'xray',
+      'surge', 'loon', 'quantumultx', 'links', 'json'
+    ]);
+    const values = [...sel.options].map((o) => o.value);
+    expect(values).toEqual([
+      'v2ray', 'clash', 'clash-meta', 'sing-box', 'xray',
+      'surge', 'loon', 'quantumultx', 'links', 'json'
+    ]);
+  });
+
+  it('builds the URL for a format that is not v2ray', async () => {
+    const sel = await openSubDialog(['v2ray', 'surge']);
+    await fireEvent.change(sel, { target: { value: 'surge' } });
+    const link = await screen.findByTestId('sub-url');
+    expect(link.textContent).toContain('/sub/tok7/surge');
+  });
+
+  // A server that predates the formats field must not leave the operator with an
+  // empty select and no way to fetch anything at all.
+  it('falls back to the three it always had when the server sends no list', async () => {
+    const sel = await openSubDialog();
+    expect([...sel.options].map((o) => o.value)).toEqual(['v2ray', 'clash', 'sing-box']);
+  });
+});

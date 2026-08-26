@@ -48,7 +48,7 @@ func (s *Server) handleSchema(c *gin.Context) {
 	// Only transports Xray 26 actually supports. h2/quic/mKCP were removed and
 	// produce an unstartable config (verified against the running core), so they
 	// are not offered — xhttp replaces h2/quic for the CDN/HTTP use cases.
-	transports := []string{"tcp", "ws", "grpc", "httpupgrade", "xhttp"}
+	transports := offeredTransports()
 	securities := []string{"none", "tls", "reality"}
 
 	c.JSON(200, gin.H{
@@ -141,6 +141,8 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 			{Key: "hysteria2.masquerade.directory", Label: "Masquerade: file directory", Type: "text", Ph: "/var/www"},
 			{Key: "hysteria2.masquerade.status_code", Label: "Masquerade: string status code", Type: "number"},
 			{Key: "hysteria2.masquerade.content", Label: "Masquerade: string content", Type: "text"},
+			{Key: "hysteria2.masquerade.headers", Label: "Masquerade: response headers", Type: "kv",
+				Ph: "Server: nginx", Help: "one Name: value per line, sent with the masquerade response"},
 		}},
 		{Proto: "tuic", Label: "TUIC", Engine: "sing-box", Securities: []string{"tls"}, Fields: []Field{
 			{Key: "uuid", Label: "UUID", Type: "text", Keygen: "uuid"},
@@ -148,22 +150,42 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 			{Key: "tuic.congestion_control", Label: "Congestion", Type: "select", Options: []string{"bbr", "cubic", "new_reno"}, Default: "bbr"},
 			{Key: "tuic.udp_relay_mode", Label: "UDP relay", Type: "select", Options: []string{"native", "quic"}, Default: "native"},
 			{Key: "tuic.zero_rtt_handshake", Label: "Zero-RTT", Type: "bool"},
+			{Key: "tuic.heartbeat", Label: "Heartbeat (s)", Type: "number",
+				Help: "keeps the QUIC connection alive through NAT that drops idle flows"},
+			{Key: "tuic.disable_sni", Label: "Disable SNI", Type: "bool",
+				Help: "omit the server name from the TLS handshake"},
 		}},
 		{Proto: "anytls", Label: "AnyTLS", Engine: "sing-box", Securities: []string{"tls"}, Fields: []Field{
 			{Key: "password", Label: "Password", Type: "text", Keygen: "password"},
 			{Key: "anytls.idle_session_timeout", Label: "Idle timeout (s)", Type: "number"},
+			{Key: "anytls.idle_session_check_interval", Label: "Idle check interval (s)", Type: "number"},
+			{Key: "anytls.min_idle_sessions", Label: "Minimum idle sessions", Type: "number",
+				Help: "sessions kept open so a new request does not pay a handshake"},
+			{Key: "anytls.padding_scheme", Label: "Padding scheme (one rule per line)", Type: "lines",
+				Ph: "stop=8\n0=30-30\n1=100-400", Help: "must be IDENTICAL on the client, or the two disagree on frame sizes"},
 		}},
 		{Proto: "shadowtls", Label: "ShadowTLS", Engine: "sing-box", Fields: []Field{
 			{Key: "shadowtls.version", Label: "Version", Type: "iselect", Options: []string{"3", "2", "1"}, Default: 3},
 			{Key: "shadowtls.password", Label: "Password", Type: "text", Keygen: "password"},
 			{Key: "shadowtls.handshake_host", Label: "Handshake host", Type: "text", Ph: "www.apple.com", Default: "www.apple.com"},
 			{Key: "shadowtls.handshake_port", Label: "Handshake port", Type: "number", Default: 443},
+			{Key: "shadowtls.strict_mode", Label: "Strict mode (v3)", Type: "bool",
+				Help: "v3 only: reject clients that do not prove they know the password. Ignored on v1/v2."},
 		}},
 		{Proto: "wireguard", Label: "WireGuard", Engine: "xray", Fields: []Field{
 			{Key: "wireguard.private_key", Label: "Private key", Type: "text", Keygen: "wireguard"},
 			{Key: "wireguard.public_key", Label: "Peer public key", Type: "text"},
-			{Key: "wireguard.local_address", Label: "Address (comma-sep)", Type: "csv", Ph: "10.0.0.2/32"},
+			{Key: "wireguard.server_address", Label: "Server tunnel address", Type: "csv", Ph: "10.66.66.1/24",
+				Help: "this box's address inside the tunnel. The panel allocates one if left empty."},
+			{Key: "wireguard.allowed_ips", Label: "Client AllowedIPs", Type: "csv", Ph: "0.0.0.0/0, ::/0",
+				Help: "what the CLIENT routes through the tunnel. 0.0.0.0/0, ::/0 sends everything."},
+			{Key: "wireguard.pre_shared_key", Label: "Pre-shared key", Type: "text",
+				Help: "optional extra symmetric key; must match on both ends"},
+			{Key: "wireguard.persistent_keepalive", Label: "Persistent keepalive (s)", Type: "number", Default: 25,
+				Help: "0 = off. Needed behind NAT that forgets the flow."},
 			{Key: "wireguard.mtu", Label: "MTU", Type: "number", Default: 1420},
+			{Key: "wireguard.workers", Label: "Workers", Type: "number",
+				Help: "sing-box endpoint worker count; 0 = one per CPU"},
 			{Key: "wireguard.reserved", Label: "Reserved (WARP)", Type: "csvint", Ph: "0,0,0"},
 		}},
 		// AmneziaWG runs in KERNEL mode (amneziawg module + awg-quick). Keys and
@@ -172,6 +194,12 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 		{Proto: "amneziawg", Label: "AmneziaWG (kernel)", Engine: "amneziawg", Fields: []Field{
 			{Key: "amneziawg.private_key", Label: "Server private key (auto)", Type: "text", Keygen: "wireguard"},
 			{Key: "amneziawg.public_key", Label: "Peer public key (auto)", Type: "text"},
+			{Key: "amneziawg.server_address", Label: "Server tunnel address", Type: "csv", Ph: "10.67.67.1/24",
+				Help: "this box's address inside the tunnel. The panel allocates one if left empty."},
+			{Key: "amneziawg.allowed_ips", Label: "Client AllowedIPs", Type: "csv", Ph: "0.0.0.0/0, ::/0"},
+			{Key: "amneziawg.pre_shared_key", Label: "Pre-shared key", Type: "text",
+				Help: "optional extra symmetric key; must match on both ends"},
+			{Key: "amneziawg.persistent_keepalive", Label: "Persistent keepalive (s)", Type: "number", Default: 25},
 			{Key: "amneziawg.mtu", Label: "MTU", Type: "number", Default: 1420},
 			{Key: "amneziawg.jc", Label: "Jc (junk packet count)", Type: "number", Default: 8},
 			{Key: "amneziawg.jmin", Label: "Jmin (junk min size)", Type: "number", Default: 50},
@@ -191,6 +219,8 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 			{Key: "brook.mode", Label: "Mode", Type: "select", Options: []string{"server", "wsserver", "wssserver", "quicserver"}, Default: "server", Help: "server=raw TCP/UDP; ws=WebSocket; wss=WebSocket+TLS; quic=QUIC"},
 			{Key: "password", Label: "Password", Type: "text", Keygen: "password"},
 			{Key: "brook.path", Label: "Path (ws/wss)", Type: "text", Default: "/ws"},
+			{Key: "brook.udp_over_tcp", Label: "UDP over TCP", Type: "bool",
+				Help: "carry UDP inside the TCP stream, for networks that drop or throttle UDP"},
 		}},
 	}
 }
@@ -198,7 +228,26 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 // transportFields returns the extra fields each transport needs.
 func transportFields() map[string][]Field {
 	return map[string][]Field{
-		"tcp": {},
+		// TCP is not "no transport" — it is the one that carries Xray's HTTP
+		// header camouflage, and this map entry was empty, so the whole feature
+		// was reachable only by hand-editing the node through the API even
+		// though the renderer, both share-link exporters and the Clash exporter
+		// have carried it all along.
+		//
+		// Measured against Xray 26.2.6 with a real client and server rather than
+		// reasoned about: the server validates ONLY the path. A client whose
+		// path differs cannot connect at all; a client whose Host header or
+		// request method differ connects fine. That is why Path says it must
+		// match and Host does not.
+		"tcp": {
+			{Key: "transport.header.type", Label: "Header camouflage", Type: "select",
+				Options: []string{"", "none", "http"},
+				Help:    "wrap the stream in a fake HTTP exchange. Empty or \"none\" sends raw TCP."},
+			{Key: "transport.path", Label: "Camouflage path", Type: "text", Ph: "/",
+				Help: "the path in the fake request. The core CHECKS this: a client using a different path cannot connect."},
+			{Key: "transport.host", Label: "Camouflage Host", Type: "text", Ph: "www.example.com",
+				Help: "the Host header in the fake request. Not checked by the server; it shapes what a DPI box sees and is carried in the share link."},
+		},
 		"ws": {
 			{Key: "transport.path", Label: "Path", Type: "text", Default: "/", Ph: "/ws"},
 			{Key: "transport.host", Label: "Host", Type: "text"},
@@ -226,15 +275,18 @@ func transportFields() map[string][]Field {
 		// that owns the inbound. The options come from the model's own enum
 		// tables so this list cannot drift from what the core accepts.
 		"xhttp": xhttpFields(),
-		"h2": {
-			{Key: "transport.path", Label: "Path", Type: "text", Default: "/"},
-			{Key: "transport.host", Label: "Host", Type: "text"},
-		},
-		"kcp": {
-			{Key: "transport.seed", Label: "Seed", Type: "text"},
-		},
-		"quic": {},
 	}
+}
+
+// offeredTransports is the single list of transports the form may offer.
+//
+// It used to exist twice: handleSchema hardcoded tcp/ws/grpc/httpupgrade/xhttp,
+// while transportFields also shipped field definitions for h2, kcp and quic —
+// transports model.Validate rejects outright, so anything built from them was a
+// guaranteed 400. Two lists that must agree and no test that they do is how a
+// payload ends up advertising options the same server refuses.
+func offeredTransports() []string {
+	return []string{"tcp", "ws", "grpc", "httpupgrade", "xhttp"}
 }
 
 // xhttpFields returns the complete XHTTP surface.

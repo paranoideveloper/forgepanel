@@ -137,6 +137,11 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 		"front_mode":   string(s.subFrontMode()),
 		"front_modes":  []string{"none", "sni", "cdn"},
 		"fancy_themes": model.FancyThemes(),
+		// The formats this endpoint can actually render, so the sub dialog offers
+		// exactly them. It offered three of nine hardcoded, which meant the Surge,
+		// Loon and Quantumult X renderers — complete, tested, and reachable by
+		// typing the URL — were invisible to every operator who used the panel.
+		"formats": subFormats,
 	})
 }
 
@@ -205,8 +210,9 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		"name_template": s.subNameTemplate(), "front_domain": s.subFrontDomain(), "front_mode": string(s.subFrontMode())})
 }
 
-// subFormats are the subscription formats this endpoint can render, listed for
-// the error message when a client asks for something else.
+// subFormats are the subscription formats this endpoint can render. It is the
+// list the sub dialog offers and the list the error message names when a client
+// asks for something else, so the two can never disagree.
 var subFormats = []string{"v2ray", "clash", "clash-meta", "sing-box", "xray", "surge", "loon", "quantumultx", "links", "json"}
 
 // canonicalSubFormat maps a requested format (and its aliases) to the single

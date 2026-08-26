@@ -24,7 +24,17 @@
   // sub modal
   let subModalOpen = $state(false);
   let activeSubUser = $state<User | null>(null);
-  let subFormat = $state<'v2ray' | 'clash' | 'sing-box'>('v2ray');
+  let subFormat = $state('v2ray');
+  // Client app names, not prose: "Quantumult X" is what the app is called in
+  // every language. An unknown format still renders under its wire name, so a
+  // format added server-side appears here without a frontend change.
+  const SUB_FORMAT_NAMES: Record<string, string> = {
+    'v2ray': 'v2rayN / v2rayNG', 'clash': 'Clash', 'clash-meta': 'Clash.Meta / Mihomo',
+    'sing-box': 'sing-box', 'xray': 'Xray JSON', 'surge': 'Surge', 'loon': 'Loon',
+    'quantumultx': 'Quantumult X', 'links': 'Plain links', 'json': 'JSON'
+  };
+  const subFormatLabel = (f: string) => SUB_FORMAT_NAMES[f] ?? f;
+
   const subUrl = $derived.by(() => {
     if (!activeSubUser) return '';
     const base = `${window.location.origin}/sub/${activeSubUser.sub_token}`;
@@ -59,8 +69,12 @@
   // subscription defaults (routing preset + TLS fragment) applied to every
   // generated sing-box/Xray/Clash config.
   interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; }
   let subSettings = $state<SubSettings | null>(null);
+  // The formats come from the server, which is the only thing that knows what it
+  // can render. Hardcoding them here left six of nine renderers unreachable from
+  // the panel, Surge/Loon/Quantumult X among them.
+  const subFormats = $derived(subSettings?.formats ?? ['v2ray', 'clash', 'sing-box']);
 
   interface Quota {
     role: string;
@@ -610,7 +624,7 @@
             <td><code>{u.sub_token}</code></td>
             <td class="acts">
               <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>{tr('users.manage')}</button>
-              <button class="sm" onclick={() => openSubModal(u)}>{tr('users.sub')}</button>
+              <button class="sm" data-testid="open-sub" onclick={() => openSubModal(u)}>{tr('users.sub')}</button>
               <button class="sm" onclick={() => setStatus(u, (u as any).status === 'active' ? 'disabled' : 'active')}>{(u as any).status === 'active' ? tr('users.disable') : tr('users.enable')}</button>
               <button class="sm" data-testid="rotate" onclick={() => openRotate(u)}>{tr('users.rotate')}</button>
               <button class="sm danger" onclick={() => deleteUser(u.id)}>{tr('users.delete')}</button>
@@ -784,9 +798,11 @@
 <!-- Sub modal -->
 <Modal title={tr('users.subscription') + (activeSubUser?.username || '')} isOpen={subModalOpen} onClose={() => subModalOpen = false}>
   <div class="mgrid">
-    <label>{tr('users.format')}<select bind:value={subFormat}><option value="v2ray">{tr('users.v2ray')}</option><option value="clash">{tr('users.clash')}</option><option value="sing-box">sing-box</option></select></label>
+    <label>{tr('users.format')}<select bind:value={subFormat} data-testid="sub-format">
+      {#each subFormats as f (f)}<option value={f}>{subFormatLabel(f)}</option>{/each}
+    </select></label>
   </div>
-  <div class="uri-row"><code>{subUrl}</code><button class="sm" onclick={copySubUrl}>{tr('users.copy')}</button></div>
+  <div class="uri-row"><code data-testid="sub-url">{subUrl}</code><button class="sm" onclick={copySubUrl}>{tr('users.copy')}</button></div>
   {#if subUrl}<div class="qr"><QRCode value={subUrl} size={190} /></div>{/if}
 </Modal>
 

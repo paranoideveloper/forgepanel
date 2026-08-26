@@ -199,12 +199,15 @@ func applyCreateDefaults(n *model.Node) {
 			}
 		}
 		// Tunnel addressing (private range). Server .1, client .2.
+		//
+		// LocalAddress is deliberately NOT adopted here. It is the dialer's own
+		// address — the parser fills it from a wireguard:// link, which describes
+		// a CLIENT — so an inbound created from an imported link took the
+		// client's 10.0.0.2/32 as the server's interface address, leaving the
+		// server and the peer it provisions on different subnets and the tunnel
+		// dead. The panel allocates its own subnet instead.
 		if len(w.ServerAddress) == 0 {
-			if len(w.LocalAddress) > 0 {
-				w.ServerAddress = w.LocalAddress
-			} else {
-				w.ServerAddress = []string{"10.66.66.1/24"}
-			}
+			w.ServerAddress = []string{"10.66.66.1/24"}
 		}
 		if len(w.PeerAddress) == 0 {
 			w.PeerAddress = []string{"10.66.66.2/32"}

@@ -205,8 +205,16 @@ func xrayStream(t model.Transport, sec model.Security, sni string, inbound bool)
 	switch t.Network {
 	case model.NetTCP:
 		if t.HeaderObfs != nil && t.HeaderObfs.Type == "http" {
-			ss["tcpSettings"] = jobj{"header": jobj{"type": "http",
-				"request": jobj{"path": splitOr(t.Path, "/"), "headers": jobj{"Host": splitOr(t.Host, "")}}}}
+			req := jobj{"path": splitOr(t.Path, "/")}
+			// An empty Host was being sent as `"Host": [""]`. The point of this
+			// transport is to look like ordinary web traffic, and a request with
+			// a blank Host header looks like nothing else on the internet — it
+			// made the camouflage more distinctive than no camouflage. Omit the
+			// header entirely when there is nothing to put in it.
+			if t.Host != "" {
+				req["headers"] = jobj{"Host": []string{t.Host}}
+			}
+			ss["tcpSettings"] = jobj{"header": jobj{"type": "http", "request": req}}
 		}
 	case model.NetWS:
 		wsHeaders := jobj{}

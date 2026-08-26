@@ -143,12 +143,17 @@ func KeySizeForMethod(method string) (size int, is2022 bool) {
 }
 
 // Header is an obfuscation header for tcp/mkcp/quic transports.
+//
+// Type is the whole of it. This carried Request/Host/Path/Method as well, none
+// of which any producer set, any renderer read or any exporter wrote — and for
+// the http type they would have been ignored anyway. Measured against Xray
+// 26.2.6 with a real client and server on the tcp http header: the server
+// validates ONLY the request path (a mismatched path fails the connection), and
+// ignores the method and every header including Host. The camouflage request is
+// therefore described by Transport.Path and Transport.Host, which is what
+// xrayStream renders and what the share-link exporters carry.
 type Header struct {
-	Type    string              `json:"type,omitempty"` // none, http, srtp, utp, wechat-video, dtls, wireguard
-	Request map[string][]string `json:"request,omitempty"`
-	Host    []string            `json:"host,omitempty"`
-	Path    []string            `json:"path,omitempty"`
-	Method  string              `json:"method,omitempty"`
+	Type string `json:"type,omitempty"` // none, http, srtp, utp, wechat-video, dtls, wireguard
 }
 
 // Transport carries every transport-layer knob, orthogonally to the protocol.
@@ -351,11 +356,6 @@ type Hysteria2Options struct {
 	Masquerade     *Hy2Masquerade `json:"masquerade,omitempty"`
 	MasqueradeType string         `json:"masquerade_type,omitempty"` // legacy: proxy, file, string
 	MasqueradeURL  string         `json:"masquerade_url,omitempty"`  // legacy
-
-	// BrutalCC is a PANEL preset flag only — sing-box has no brutal_cc field, so it
-	// is NEVER rendered. When set, applyCreateDefaults selects a matching bandwidth
-	// profile instead. Kept for backwards-compatible persistence.
-	BrutalCC bool `json:"brutal_cc,omitempty"`
 }
 
 // Hy2Masquerade is the sing-box hysteria2 masquerade object. Type selects which
@@ -415,8 +415,20 @@ type WireGuardOptions struct {
 	Reserved     []int    `json:"reserved,omitempty"` // 3 bytes, WARP compatible
 	Workers      int      `json:"workers,omitempty"`
 
-	// LocalAddress is the legacy field name kept for parse/back-compat; it maps to
-	// ServerAddress when set.
+	// LocalAddress is the tunnel address of whichever side THIS node describes.
+	//
+	// It is not interchangeable with ServerAddress, and the old comment here
+	// saying it "maps to ServerAddress" caused exactly the confusion it sounds
+	// like. Every reader treats it as the DIALER's own address: the parser fills
+	// it from a wireguard:// link's address=, the URI and Clash exporters write
+	// it back out as the client's address, and the xray outbound renders it as
+	// the local interface address. Only the inbound create path ever read it as
+	// the server's address, which is why an inbound imported from a client link
+	// used to take the client's /32 as its own interface address and produce a
+	// tunnel whose two ends were not on a common subnet.
+	//
+	// For an inbound the panel serves, the server's address is ServerAddress and
+	// the client's is PeerAddress; both are allocated by the panel.
 	LocalAddress []string `json:"local_address,omitempty"`
 
 	// Peers is the per-client peer list the SERVER config renders.
@@ -1244,8 +1256,6 @@ func (t Transport) clone() Transport {
 	c.H2Hosts = append([]string(nil), t.H2Hosts...)
 	if t.HeaderObfs != nil {
 		h := *t.HeaderObfs
-		h.Host = append([]string(nil), t.HeaderObfs.Host...)
-		h.Path = append([]string(nil), t.HeaderObfs.Path...)
 		c.HeaderObfs = &h
 	}
 	if t.XMux != nil {

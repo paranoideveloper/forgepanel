@@ -173,7 +173,19 @@ func (s *Server) handleListInbounds(c *gin.Context) {
 	for _, in := range ins {
 		n, _ := in.Node()
 		out = append(out, gin.H{"id": in.ID, "remark": in.Remark, "protocol": in.Protocol, "port": in.Port,
-			"enabled": in.Enabled, "node": n, "reachable": reach(in.Port)})
+			"enabled": in.Enabled, "node": n, "reachable": reach(in.Port),
+			// Why an enabled inbound is not in the running configuration. The
+			// detection, the storage and the audit trail for this were all built,
+			// and the list — the only place the panel could show it — left the
+			// field out of the payload, so the badge in the table could never
+			// render and an inbound carrying no traffic still read as "Enabled".
+			"not_serving_reason": in.NotServingReason,
+			"not_serving_since":  in.NotServingSince,
+			// Whether the undo endpoint has anything to restore. Without it the
+			// only way to learn there is nothing to undo is to press Undo and
+			// read a 409.
+			"can_undo": in.PrevNodeJSON != "",
+		})
 	}
 	if !q.Paged() {
 		c.JSON(200, out)

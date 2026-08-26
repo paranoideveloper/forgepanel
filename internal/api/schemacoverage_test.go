@@ -45,11 +45,23 @@ func schemaKeys() map[string]bool {
 
 // jsonTags returns the json tag names of a struct's fields, recursing into
 // nested structs with the dot-path the schema uses.
+//
+// An ANONYMOUS embedded struct is flattened, because that is what encoding/json
+// does: AmneziaWGOptions embeds WireGuardOptions, so "amneziawg.allowed_ips" is
+// a real key in a stored node. Skipping it — which this did, since an embedded
+// field carries no json tag of its own — made every inherited field invisible to
+// the guard, which is precisely how AmneziaWG shipped with no control for the
+// tunnel address, the preshared key or the keepalive that its exported client
+// config writes out.
 func jsonTags(t reflect.Type, prefix string) []string {
 	var out []string
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		tag := strings.Split(f.Tag.Get("json"), ",")[0]
+		if f.Anonymous && tag == "" && f.Type.Kind() == reflect.Struct {
+			out = append(out, jsonTags(f.Type, prefix)...)
+			continue
+		}
 		if tag == "" || tag == "-" {
 			continue
 		}
@@ -73,7 +85,14 @@ var notOffered = map[string]string{
 	"transport.congestion":        "mKCP removed in Xray 26",
 	"transport.read_buffer_size":  "mKCP removed in Xray 26",
 	"transport.write_buffer_size": "mKCP removed in Xray 26",
-	"transport.header":            "tcp/mKCP/QUIC header obfuscation; only reachable on transports Xray 26 dropped",
+	// NOT an exemption any more, and the reason it used to carry was simply
+	// untrue: tcp is the FIRST transport the form offers, xrayStream renders its
+	// http header camouflage, and both share-link exporters carry it. The entry
+	// said the feature was "only reachable on transports Xray 26 dropped", which
+	// is how a guard designed to catch unreachable options was talked into
+	// ignoring the one that really was unreachable. Header has a single field
+	// now and it is offered; this line only skips the CONTAINER.
+	"transport.header": "container; transport.header.type is the field",
 
 	"transport.quic_security": "QUIC removed in Xray 26",
 	"transport.quic_key":      "QUIC removed in Xray 26",
@@ -262,5 +281,136 @@ func TestEverySecurityOptionIsReachableFromTheForm(t *testing.T) {
 		t.Fatalf("%d security option(s) exist in the model but have no control in the form:\n  - %s\n\n"+
 			"Add a Field for each, or document it in notOfferedSecurity with the reason.",
 			len(missing), strings.Join(missing, "\n  - "))
+	}
+}
+
+// notOfferedProtocol documents protocol options the panel deliberately does not
+// expose, with the reason. Same contract as notOffered.
+//
+// There was no guard on this side at all, which is how three options an operator
+// would reasonably expect to set — AmneziaWG's reserved bytes and tunnel address,
+// and Hysteria2's Brutal preset — stayed reachable only through the API for as
+// long as they existed. The transport and security layers had a guard each; the
+// protocol layer, which has by far the most fields, had none.
+var notOfferedProtocol = map[string]string{
+	// Provisioned by the panel, never typed. A WireGuard/AmneziaWG tunnel only
+	// works if both key pairs and both tunnel addresses agree, so the panel mints
+	// them together; letting an operator type one half is how a tunnel ends up
+	// with a peer whose key matches nothing.
+	"wireguard.peer_private_key": "minted by the panel with its matching public key",
+	"wireguard.peer_public_key":  "minted by the panel with its matching private key",
+	"wireguard.peer_address":     "allocated by the panel from the tunnel subnet",
+	"wireguard.peers":            "derived from the users assigned to the inbound, not stored on it",
+	"amneziawg.peer_private_key": "minted by the panel with its matching public key",
+	"amneziawg.peer_public_key":  "minted by the panel with its matching private key",
+	"amneziawg.peer_address":     "allocated by the panel from the tunnel subnet",
+	"amneziawg.peers":            "derived from the users assigned to the inbound, not stored on it",
+	"shadowtls.inner_method":     "minted by the panel for the inner Shadowsocks inbound",
+	"shadowtls.inner_password":   "minted by the panel for the inner Shadowsocks inbound",
+
+	// Legacy shapes kept only so old stored nodes and old links still load.
+	"hysteria2.masquerade_type": "legacy; Normalize migrates it into masquerade.type",
+	"hysteria2.masquerade_url":  "legacy; Normalize migrates it into masquerade.url",
+
+	// local_address is the DIALER's own tunnel address: the parser fills it from
+	// a wireguard:// link, and the URI/Clash exporters and the xray outbound read
+	// it back. On an inbound the panel is the server, so the two addresses that
+	// mean anything are server_address and peer_address, and both are offered or
+	// allocated. Showing local_address as well would be a third control that
+	// changes what a client link says without changing what the server does.
+	"wireguard.local_address": "the dialer's own address; an inbound uses server_address/peer_address",
+	"amneziawg.local_address": "the dialer's own address; an inbound uses server_address/peer_address",
+
+	// AmneziaWG runs in KERNEL mode through awg-quick, whose config format has
+	// no line for either of these. Reserved is a WARP header trick that only the
+	// USERSPACE WireGuard implementations in xray and sing-box apply, and Workers
+	// is the sing-box endpoint's goroutine count. Offering them on a kernel
+	// interface would be two controls that change nothing.
+	"amneziawg.reserved": "awg-quick has no Reserved; it is a userspace-only WARP header",
+	"amneziawg.workers":  "worker count belongs to the sing-box endpoint, not a kernel interface",
+
+	// Nested structs covered by their own dot-path fields.
+	"hysteria2.masquerade": "container; its fields are offered individually",
+}
+
+// TestEveryProtocolOptionIsReachableFromTheForm is the protocol-layer twin of
+// TestEveryTransportOptionIsReachableFromTheForm.
+func TestEveryProtocolOptionIsReachableFromTheForm(t *testing.T) {
+	keys := schemaKeys()
+	// Only protocols the form can actually create. A protocol no core serves as
+	// an inbound has no form to be reachable from, and demanding fields for it
+	// would force controls that build an inbound which cannot start.
+	served := map[string]bool{}
+	for _, ps := range protocolSchemaList([]string{"tcp"}, []string{"none"}) {
+		served[ps.Proto] = true
+	}
+
+	cases := []struct {
+		proto  string
+		typ    reflect.Type
+		prefix string
+	}{
+		{"hysteria2", reflect.TypeOf(model.Hysteria2Options{}), "hysteria2."},
+		{"hysteria2", reflect.TypeOf(model.Hy2Masquerade{}), "hysteria2.masquerade."},
+		{"tuic", reflect.TypeOf(model.TUICOptions{}), "tuic."},
+		{"anytls", reflect.TypeOf(model.AnyTLSOptions{}), "anytls."},
+		{"wireguard", reflect.TypeOf(model.WireGuardOptions{}), "wireguard."},
+		{"amneziawg", reflect.TypeOf(model.AmneziaWGOptions{}), "amneziawg."},
+		{"shadowtls", reflect.TypeOf(model.ShadowTLSOptions{}), "shadowtls."},
+		{"brook", reflect.TypeOf(model.BrookOptions{}), "brook."},
+		{"shadowsocks", reflect.TypeOf(model.SSPluginOptions{}), "ss_plugin."},
+	}
+
+	var missing []string
+	for _, c := range cases {
+		if !served[c.proto] {
+			continue
+		}
+		for _, tag := range jsonTags(c.typ, c.prefix) {
+			if keys[tag] || notOfferedProtocol[tag] != "" {
+				continue
+			}
+			missing = append(missing, tag)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("%d protocol option(s) exist in the model but have no control in the form, so they "+
+			"can be set through the API and then neither seen nor changed in the panel:\n  - %s\n\n"+
+			"Add a Field for each, or document it in notOfferedProtocol with the reason it cannot be offered.",
+			len(missing), strings.Join(missing, "\n  - "))
+	}
+}
+
+
+// The schema payload used to advertise field definitions for h2, kcp and quic
+// while handleSchema offered none of them, because the offered list and the
+// field map were written out separately. model.Validate rejects all three, so
+// anything built from those fields was a guaranteed 400 — a form the panel's own
+// API refuses. Neither list is wrong on its own; only comparing them finds it.
+func TestTheFormOffersExactlyTheTransportsItShipsFieldsFor(t *testing.T) {
+	fields := transportFields()
+	offered := map[string]bool{}
+	for _, n := range offeredTransports() {
+		offered[n] = true
+		if _, ok := fields[n]; !ok {
+			t.Errorf("transport %q is offered but the payload carries no field definitions for it", n)
+		}
+	}
+	for n := range fields {
+		if !offered[n] {
+			t.Errorf("the payload ships fields for transport %q, which the form never offers", n)
+		}
+	}
+	// And every offered transport must be one the core will actually start.
+	for _, n := range offeredTransports() {
+		node := &model.Node{
+			Protocol: model.ProtoVLESS, Address: "example.com", Port: 443,
+			UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+			Transport: model.Transport{Network: model.Network(n)},
+		}
+		node.Normalize()
+		if err := node.Validate(); err != nil {
+			t.Errorf("the form offers transport %q, which the panel then refuses: %v", n, err)
+		}
 	}
 }

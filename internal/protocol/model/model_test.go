@@ -932,7 +932,7 @@ func TestCloneIsDeep(t *testing.T) {
 	orig := &Node{
 		Protocol: ProtoVLESS, Address: "a", Port: 443, UUID: "u",
 		Transport: Transport{Network: NetWS, Headers: map[string]string{"X": "1"}, H2Hosts: []string{"h1"},
-			HeaderObfs: &Header{Type: "http", Host: []string{"h"}, Path: []string{"/p"}}, XMux: &XMux{MaxConcurrency: "8"}},
+			HeaderObfs: &Header{Type: "http"}, XMux: &XMux{MaxConcurrency: "8"}},
 		Security: Security{Type: SecReality, ALPN: []string{"h2"}, PinSHA256: []string{"pin"},
 			Reality: &Reality{PublicKey: "pk", ServerNames: []string{"s"}, ShortIDs: []string{"00"}}, ECH: &ECH{Enabled: true}},
 		Multiplex: &Multiplex{Enabled: true, Brutal: &Brutal{Enabled: true, UpMbps: 50}},
@@ -952,7 +952,6 @@ func TestCloneIsDeep(t *testing.T) {
 	// Mutate every independently-allocated part of the clone.
 	c.Transport.Headers["X"] = "mutated"
 	c.Transport.H2Hosts[0] = "mutated"
-	c.Transport.HeaderObfs.Host[0] = "mutated"
 	c.Transport.HeaderObfs.Type = "mutated"
 	c.Transport.XMux.MaxConcurrency = "mutated"
 	c.Security.ALPN[0] = "mutated"
@@ -980,7 +979,7 @@ func TestCloneIsDeep(t *testing.T) {
 
 	// None of it may have reached the original.
 	if orig.Transport.Headers["X"] != "1" || orig.Transport.H2Hosts[0] != "h1" ||
-		orig.Transport.HeaderObfs.Host[0] != "h" || orig.Transport.HeaderObfs.Type != "http" ||
+		orig.Transport.HeaderObfs.Type != "http" ||
 		orig.Transport.XMux.MaxConcurrency != "8" {
 		t.Error("Clone aliased the transport")
 	}

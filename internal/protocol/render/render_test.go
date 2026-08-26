@@ -503,8 +503,11 @@ func TestXrayStreamSettingsTransports(t *testing.T) {
 				if !reflect.DeepEqual(req["path"], []string{"/"}) {
 					t.Errorf("default path = %v, want [/]", req["path"])
 				}
-				if !reflect.DeepEqual(sub(t, req, "headers")["Host"], []string{""}) {
-					t.Errorf("default host = %v", sub(t, req, "headers")["Host"])
+				// No Host set means no Host header. This used to emit
+				// `"Host": [""]`, which is a request no real browser sends —
+				// camouflage that is easier to fingerprint than plain TCP.
+				if _, ok := req["headers"]; ok {
+					t.Errorf("headers = %v, want none when no Host is configured", req["headers"])
 				}
 			}},
 		{"ws", model.Transport{Network: model.NetWS, Path: "/ws", Host: "cdn.example.com", EarlyData: 2048, EDHeader: "Sec-WebSocket-Protocol"},
@@ -1505,7 +1508,7 @@ func TestSingboxInboundPerProtocol(t *testing.T) {
 			name: "hysteria2 with masquerade",
 			node: &model.Node{Protocol: model.ProtoHysteria2, Address: "0.0.0.0", Port: 443, Password: "pw",
 				Hysteria2: &model.Hysteria2Options{UpMbps: 100, DownMbps: 200, ObfsType: "salamander", ObfsPassword: "opw",
-					IgnoreClientBandwidth: true, BrutalCC: true,
+					IgnoreClientBandwidth: true,
 					Masquerade: &model.Hy2Masquerade{Type: "proxy", URL: "https://example.com", RewriteHost: true}}},
 			check: func(t *testing.T, in jobj) {
 				if str(t, in, "type") != "hysteria2" || num(t, in, "up_mbps") != 100 || in["ignore_client_bandwidth"] != true {
@@ -1518,7 +1521,9 @@ func TestSingboxInboundPerProtocol(t *testing.T) {
 				if str(t, m, "type") != "proxy" || str(t, m, "url") != "https://example.com" || m["rewrite_host"] != true {
 					t.Fatalf("masquerade = %v", m)
 				}
-				// brutal_cc is a panel-only preset flag and is never a sing-box key.
+				// There is no brutal_cc key. The model carried one, documented as a
+				// panel preset that "applyCreateDefaults selects a bandwidth profile
+				// for" — a behaviour that existed in the comment and nowhere else.
 				mustAbsent(t, in, "brutal_cc")
 				if sub(t, in, "tls")["enabled"] != true {
 					t.Error("hysteria2 inbound needs a tls block")

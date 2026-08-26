@@ -11,7 +11,7 @@
   interface Row {
     id: number; remark: string; protocol: string; port: number; enabled: boolean;
     not_serving_reason?: string; not_serving_since?: string;
-    reachable?: boolean;
+    reachable?: boolean; can_undo?: boolean;
     node?: any;
   }
 
@@ -27,15 +27,46 @@
   function toggleAll() {
     selected = selected.size === rows.length ? new Set() : new Set(rows.map(r => r.id));
   }
-  async function bulk(action: 'enable' | 'disable' | 'delete') {
+  async function bulk(action: 'enable' | 'disable' | 'delete' | 'set-domain', domain?: string) {
     if (selected.size === 0) return;
     if (action === 'delete' && !confirm(tr('inbounds.delete_size_inbound_s', { size: selected.size }))) return;
     try {
-      await apiFetch('/admin/inbounds/bulk', { method: 'POST', body: JSON.stringify({ action, ids: [...selected] }) });
-      showToast(tr('inbounds.action_size_inbound_s', { action, size: selected.size }), 'success');
+      const res = await apiFetch<{ succeeded: number; total: number; results?: { id: number; ok: boolean; error?: string }[] }>(
+        '/admin/inbounds/bulk',
+        { method: 'POST', body: JSON.stringify({ action, ids: [...selected], domain }) }
+      );
+      // A bulk call reports per-id results and can succeed partially. Reporting
+      // the whole batch as a success hides the ones that did not apply, and the
+      // operator finds out later from a config that did not change.
+      if (res && res.succeeded < res.total) {
+        const why = res.results?.find((r) => !r.ok)?.error ?? '';
+        showToast(tr('inbounds.bulk_partial', { done: res.succeeded, total: res.total, why }), 'error');
+      } else {
+        showToast(tr('inbounds.action_size_inbound_s', { action, size: selected.size }), 'success');
+      }
       selected = new Set();
       load();
     } catch (e: any) { showToast(e.message || tr('inbounds.bulk_action_failed'), 'error'); }
+  }
+
+  // Set-domain cascades: it rewrites the SNI, the transport Host and every other
+  // place the domain appears in each selected inbound, which is the whole reason
+  // it exists as a bulk action and the reason it needs its own confirmation
+  // rather than sharing the enable/disable button row.
+  let domainOpen = $state(false);
+  let bulkDomain = $state('');
+  async function applyBulkDomain() {
+    domainOpen = false;
+    await bulk('set-domain', bulkDomain.trim());
+    bulkDomain = '';
+  }
+
+  async function undo(r: Row) {
+    try {
+      await apiFetch(`/admin/inbounds/${r.id}/undo`, { method: 'POST' });
+      showToast(tr('inbounds.undone'), 'success');
+      load();
+    } catch (e: any) { showToast(e.message || tr('inbounds.undo_failed'), 'error'); }
   }
   let verifyResults = $state<Record<number, { pass: boolean; unprovable?: boolean; latency?: number; detail?: string }>>({});
 
@@ -213,6 +244,7 @@
         <span>{tr('inbounds.selected', { size: selected.size })}</span>
         <button class="sm" data-testid="bulk-enable" onclick={() => bulk('enable')}>{tr('inbounds.enable')}</button>
         <button class="sm" onclick={() => bulk('disable')}>{tr('inbounds.disable')}</button>
+        <button class="sm" data-testid="bulk-set-domain" onclick={() => { bulkDomain = ''; domainOpen = true; }}>{tr('inbounds.set_domain')}</button>
         <button class="sm danger" data-testid="bulk-delete" onclick={() => bulk('delete')}>{tr('inbounds.delete')}</button>
       </div>
     {/if}
@@ -259,6 +291,9 @@
               <button class="sm" data-testid="edit-btn" onclick={() => edit(r)}>{tr('inbounds.edit')}</button>
               <button class="sm" onclick={() => verify(r)}>{tr('inbounds.verify')}</button>
               <button class="sm" onclick={() => clone(r)}>{tr('inbounds.clone')}</button>
+              {#if r.can_undo}
+                <button class="sm" data-testid="undo-btn" title={tr('inbounds.undo_hint')} onclick={() => undo(r)}>{tr('inbounds.undo')}</button>
+              {/if}
               <button class="sm" onclick={() => toggle(r)}>{r.enabled ? tr('inbounds.disable_toggle') : tr('inbounds.enable_toggle')}</button>
               <button class="sm danger" onclick={() => del(r)}>{tr('inbounds.delete')}</button>
             </td>
@@ -269,6 +304,20 @@
     </div>
   {/if}
 </div>
+
+<Modal title={tr('inbounds.set_domain')} isOpen={domainOpen} onClose={() => domainOpen = false}>
+  <div class="cfg">
+    <p class="hint">{tr('inbounds.set_domain_help', { size: selected.size })}</p>
+    <label>{tr('inbounds.domain')}
+      <input data-testid="bulk-domain-input" bind:value={bulkDomain} placeholder={tr('inbounds.domain_placeholder')} />
+    </label>
+    <p class="hint">{tr('inbounds.set_domain_clear')}</p>
+    <div class="actions">
+      <button class="sm" onclick={() => domainOpen = false}>{tr('inbounds.cancel')}</button>
+      <button class="primary" data-testid="bulk-domain-apply" onclick={applyBulkDomain}>{tr('inbounds.apply')}</button>
+    </div>
+  </div>
+</Modal>
 
 <Modal title={tr('inbounds.config_3') + cfgTitle} isOpen={cfgOpen} onClose={() => cfgOpen = false}>
   {#if cfgKind === 'uri'}
