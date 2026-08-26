@@ -32,6 +32,16 @@ type DeploySpec struct {
 	// Update marks a re-upload of an existing Worker: the name check is skipped
 	// and the existing KV namespace is reused rather than created.
 	Update bool
+	// SkipVerify returns as soon as the upload is accepted, without checking
+	// that the Worker actually answers.
+	//
+	// Off by default, because "the API accepted the upload" and "the Worker
+	// serves" are not the same thing, and the gap between them is what hands
+	// somebody a dead panel link. Set it only where a probe is impossible —
+	// an air-gapped test, or a deploy from a host with no route to the edge.
+	SkipVerify bool
+	// Verify overrides the probe's timing. Zero values take the defaults.
+	Verify VerifyOptions
 }
 
 // DeployResult is what an operator needs after a successful deploy.
@@ -44,10 +54,13 @@ type DeployResult struct {
 	PanelURL      string `json:"panel_url"`
 	SubTemplate   string `json:"subscription_template"`
 	DoHURL        string `json:"doh_url"`
-	KVNamespaceID string `json:"kv_namespace_id,omitempty"`
-	D1DatabaseID  string `json:"d1_database_id,omitempty"`
-	Hostname      string `json:"hostname,omitempty"`
-	Updated       bool   `json:"updated"`
+	// Health is the post-deploy probe: proof the Worker actually answers before
+	// its URLs are handed to anyone. nil when verification was skipped.
+	Health        *Health `json:"health,omitempty"`
+	KVNamespaceID string  `json:"kv_namespace_id,omitempty"`
+	D1DatabaseID  string  `json:"d1_database_id,omitempty"`
+	Hostname      string  `json:"hostname,omitempty"`
+	Updated       bool    `json:"updated"`
 	// Warnings carry things that did not take even though the Worker itself
 	// deployed. Failing the whole request for these would send an operator
 	// hunting for something that is actually running; swallowing them would let
@@ -165,6 +178,7 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 		KVNamespaceID: kvID, D1DatabaseID: d1ID,
 		Updated: spec.Update,
 	}
+	workersDevOrigin := res.Origin
 
 	// 8. Optional custom domain.
 	if host := strings.TrimSpace(spec.Domain); host != "" {
@@ -182,7 +196,69 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 	res.PanelURL = res.Origin + "/" + res.SecurePath + "/panel"
 	res.SubTemplate = res.Origin + "/" + res.SecurePath + "/sub/<sub_token>"
 	res.DoHURL = res.Origin + "/" + res.SecurePath + "/dns-query"
+
+	// 9. Prove it serves before anyone is handed these URLs.
+	//
+	// Probed on the workers.dev origin even when a custom domain was attached:
+	// a fresh custom hostname needs DNS and certificate provisioning that can
+	// take minutes, so probing it would report a healthy Worker as broken. The
+	// workers.dev route is live within seconds and exercises the same isolate.
+	if !spec.SkipVerify {
+		health, err := verifyAndHeal(ctx, c, spec, workersDevOrigin, kvID, bindings)
+		res.Health = &health
+		if err != nil {
+			return res, err
+		}
+	}
 	return res, nil
+}
+
+// verifyAndHeal probes the Worker and, if it threw, recreates it once.
+//
+// Recreating means DELETING the script and uploading it again under the same
+// name. That is safe for the thing that actually matters: a script delete does
+// not touch the KV namespace, so the Worker's secure path, VLESS UUID and
+// trojan password all survive in KV and it comes back with the same identity
+// and the same URLs — nothing has to be redistributed to anyone already holding
+// a config. Measured on a real account: this is what cleared a Worker that was
+// throwing 1101 with settings byte-identical to a healthy twin.
+//
+// It recreates ONLY on a 1101. A probe that could not reach Cloudflare, or that
+// got some other status, leaves the Worker alone: deleting someone's Worker
+// because of a network blip on the panel host would turn a non-problem into an
+// outage.
+func verifyAndHeal(ctx context.Context, c *Client, spec DeploySpec, origin, kvID string, bindings []Binding) (Health, error) {
+	health := VerifyWorker(ctx, origin, spec.SecurePath, spec.Verify)
+	if health.OK {
+		return health, nil
+	}
+	if !health.Threw {
+		return health, &ErrWorkerUnhealthy{Health: health, Name: spec.Name}
+	}
+
+	// One recreate attempt, then report honestly rather than looping.
+	if err := c.DeleteScript(ctx, spec.Name); err != nil {
+		health.Detail = "the Worker threw an exception and could not be recreated: " + err.Error()
+		return health, &ErrWorkerUnhealthy{Health: health, Name: spec.Name}
+	}
+	if err := c.UploadScript(ctx, UploadSpec{
+		Name: spec.Name, Script: spec.Bundle, Bindings: bindings,
+	}); err != nil {
+		health.Detail = "the Worker threw an exception and the re-upload failed: " + err.Error()
+		return health, &ErrWorkerUnhealthy{Health: health, Name: spec.Name}
+	}
+	if err := c.EnableSubdomain(ctx, spec.Name); err != nil {
+		health.Detail = "the Worker was recreated but could not be published: " + err.Error()
+		return health, &ErrWorkerUnhealthy{Health: health, Name: spec.Name}
+	}
+
+	after := VerifyWorker(ctx, origin, spec.SecurePath, spec.Verify)
+	after.Attempts += health.Attempts
+	after.Recreated = true
+	if after.OK {
+		return after, nil
+	}
+	return after, &ErrWorkerUnhealthy{Health: after, Name: spec.Name}
 }
 
 // Destroy deletes the Worker and, unless keepKV, its KV namespace. Every

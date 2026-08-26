@@ -35,6 +35,10 @@ type cfMock struct {
 	LastScript   string
 	uploadFailed string
 
+	// OnDeleteScript fires when a script is deleted, so a test can observe the
+	// recreate path without reaching into the mock's state.
+	OnDeleteScript func(name string)
+
 	// Deny maps "METHOD /prefix" to a canned failure.
 	Deny       map[string]apiMessage
 	DenyStatus map[string]int
@@ -236,6 +240,9 @@ func (m *cfMock) handleScripts(w http.ResponseWriter, r *http.Request, rest stri
 		m.mu.Lock()
 		_, ok := m.Scripts[name]
 		delete(m.Scripts, name)
+		if m.OnDeleteScript != nil {
+			m.OnDeleteScript(name)
+		}
 		m.mu.Unlock()
 		if !ok {
 			m.writeEnvelope(w, http.StatusNotFound, nil,

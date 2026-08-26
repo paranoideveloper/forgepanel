@@ -313,7 +313,7 @@ func TestEdgeDeploy_RegistersInThePanel(t *testing.T) {
 	err := cmdEdgeDeploy([]string{
 		"--name", "forgeedge-cli", "--api-token", "test-token", "--account", "acct-1",
 		"--bundle", bundle, "--secure-path", "clipath23456789abcdefghi",
-		"--api-base", cf.base(), "--data", data,
+		"--api-base", cf.base(), "--data", data, "--skip-verify",
 	})
 	if err != nil {
 		t.Fatalf("deploy: %v", err)
@@ -343,7 +343,7 @@ func TestEdgeDeploy_JSONOutputAndReDeploy(t *testing.T) {
 	data := edgeDataDir(t)
 	bundle := writeBundle(t, "export default {}")
 	args := []string{"--name", "w", "--api-token", "t", "--account", "acct-1",
-		"--bundle", bundle, "--api-base", cf.base(), "--data", data, "--json"}
+		"--bundle", bundle, "--api-base", cf.base(), "--data", data, "--skip-verify", "--json"}
 	if err := cmdEdgeDeploy(args); err != nil {
 		t.Fatalf("first deploy: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestEdgeUpdate_ReUploadsRegisteredWorkers(t *testing.T) {
 	bundle := writeBundle(t, "export default {v:2}")
 	if err := cmdEdgeUpdate([]string{
 		"--name", "w", "--api-token", "t", "--account", "acct-1",
-		"--bundle", bundle, "--api-base", cf.base(), "--data", data,
+		"--bundle", bundle, "--api-base", cf.base(), "--data", data, "--skip-verify",
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}

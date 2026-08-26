@@ -63,6 +63,35 @@ journalctl -u forgeedge-bot -f
 
 You should see `edgebot: connected as @yourbot`. Now message your bot `/start`.
 
+## Deploys are checked before you get the links
+
+`/deploy` does not report success on "Cloudflare accepted the upload". After
+uploading, the bot fetches the Worker's own panel page and waits for it to
+answer. Only then does it hand over the URLs.
+
+This exists because those are not the same thing. A Worker can upload cleanly
+and then throw Cloudflare error 1101 — "Worker threw an exception" — on every
+single request, including routes that should 404. Measured on a real account:
+the script, bindings, KV and compatibility date were byte-identical to a healthy
+Worker in the same account, and it still threw. The deploy had reported success,
+and the person on the other end got a panel link and a subscription link that
+were dead from the moment they were issued, with no way to tell that from a
+Worker still propagating.
+
+When the probe sees a 1101 the bot deletes the script and uploads it again once.
+That is safe for the part that matters: deleting a script does not touch its KV
+namespace, so the secure path, VLESS UUID and trojan password all survive and it
+comes back with the same identity and the same URLs — nothing has to be
+redistributed to anyone already holding a config. The reply says so when it
+happens, rather than presenting a second attempt as a clean first-time success.
+
+If it still will not serve, you get an error and no links. Try `/deploy` again
+with a different name.
+
+A probe that simply cannot reach Cloudflare is never treated as the Worker's
+fault, and never deletes anything: a network blip on the bot's host would
+otherwise turn a non-problem into somebody's outage.
+
 ## Commands
 
 Send `/help` in chat for the live list. Summary:

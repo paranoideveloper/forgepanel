@@ -10,11 +10,12 @@ import (
 
 // fakeOps is an in-memory Ops so the router can be tested with no network.
 type fakeOps struct {
-	deployed  map[string]Deployment
-	config    map[string]map[string]any // per worker name
-	deployErr error
-	verifyErr error
-	warpCount int
+	deployed        map[string]Deployment
+	config          map[string]map[string]any // per worker name
+	deployErr       error
+	deployRecreated bool
+	verifyErr       error
+	warpCount       int
 }
 
 func newFakeOps() *fakeOps {
@@ -41,6 +42,7 @@ func (f *fakeOps) Deploy(_ context.Context, _, account, name, domain string) (De
 	d := Deployment{
 		Name: name, Origin: "https://" + name + ".workers.dev", SecurePath: "securepath23456789abcd",
 		FeedPushToken: "push-" + name, AccountID: account, Domain: domain,
+		Recreated: f.deployRecreated,
 	}
 	f.deployed[name] = d
 	f.config[name] = map[string]any{
@@ -327,5 +329,72 @@ func TestRouter_DestroyConfirmFlow(t *testing.T) {
 	}
 	if !strings.Contains(res.CallbackAnswer, "Deleted") {
 		t.Fatalf("callback answer: %q", res.CallbackAnswer)
+	}
+}
+
+// --- post-deploy verification surfaced to the user --------------------------
+
+func TestDeployReplyDoesNotHandOutLinksForAWorkerThatIsNotServing(t *testing.T) {
+	// The exact thing that happened on a real account: the upload succeeded, the
+	// bot said "your edge is live" and printed a panel URL and a subscription
+	// URL, and every one of them returned Cloudflare error 1101. The person had
+	// no way to tell that from a Worker still propagating.
+	r, store, ops := harness(t, 1)
+	_ = store.Decide(2, StatusApproved)
+	_ = store.SetCreds(2, "tok", "acct")
+	ops.deployErr = &edge.ErrWorkerUnhealthy{
+		Name:   "w",
+		Health: edge.Health{Detail: "the Worker threw an exception on every request (Cloudflare error 1101)"},
+	}
+
+	text := firstText(send(r, 2, "/deploy myedge"))
+
+	// The behaviour that CHANGED is upstream: edge.Deploy now returns an error
+	// for a Worker that uploaded but does not serve, where it used to return
+	// success. The bot's job is to recognise that specific failure and say
+	// something useful about it — a generic "Deploy failed" would leave someone
+	// retrying the same stuck name forever.
+	if !strings.Contains(text, "not serving") {
+		t.Fatalf("the 1101 case was not distinguished from any other failure:\n%s", text)
+	}
+	if !strings.Contains(text, "different name") {
+		t.Errorf("the reply gives no way forward:\n%s", text)
+	}
+	if !strings.Contains(text, "1101") {
+		t.Errorf("the reply does not say what went wrong:\n%s", text)
+	}
+
+	// Regression guard, not new behaviour: the error path already withheld the
+	// links, and it must keep doing so.
+	if strings.Contains(text, "is live") {
+		t.Fatalf("the bot still claimed the edge is live:\n%s", text)
+	}
+	for _, leak := range []string{"/panel", "/sub/"} {
+		if strings.Contains(text, leak) {
+			t.Fatalf("the bot handed out a %s link for a Worker that does not serve:\n%s", leak, text)
+		}
+	}
+	if _, ok := store.Deployment(2, "myedge"); ok {
+		t.Error("a Worker that does not serve was recorded as one of the user's deployments")
+	}
+}
+
+func TestDeployReplySaysWhenTheWorkerHadToBeRecreated(t *testing.T) {
+	// Reporting a second attempt as a clean first-time success hides the one
+	// detail an operator would want if it starts happening repeatedly.
+	r, store, ops := harness(t, 1)
+	_ = store.Decide(2, StatusApproved)
+	_ = store.SetCreds(2, "tok", "acct")
+	ops.deployRecreated = true
+
+	text := firstText(send(r, 2, "/deploy myedge"))
+	if !strings.Contains(text, "recreated") {
+		t.Fatalf("a deploy that needed a recreate was reported as a clean success:\n%s", text)
+	}
+	if !strings.Contains(text, "unchanged") {
+		t.Errorf("the reply does not reassure that the identity survived:\n%s", text)
+	}
+	if !strings.Contains(text, "/sub/") {
+		t.Errorf("a recovered deploy withheld its links:\n%s", text)
 	}
 }

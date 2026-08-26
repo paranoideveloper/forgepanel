@@ -237,10 +237,14 @@ func cmdEdgeDeploy(args []string) error {
 		securePath = fs.String("secure-path", "", "secure path to bind (default: freshly generated)")
 		useD1      = fs.Bool("d1", false, "also create and bind a D1 database")
 		force      = fs.Bool("force", false, "overwrite a Worker that already exists")
-		pushFeed   = fs.Bool("feed", false, "push the canonical feed immediately after deploying")
-		data       = fs.String("data", defaultDataDir(), "panel data directory (for registering the deployment)")
-		apiBase    = fs.String("api-base", "", "override the Cloudflare API root (testing/proxying)")
-		asJSON     = fs.Bool("json", false, "machine-readable output")
+		skipVerify = fs.Bool("skip-verify", false,
+			"return as soon as the upload is accepted, without checking the Worker actually serves. "+
+				"Only for a host with no route to the edge: \"the API accepted it\" and \"it serves\" "+
+				"are not the same thing, and the gap is what hands somebody a dead panel link")
+		pushFeed = fs.Bool("feed", false, "push the canonical feed immediately after deploying")
+		data     = fs.String("data", defaultDataDir(), "panel data directory (for registering the deployment)")
+		apiBase  = fs.String("api-base", "", "override the Cloudflare API root (testing/proxying)")
+		asJSON   = fs.Bool("json", false, "machine-readable output")
 	)
 	if err := fs.Parse(args); err != nil {
 		return withExit(exitUsage, err)
@@ -264,9 +268,15 @@ func cmdEdgeDeploy(args []string) error {
 	}
 	res, err := edge.Deploy(ctx, c, edge.DeploySpec{
 		Name: *name, Target: *target, SecurePath: *securePath, Bundle: raw,
-		Domain: *domain, Force: *force, D1: *useD1,
+		Domain: *domain, Force: *force, D1: *useD1, SkipVerify: *skipVerify,
 	})
 	if err != nil {
+		// A Worker that uploaded but does not serve is still registered locally
+		// so `forgectl edge update` can retry it by name — but it is reported as
+		// the failure it is, not as a deploy that worked.
+		if res != nil && edge.IsUnhealthy(err) {
+			registerEdgeLocally(*data, res, c.AccountID)
+		}
 		return err
 	}
 	registerEdgeLocally(*data, res, c.AccountID)
@@ -331,18 +341,21 @@ func cmdEdgeUpdate(args []string) error {
 	fs := flag.NewFlagSet("edge update", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		name      = fs.String("name", "", "Worker name")
-		all       = fs.Bool("all", false, "every registered deployment")
-		checkOnly = fs.Bool("check-only", false, "only report whether a newer release exists")
-		force     = fs.Bool("force", false, "allow a downgrade")
-		apiToken  = fs.String("api-token", "", "skip OAuth and use this token")
-		account   = fs.String("account", "", "account id")
-		bundle    = fs.String("bundle", "", "path to the built worker.js")
-		password  = fs.String("password", "", "the edge admin password, to read its version back")
-		repo      = fs.String("repo", edge.UpdateRepo, "GitHub repo to check releases against")
-		data      = fs.String("data", defaultDataDir(), "panel data directory")
-		apiBase   = fs.String("api-base", "", "override the Cloudflare API root")
-		asJSON    = fs.Bool("json", false, "machine-readable output")
+		name       = fs.String("name", "", "Worker name")
+		all        = fs.Bool("all", false, "every registered deployment")
+		checkOnly  = fs.Bool("check-only", false, "only report whether a newer release exists")
+		force      = fs.Bool("force", false, "allow a downgrade")
+		skipVerify = fs.Bool("skip-verify", false,
+			"return as soon as the upload is accepted, without checking the Worker still serves. "+
+				"An update that leaves a Worker throwing is worse than a failed one: it was working before")
+		apiToken = fs.String("api-token", "", "skip OAuth and use this token")
+		account  = fs.String("account", "", "account id")
+		bundle   = fs.String("bundle", "", "path to the built worker.js")
+		password = fs.String("password", "", "the edge admin password, to read its version back")
+		repo     = fs.String("repo", edge.UpdateRepo, "GitHub repo to check releases against")
+		data     = fs.String("data", defaultDataDir(), "panel data directory")
+		apiBase  = fs.String("api-base", "", "override the Cloudflare API root")
+		asJSON   = fs.Bool("json", false, "machine-readable output")
 	)
 	if err := fs.Parse(args); err != nil {
 		return withExit(exitUsage, err)
@@ -394,7 +407,7 @@ func cmdEdgeUpdate(args []string) error {
 		// path all survive the re-upload (see edge.UploadScript).
 		res, err := edge.Deploy(ctx, c, edge.DeploySpec{
 			Name: t.Name, Target: t.Target, SecurePath: t.SecurePath,
-			Bundle: raw, Update: true, Force: *force,
+			Bundle: raw, Update: true, Force: *force, SkipVerify: *skipVerify,
 		})
 		if err != nil {
 			return err

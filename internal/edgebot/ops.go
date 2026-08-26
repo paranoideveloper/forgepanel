@@ -121,6 +121,7 @@ func (o *liveOps) Deploy(ctx context.Context, token, account, name, domain strin
 		Name: res.Name, Origin: res.Origin, SecurePath: res.SecurePath,
 		FeedPushToken: res.FeedPushToken, AccountID: c.AccountID, Domain: res.Hostname,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Recreated: res.Health != nil && res.Health.Recreated,
 	}, nil
 }
 

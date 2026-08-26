@@ -45,6 +45,12 @@ type Deployment struct {
 	AccountID     string `json:"account_id"`
 	Domain        string `json:"domain,omitempty"`
 	CreatedAt     string `json:"created_at"`
+
+	// Recreated records that the deploy had to delete and re-upload the Worker
+	// before it would serve. Not persisted: it describes one deploy, not the
+	// Worker, and it exists so the reply can say so instead of presenting a
+	// second attempt as a clean first-time success.
+	Recreated bool `json:"-"`
 }
 
 // PanelURL is the Worker's own admin page (for a human, not the bot).

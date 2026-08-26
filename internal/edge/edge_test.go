@@ -27,7 +27,7 @@ func TestDeploy_HappyPath(t *testing.T) {
 
 	res, err := Deploy(ctx(t), c, DeploySpec{
 		Name: "forgeedge-a1b2c3", SecurePath: "qrs7tuvwxy23456789abcdef",
-		Bundle: []byte("export default {}"),
+		Bundle: []byte("export default {}"), SkipVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
@@ -92,7 +92,7 @@ func TestDeploy_RefusesToClobber(t *testing.T) {
 	m.Scripts["taken"] = ScriptInfo{ID: "taken"}
 	c := m.client()
 
-	_, err := Deploy(ctx(t), c, DeploySpec{Name: "taken", Bundle: []byte("x")})
+	_, err := Deploy(ctx(t), c, DeploySpec{Name: "taken", Bundle: []byte("x"), SkipVerify: true})
 	if err == nil {
 		t.Fatal("silently overwriting an existing Worker is not acceptable")
 	}
@@ -101,7 +101,7 @@ func TestDeploy_RefusesToClobber(t *testing.T) {
 	}
 
 	// --force is the deliberate override.
-	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "taken", Bundle: []byte("x"), Force: true}); err != nil {
+	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "taken", Bundle: []byte("x"), Force: true, SkipVerify: true}); err != nil {
 		t.Fatalf("--force should overwrite: %v", err)
 	}
 }
@@ -109,11 +109,11 @@ func TestDeploy_RefusesToClobber(t *testing.T) {
 func TestDeploy_UpdateReusesKVAndKeepsBindings(t *testing.T) {
 	m := newCFMock(t)
 	c := m.client()
-	first, err := Deploy(ctx(t), c, DeploySpec{Name: "w", SecurePath: "path23456789abcdefghijkl", Bundle: []byte("v1")})
+	first, err := Deploy(ctx(t), c, DeploySpec{Name: "w", SecurePath: "path23456789abcdefghijkl", Bundle: []byte("v1"), SkipVerify: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Deploy(ctx(t), c, DeploySpec{Name: "w", SecurePath: "path23456789abcdefghijkl",
+	second, err := Deploy(ctx(t), c, DeploySpec{Name: "w", SecurePath: "path23456789abcdefghijkl", SkipVerify: true,
 		Bundle: []byte("v2"), Update: true})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -135,7 +135,7 @@ func TestDeploy_UpdateReusesKVAndKeepsBindings(t *testing.T) {
 
 func TestDeploy_GeneratesSecurePathWhenAbsent(t *testing.T) {
 	m := newCFMock(t)
-	res, err := Deploy(ctx(t), m.client(), DeploySpec{Name: "w", Bundle: []byte("x")})
+	res, err := Deploy(ctx(t), m.client(), DeploySpec{Name: "w", Bundle: []byte("x"), SkipVerify: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestDeploy_GeneratesSecurePathWhenAbsent(t *testing.T) {
 func TestDeploy_ClaimsSubdomainWhenAccountHasNone(t *testing.T) {
 	m := newCFMock(t)
 	m.Subdomain = ""
-	res, err := Deploy(ctx(t), m.client(), DeploySpec{Name: "w", Bundle: []byte("x")})
+	res, err := Deploy(ctx(t), m.client(), DeploySpec{Name: "w", Bundle: []byte("x"), SkipVerify: true})
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
@@ -164,6 +164,7 @@ func TestDeploy_AttachesCustomDomain(t *testing.T) {
 	m.Zones = append(m.Zones, struct{ ID, Name string }{"zone-1", "example.com"})
 	res, err := Deploy(ctx(t), m.client(), DeploySpec{
 		Name: "w", Bundle: []byte("x"), Domain: "edge.example.com", SecurePath: "p23456789abcdefghijklmno",
+		SkipVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("Deploy: %v", err)
@@ -202,7 +203,7 @@ func TestDeploy_Rejections(t *testing.T) {
 	t.Run("no account id", func(t *testing.T) {
 		c := m.client()
 		c.AccountID = ""
-		_, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x")})
+		_, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x"), SkipVerify: true})
 		if e, ok := AsError(err); !ok || e.Kind != KindValidation {
 			t.Fatalf("want a validation error for a missing account, got %v", err)
 		}
@@ -214,7 +215,7 @@ func TestDeploy_Rejections(t *testing.T) {
 func TestDestroy(t *testing.T) {
 	m := newCFMock(t)
 	c := m.client()
-	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "doomed", Bundle: []byte("x")}); err != nil {
+	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "doomed", Bundle: []byte("x"), SkipVerify: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Destroy(ctx(t), c, "doomed", "workers", false); err != nil {
@@ -231,7 +232,7 @@ func TestDestroy(t *testing.T) {
 func TestDestroy_KeepKV(t *testing.T) {
 	m := newCFMock(t)
 	c := m.client()
-	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x")}); err != nil {
+	if _, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x"), SkipVerify: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Destroy(ctx(t), c, "w", "workers", true); err != nil {
@@ -398,7 +399,7 @@ func TestKVHelpers(t *testing.T) {
 func TestD1Lifecycle(t *testing.T) {
 	m := newCFMock(t)
 	c := m.client()
-	res, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x"), D1: true})
+	res, err := Deploy(ctx(t), c, DeploySpec{Name: "w", Bundle: []byte("x"), D1: true, SkipVerify: true})
 	if err != nil {
 		t.Fatalf("Deploy with D1: %v", err)
 	}

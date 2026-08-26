@@ -750,7 +750,7 @@ func TestEdgeDeploy_WithoutBundleUsesEmbedded(t *testing.T) {
 	r := edgeRouter(f.s)
 	scripts := map[string]bool{}
 	cf := cfAPIMock(t, scripts)
-	body := fmt.Sprintf(`{"name":"forgeedge-emb","api_token":"t","account_id":"acct-1","api_base":%q}`, cf.URL+"/client/v4")
+	body := fmt.Sprintf(`{"name":"forgeedge-emb","api_token":"t","account_id":"acct-1","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1074,7 +1074,7 @@ func TestEdgeDeploy_LiveAgainstMockCloudflare(t *testing.T) {
 	cf := cfAPIMock(t, scripts)
 
 	body := fmt.Sprintf(`{"name":"forgeedge-live","api_token":"t","account_id":"acct-1",
-		"secure_path":"livepath23456789abcdefg","bundle":"export default {}","api_base":%q}`, cf.URL+"/client/v4")
+		"secure_path":"livepath23456789abcdefg","bundle":"export default {}","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1124,7 +1124,7 @@ func TestEdgeDeploy_GeneratesNameAndPath(t *testing.T) {
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
 	cf := cfAPIMock(t, map[string]bool{})
-	body := fmt.Sprintf(`{"api_token":"t","account_id":"acct-1","bundle":"x","api_base":%q}`, cf.URL+"/client/v4")
+	body := fmt.Sprintf(`{"api_token":"t","account_id":"acct-1","bundle":"x","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

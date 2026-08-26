@@ -296,6 +296,12 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		// APIBase redirects the Cloudflare API root, for an operator behind an
 		// egress proxy (and for the tests that exercise this handler).
 		APIBase string `json:"api_base"`
+		// SkipVerify returns as soon as Cloudflare accepts the upload, without
+		// checking the Worker actually serves. Off by default: "the API accepted
+		// it" and "it serves" are not the same thing, and the gap between them is
+		// what hands an operator a panel link that is dead on arrival. Only for a
+		// panel host with no route to the edge.
+		SkipVerify bool `json:"skip_verify"`
 		// ProxyIP is the relay a Worker dials when the destination is itself on
 		// Cloudflare. A Worker's connect() to a Cloudflare IP is refused (the
 		// CF->CF block), so without this every Cloudflare-hosted destination is
@@ -350,7 +356,7 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 	}
 	out, err := edge.Deploy(ctx, cl, edge.DeploySpec{
 		Name: req.Name, Target: req.Target, SecurePath: req.SecurePath,
-		Bundle: []byte(req.Bundle), Force: req.Force,
+		Bundle: []byte(req.Bundle), Force: req.Force, SkipVerify: req.SkipVerify,
 	})
 	if err == nil && strings.TrimSpace(req.ProxyIP) != "" {
 		// Best effort, and reported rather than fatal: the Worker IS deployed at

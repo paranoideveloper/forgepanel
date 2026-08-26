@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/forgepanel/forgepanel/internal/edge"
 	"sort"
 	"strings"
 )
@@ -25,13 +26,26 @@ func (r *Router) handleDeploy(ctx context.Context, in Incoming, args []string) R
 	}
 	d, err := r.ops.Deploy(ctx, token, account, name, domain)
 	if err != nil {
+		// A Worker that uploaded but does not serve is its own failure, and it
+		// used to be reported as a success with a dead panel link — the person
+		// on the other end had no way to tell that from one still propagating.
+		if edge.IsUnhealthy(err) {
+			return r.reply(in, "❌ The Worker uploaded but is not serving, so I have not given you its links.\n\n"+
+				errText(err)+"\n\nThis is usually a stuck script on Cloudflare's side. Try /deploy again with a "+
+				"different name; if it keeps happening, check the account has Workers enabled and is not over its plan limits.")
+		}
 		return r.reply(in, "❌ Deploy failed:\n"+errText(err))
 	}
 	if err := r.store.AddDeployment(in.UserID, d); err != nil {
 		return r.reply(in, "Deployed, but couldn't save it locally: "+err.Error()+"\nWorker: "+d.Origin)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "✅ Your edge is live: %s\n\n", d.Name)
+	// "live" is now a checked claim, not an assumption: Deploy probed the panel
+	// and only returns without error once it answered.
+	fmt.Fprintf(&b, "✅ Your edge is live (checked): %s\n\n", d.Name)
+	if d.Recreated {
+		b.WriteString("ℹ️ It threw on first boot, so I recreated it. Your KV, secure path and UUID are unchanged.\n\n")
+	}
 	fmt.Fprintf(&b, "🌐 URL          %s\n", d.Origin)
 	fmt.Fprintf(&b, "🔗 Subscription %s\n", d.SubTemplate())
 	fmt.Fprintf(&b, "📥 Free config  %s\n", d.SharedSub())
