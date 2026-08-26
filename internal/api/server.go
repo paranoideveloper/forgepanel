@@ -683,6 +683,7 @@ func (s *Server) routes() {
 			admin.POST("/wizard/preset", s.handlePresetWizard)
 			admin.POST("/inbounds/:id/tls", s.handleInboundOneClickTLS)
 			admin.POST("/certs/import", s.handleCertImport)
+			admin.POST("/certs/issue", s.handleCertIssueDNS01)
 			admin.GET("/certs", s.handleCertList)
 			admin.GET("/nodes", s.handleListNodes)
 			admin.POST("/nodes/enroll", s.handleEnrollNode)

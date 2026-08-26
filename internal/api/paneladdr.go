@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -245,6 +246,10 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 // for the :80 HTTP-01 helper to come up, then asks autocert for the cert; any
 // failure is left for the real handshake (or the Force-Renew button) to retry.
 func (s *Server) PrimePanelCert() {
+	// Reload first, always — including when there is no panel domain. A
+	// wildcard issued for an inbound is on disk too, and skipping the reload on
+	// the no-domain path would re-issue it on the next restart.
+	s.loadDNS01Cache()
 	p := s.cfg.Panel()
 	if p == nil || p.Domain == "" || s.certs == nil {
 		return
@@ -260,6 +265,17 @@ func (s *Server) PrimePanelCert() {
 		// nothing in the log, which made it impossible to diagnose.
 		time.Sleep(3 * time.Second)
 		if s.isClosed() {
+			return
+		}
+		// A dns-01 panel does NOT go through autocert: autocert cannot perform
+		// that challenge, so calling it here would try http-01 against a host
+		// whose port 80 is almost certainly shut — which is why dns-01 was
+		// chosen. This is the branch whose absence made the setting a no-op.
+		if s.usesDNS01() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			_, err := s.issueDNS01(ctx, domain)
+			cancel()
+			s.recordACMEOutcome(domain, err)
 			return
 		}
 		_, err := s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
@@ -325,7 +341,15 @@ func (s *Server) handlePanelCertRenew(c *gin.Context) {
 		c.JSON(501, gin.H{"error": "certificate manager unavailable"})
 		return
 	}
-	_, err = s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: p.Domain})
+	// Force-Renew must take the same branch startup does, or the button quietly
+	// runs a different challenge from the one the panel is configured for.
+	if s.usesDNS01() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Minute)
+		_, err = s.issueDNS01(ctx, p.Domain)
+		cancel()
+	} else {
+		_, err = s.certs.ACMEManager().GetCertificate(&tls.ClientHelloInfo{ServerName: p.Domain})
+	}
 	p.ACME.LastRenewal = time.Now().Format(time.RFC3339)
 	if err != nil {
 		p.ACME.RenewalError = err.Error()
