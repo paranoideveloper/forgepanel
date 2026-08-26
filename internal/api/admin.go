@@ -610,11 +610,16 @@ func (s *Server) handleDeleteUser(c *gin.Context) {
 }
 
 // handleStats returns a small dashboard summary.
+//
+// Three COUNT(*) queries, not three whole tables decoded so their lengths can be
+// taken. The dashboard polls this.
 func (s *Server) handleStats(c *gin.Context) {
-	ins, _ := s.db.ListInbounds()
-	us, _ := s.db.ListUsers(0)
-	gs, _ := s.db.ListGroups()
-	c.JSON(200, gin.H{"inbounds": len(ins), "users": len(us), "groups": len(gs)})
+	ins, us, gs, err := s.db.Counts()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"inbounds": ins, "users": us, "groups": gs})
 }
 
 // processStart is when this panel process started, for the uptime the dashboard

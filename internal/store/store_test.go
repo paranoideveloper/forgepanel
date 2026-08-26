@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,5 +294,70 @@ func TestCreatingADisabledInboundKeepsItDisabled(t *testing.T) {
 	again, _ := db.InboundByID(on.ID)
 	if again.Enabled {
 		t.Fatal("disabling an existing inbound did not stick")
+	}
+}
+
+// The username column has always carried a unique index and the store had no
+// query that used it, so every caller that needed a user by name loaded the
+// WHOLE user table and walked it. The Telegram bot did that on every command.
+func TestUserByUsernameUsesTheIndexAndNotAScan(t *testing.T) {
+	s := testStore(t)
+	for _, n := range []string{"alice", "bob", "carol"} {
+		if err := s.CreateUser(&User{Username: n, SubToken: "tok-" + n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u, err := s.UserByUsername("bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Username != "bob" {
+		t.Fatalf("got %q", u.Username)
+	}
+
+	// A miss must be an error, not the zero user. A caller that checked only
+	// the name would treat a zero-valued User as "found, with no data".
+	if _, err := s.UserByUsername("nobody"); err == nil {
+		t.Error("an unknown username returned no error")
+	}
+
+	// SQLite tells us whether the plan is a scan. This is the whole point of the
+	// change, and asserting only on the returned row would pass just as well
+	// against the loop this replaced.
+	var plan []struct {
+		ID, Parent, NotUsed int
+		Detail              string
+	}
+	if err := s.db.Raw("EXPLAIN QUERY PLAN SELECT * FROM users WHERE username = ?", "bob").Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) == 0 {
+		t.Fatal("no query plan returned")
+	}
+	joined := ""
+	for _, r := range plan {
+		joined += r.Detail + " "
+	}
+	if !strings.Contains(joined, "USING INDEX") && !strings.Contains(joined, "USING COVERING INDEX") {
+		t.Errorf("the lookup does not use an index: %s", joined)
+	}
+}
+
+func TestCountsDoesNotLoadTheTables(t *testing.T) {
+	s := testStore(t)
+	for i := 0; i < 5; i++ {
+		if err := s.CreateUser(&User{Username: fmt.Sprintf("u%d", i), SubToken: fmt.Sprintf("tok%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins, us, gs, err := s.Counts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if us != 5 {
+		t.Errorf("users = %d, want 5", us)
+	}
+	if ins != 0 || gs != 0 {
+		t.Errorf("inbounds/groups = %d/%d, want 0/0", ins, gs)
 	}
 }

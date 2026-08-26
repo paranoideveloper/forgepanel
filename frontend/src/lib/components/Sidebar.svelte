@@ -2,6 +2,7 @@
 	import { tr, locale, setLocale, locales } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { session, canSeeTab } from '$lib/session.svelte';
 
   // Read from GET /api/version rather than a literal. It was pinned at v1.10.0
   // while the product shipped v1.20.0 — a badge that is confidently wrong is
@@ -47,6 +48,12 @@
     { id: 'system', labelKey: 'sidebar.tab.system', icon: '🛠️' }
   ];
 
+  // Both POST /login and GET /admin/me have always returned the caller's role,
+  // and nothing read it — so a reseller saw Certificates, Admins, the Audit
+  // trail, Nodes, Routing and ForgeDNS, clicked one, and got a 403 toast from a
+  // route the panel already knew they could not use.
+  const visibleTabs = $derived(tabs.filter((t) => canSeeTab(t.id, session.role)));
+
   function handleSelect(tab: string) {
     onTabChange(tab);
     mobileOpen = false;
@@ -72,9 +79,10 @@
   </div>
 
   <nav>
-    {#each tabs as tab}
+    {#each visibleTabs as tab (tab.id)}
       <button 
         class="nav-btn" 
+        data-testid="nav-{tab.id}"
         class:active={activeTab === tab.id}
         onclick={() => handleSelect(tab.id)}
       >
@@ -134,9 +142,10 @@
       </div>
 
       <nav>
-        {#each tabs as tab}
+        {#each visibleTabs as tab (tab.id)}
           <button 
             class="nav-btn" 
+            data-testid="mnav-{tab.id}"
             class:active={activeTab === tab.id}
             onclick={() => handleSelect(tab.id)}
           >

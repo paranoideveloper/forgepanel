@@ -18,21 +18,20 @@ const gbBytes = 1024 * 1024 * 1024
 type tgPanelData struct{ s *Server }
 
 func (d tgPanelData) Stats() (int, int, int) {
-	ins, _ := d.s.db.ListInbounds()
-	us, _ := d.s.db.ListUsers(0)
-	gs, _ := d.s.db.ListGroups()
-	return len(ins), len(us), len(gs)
+	ins, us, gs, err := d.s.db.Counts()
+	if err != nil {
+		return 0, 0, 0
+	}
+	return int(ins), int(us), int(gs)
 }
 
 func (d tgPanelData) UserByName(name string) (string, string, float64, float64, bool) {
-	us, _ := d.s.db.ListUsers(0)
-	for _, u := range us {
-		if u.Username == name {
-			const gb = 1024 * 1024 * 1024
-			return u.Username, string(u.Status), float64(u.UsedTraffic) / gb, float64(u.DataLimit) / gb, true
-		}
+	u, err := d.s.db.UserByUsername(name)
+	if err != nil {
+		return "", "", 0, 0, false
 	}
-	return "", "", 0, 0, false
+	const gb = 1024 * 1024 * 1024
+	return u.Username, string(u.Status), float64(u.UsedTraffic) / gb, float64(u.DataLimit) / gb, true
 }
 
 func (d tgPanelData) SubURLForToken(token string) (string, bool) {
@@ -42,19 +41,13 @@ func (d tgPanelData) SubURLForToken(token string) (string, bool) {
 	return "/sub/" + token, true
 }
 
-// findUser resolves a username to its record (there is no unique-username lookup
-// on the store, so this scans — the user set a Telegram admin manages is small).
+// findUser resolves a username to its record through the unique index.
 func (d tgPanelData) findUser(name string) (*store.User, error) {
-	us, err := d.s.db.ListUsers(0)
+	u, err := d.s.db.UserByUsername(name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("user not found")
 	}
-	for i := range us {
-		if us[i].Username == name {
-			return &us[i], nil
-		}
-	}
-	return nil, fmt.Errorf("user not found")
+	return u, nil
 }
 
 // afterMutation reloads the engines so a change made from Telegram takes effect

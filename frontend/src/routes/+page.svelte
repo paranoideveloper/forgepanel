@@ -5,6 +5,7 @@
   import { apiFetch, setSession, clearSession, getAuthToken, onSessionExpired } from '$lib/api';
   import { watchIdle } from '$lib/idle';
   import Sidebar from '$lib/components/Sidebar.svelte';
+  import { session, canSeeTab } from '$lib/session.svelte';
   import Toast, { showToast } from '$lib/components/Toast.svelte';
 
   let token = $state(getAuthToken());
@@ -61,6 +62,10 @@
   };
 
   async function loadTabModule(tab: string) {
+    // A tab this role cannot reach is not loaded, whatever asked for it — a
+    // remembered tab from a previous session, a link, or a stale navigation
+    // state. Falling back to the overview is the one tab every role has.
+    if (!canSeeTab(tab, session.role)) tab = 'overview';
     activeTab = tab;
     componentLoading = true;
     try {
@@ -90,6 +95,10 @@
       // bare 401s that named no cause and offered no way back.
       token = res.access_token;
       setSession(res.access_token, res.refresh_token);
+      // Learn WHO signed in before the first view renders. Everything that
+      // decides what to offer reads this, and rendering the navigation first
+      // would flash the owner's tabs at a reseller.
+      await session.load();
       showToast(tr('app.signed_in_successfully'), 'success');
       await loadTabModule('overview');
     } catch (err: any) {
@@ -138,6 +147,9 @@
 
   onMount(async () => {
     if (token) {
+      // A restored session goes through the same step a fresh login does. The
+      // token in localStorage says nothing about the role it carries.
+      await session.load();
       loadTabModule('overview');
       return;
     }

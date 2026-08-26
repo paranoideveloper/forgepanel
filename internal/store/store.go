@@ -276,6 +276,41 @@ func (s *Store) UserBySubToken(token string) (*User, error) {
 	return &u, nil
 }
 
+// UserByUsername fetches one user by name, using the unique index the column
+// has always carried.
+//
+// The index existed; the query did not. Every caller that needed a user by name
+// loaded the ENTIRE user table and walked it — the Telegram bot did it on every
+// single command, twice for some of them, and its own comment said so ("there is
+// no unique-username lookup on the store, so this scans"). On a panel with a few
+// thousand users that is a few thousand rows decoded to answer a question SQLite
+// can answer from the index without touching the table.
+func (s *Store) UserByUsername(name string) (*User, error) {
+	var u User
+	if err := s.db.Where("username = ?", name).First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// Counts returns the row counts the dashboard and the bot report.
+//
+// COUNT(*) per table, rather than loading three whole tables and taking len()
+// of each — which is what the bot's /stats did, decoding every user, every
+// inbound and every group to produce three integers.
+func (s *Store) Counts() (inbounds, users, groups int64, err error) {
+	if err = s.db.Model(&Inbound{}).Count(&inbounds).Error; err != nil {
+		return 0, 0, 0, err
+	}
+	if err = s.db.Model(&User{}).Count(&users).Error; err != nil {
+		return 0, 0, 0, err
+	}
+	if err = s.db.Model(&Group{}).Count(&groups).Error; err != nil {
+		return 0, 0, 0, err
+	}
+	return inbounds, users, groups, nil
+}
+
 // UserByID fetches one user.
 func (s *Store) UserByID(id uint) (*User, error) {
 	var u User
