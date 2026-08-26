@@ -34,6 +34,14 @@ type PanelData interface {
 	DeleteUser(name string) error
 }
 
+// BackupProvider is implemented by a PanelData that can produce a backup on
+// demand. Optional, and discovered by type assertion: a panel built without
+// backup support keeps a working bot, minus one command.
+type BackupProvider interface {
+	// MakeBackup returns a filename and the encrypted bytes.
+	MakeBackup() (filename string, data []byte, err error)
+}
+
 // Sender abstracts the Telegram transport so the router is testable.
 type Sender interface {
 	Send(chatID int64, text string) error
@@ -65,9 +73,20 @@ func New(token string, adminIDs []int64, data PanelData) *Bot {
 // Enabled reports whether a token is configured.
 func (b *Bot) Enabled() bool { return b.token != "" }
 
-// Send implements Sender via the Bot API.
 var apiBaseURL = "https://api.telegram.org"
 
+// Send implements Sender via the Bot API.
+//
+// It used to read the response into io.Discard and return nil whatever came
+// back, so EVERY failure looked like success: a revoked token, a chat id that
+// does not exist, a user who never pressed Start. The notifier reported alerts
+// as delivered that Telegram had refused, and a "test your configuration"
+// button built on this could only ever say yes.
+//
+// Telegram answers with {"ok":false,"description":"..."} and an HTTP status.
+// The description is the useful part — "Unauthorized" and "chat not found" have
+// completely different fixes — so it is carried through rather than flattened
+// into "send failed".
 func (b *Bot) Send(chatID int64, text string) error {
 	if b.token == "" {
 		return nil
@@ -78,11 +97,61 @@ func (b *Bot) Send(chatID int64, text string) error {
 	v.Set("parse_mode", "Markdown")
 	resp, err := b.sendClient.PostForm(apiBaseURL+"/bot"+b.token+"/sendMessage", v)
 	if err != nil {
-		return err
+		return fmt.Errorf("telegram: could not reach the Bot API: %w", err)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
+	// Bounded: an error body is small, and this must not become a way to make
+	// the panel read an unbounded response from a host it does not control.
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	var out struct {
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code"`
+		Description string `json:"description"`
+	}
+	_ = json.Unmarshal(raw, &out)
+	if out.OK {
+		return nil
+	}
+	desc := strings.TrimSpace(out.Description)
+	if desc == "" {
+		desc = strings.TrimSpace(string(raw))
+	}
+	if desc == "" {
+		desc = resp.Status
+	}
+	return &SendError{ChatID: chatID, Code: out.ErrorCode, Status: resp.StatusCode, Description: desc}
+}
+
+// SendError is a refusal from Telegram, with enough detail to act on.
+type SendError struct {
+	ChatID      int64
+	Code        int
+	Status      int
+	Description string
+}
+
+func (e *SendError) Error() string {
+	return fmt.Sprintf("telegram: chat %d: %s", e.ChatID, e.Description)
+}
+
+// Remediation turns Telegram's own wording into the thing to do about it. The
+// three failures below are the three an operator actually hits, and each has a
+// different fix, which is why "the message could not be sent" is not enough.
+func (e *SendError) Remediation() string {
+	d := strings.ToLower(e.Description)
+	switch {
+	case e.Code == 401 || strings.Contains(d, "unauthorized"):
+		return "the bot token is wrong or has been revoked; create a new one with @BotFather"
+	case strings.Contains(d, "chat not found"):
+		return "that chat id does not exist, or the bot has never been in that chat. " +
+			"Send the bot a message from the account first, then use the id it reports."
+	case e.Code == 403 || strings.Contains(d, "forbidden") || strings.Contains(d, "blocked"):
+		return "the bot cannot write to that chat: open it in Telegram and press Start, " +
+			"and make sure the bot was not blocked or removed from the group."
+	case strings.Contains(d, "too many requests"):
+		return "Telegram is rate limiting this bot; wait and try again."
+	}
+	return ""
 }
 
 // Run long-polls until ctx is cancelled.
@@ -124,6 +193,12 @@ func (b *Bot) Handle(chatID int64, text string) {
 		}
 		i, u, g := b.data.Stats()
 		b.sender.Send(chatID, fmt.Sprintf("*ForgePanel*\nInbounds: %d\nUsers: %d\nGroups: %d", i, u, g))
+	case "/backup":
+		if !admin {
+			b.sender.Send(chatID, "⛔ admin only")
+			return
+		}
+		b.handleBackup(chatID)
 	case "/user":
 		if !admin {
 			b.sender.Send(chatID, "⛔ admin only")
@@ -277,7 +352,8 @@ func helpText(admin bool) string {
 			"\n/enable <name> · /disable <name>" +
 			"\n/reset <name> — zero traffic" +
 			"\n/limit <name> <GB> — set data cap (0=∞)" +
-			"\n/extend <name> <days> — extend expiry"
+			"\n/extend <name> <days> — extend expiry" +
+			"\n/backup — send the encrypted panel backup here"
 	}
 	return base
 }
@@ -318,4 +394,28 @@ func (b *Bot) getUpdates(ctx context.Context) ([]update, error) {
 func escapeMarkdown(s string) string {
 	r := strings.NewReplacer("_", "\\_", "*", "\\*", "`", "\\`", "[", "\\[")
 	return r.Replace(s)
+}
+
+// handleBackup answers /backup with the encrypted archive itself.
+//
+// It says what it is sending BEFORE sending it, because taking and uploading a
+// backup is not instant and a silent pause reads as a bot that ignored the
+// command. And the failure path names the cause: an operator asking for a backup
+// over Telegram is usually doing it because something is already wrong.
+func (b *Bot) handleBackup(chatID int64) {
+	provider, ok := b.data.(BackupProvider)
+	if !ok || provider == nil {
+		b.sender.Send(chatID, "backups are not available on this panel")
+		return
+	}
+	b.sender.Send(chatID, "Taking a backup…")
+	name, data, err := provider.MakeBackup()
+	if err != nil {
+		b.sender.Send(chatID, "backup failed: "+err.Error())
+		return
+	}
+	caption := fmt.Sprintf("ForgePanel backup · %s · %d KB\nEncrypted with this panel's master key.", name, len(data)>>10)
+	if err := b.SendDocument(chatID, name, data, caption); err != nil {
+		b.sender.Send(chatID, "backup was taken but could not be uploaded: "+err.Error())
+	}
 }

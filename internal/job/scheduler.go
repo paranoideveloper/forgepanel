@@ -48,6 +48,9 @@ type Scheduler struct {
 	// Scheduled backups. A backup that happens only when someone remembers is
 	// not a backup policy.
 	backupEvery func() (dataDir, master string, every time.Duration, keep int)
+	// deliverBackup ships a freshly-written backup off the box. Nil means the
+	// backup stays local, which is the default.
+	deliverBackup func(path string)
 	reloadHook  func()                                                  // called after a mutation to reapply engine configs
 	pollTraffic func(reset bool) (map[string]store.TrafficSplit, error) // email -> uplink/downlink
 	// activeAddresses reports how many distinct source addresses a user is
@@ -84,6 +87,11 @@ type Config struct {
 	// BackupConfig supplies the scheduled-backup settings at run time, so an
 	// operator changing them does not require a restart. Nil disables them.
 	BackupConfig func() (dataDir, master string, every time.Duration, keep int)
+
+	// DeliverBackup is called with the path of each scheduled backup as it is
+	// written, for an operator who has asked for an off-box copy. Optional: a
+	// nil hook leaves the backup on disk, which is what it did before.
+	DeliverBackup func(path string)
 	// PollTraffic returns the engine's per-user counters. The scheduler always
 	// calls it with reset=false and accounts by subtraction against a stored
 	// snapshot: a destructive read makes the in-flight value the only copy of
@@ -130,6 +138,7 @@ func New(cfg Config) *Scheduler {
 		rollupHourlyRetention: cfg.RollupHourlyRetention,
 		rollupDailyRetention:  cfg.RollupDailyRetention,
 		backupEvery:           cfg.BackupConfig,
+		deliverBackup:         cfg.DeliverBackup,
 		activeAddresses:       cfg.ActiveAddresses,
 		auditHook:             cfg.AuditIPLimit,
 		ipLimits:              newIPLimitState(),
@@ -227,10 +236,16 @@ func (s *Scheduler) runScheduledBackup() {
 			m.SchemaVersion = v
 		}
 	}
-	if _, err := backup.WriteLocal(master, dataDir, s.now(), m); err != nil {
+	path, err := backup.WriteLocal(master, dataDir, s.now(), m)
+	if err != nil {
 		// Nothing to escalate to from here; the next hour retries, and the
 		// backup status endpoint shows the age of the newest one.
 		return
+	}
+	// Off-box delivery, if the operator asked for one. A backup that only exists
+	// on the machine it backs up is not a backup of that machine.
+	if s.deliverBackup != nil {
+		s.deliverBackup(path)
 	}
 	_, _ = backup.PruneLocal(dataDir, keep)
 }

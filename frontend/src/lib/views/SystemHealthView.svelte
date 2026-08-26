@@ -10,6 +10,82 @@
   let healthDetail = $state<HealthDetail | null>(null);
   let loading = $state(true);
 
+  // Telegram alerts.
+  //
+  // The token was read once from FORGEPANEL_TELEGRAM_TOKEN at process start and
+  // nowhere else, so configuring alerts meant editing a compose file and
+  // restarting the panel — for the feature whose whole purpose is telling an
+  // operator about things that happen while they are not looking.
+  interface TelegramSettings {
+    configured: boolean;
+    has_token: boolean;
+    token_source: string;
+    chat_ids: string;
+    running: boolean;
+    backup_delivery: boolean;
+  }
+  let tg = $state<TelegramSettings | null>(null);
+  let tgToken = $state('');
+  let tgChats = $state('');
+  let tgBackup = $state(false);
+  let tgBusy = $state(false);
+  let tgErr = $state('');
+  let tgRemedy = $state('');
+
+  async function loadTelegram() {
+    try {
+      tg = await apiFetch<TelegramSettings>('/admin/settings/telegram');
+      tgChats = tg.chat_ids ?? '';
+      tgBackup = !!tg.backup_delivery;
+      // The token is never sent back, so the field starts empty and an empty
+      // field means "keep what is stored" rather than "clear it".
+      tgToken = '';
+    } catch (_) { /* an older panel has no telegram settings endpoint */ }
+  }
+
+  function tgBody(withTest: boolean) {
+    return JSON.stringify({
+      // Only send a token when one was typed. An empty field must not wipe a
+      // working token the panel deliberately never showed back.
+      ...(tgToken.trim() ? { token: tgToken.trim() } : {}),
+      chat_ids: tgChats,
+      backup_delivery: tgBackup,
+      test: withTest
+    });
+  }
+
+  async function saveTelegram(withTest: boolean) {
+    tgBusy = true;
+    tgErr = '';
+    tgRemedy = '';
+    try {
+      await apiFetch('/admin/settings/telegram', { method: 'POST', body: tgBody(withTest) });
+      tgToken = '';
+      showToast(tr('systemhealth.telegram_saved'), 'success');
+      await loadTelegram();
+    } catch (e: any) {
+      tgErr = e.message || tr('systemhealth.telegram_failed');
+      tgRemedy = e.remediation ?? '';
+    } finally {
+      tgBusy = false;
+    }
+  }
+
+  async function testTelegram() {
+    tgBusy = true;
+    tgErr = '';
+    tgRemedy = '';
+    try {
+      await apiFetch('/admin/settings/telegram/test', { method: 'POST', body: tgBody(false) });
+      showToast(tr('systemhealth.telegram_test_delivered'), 'success');
+    } catch (e: any) {
+      tgErr = e.message || tr('systemhealth.telegram_failed');
+      tgRemedy = e.remediation ?? '';
+    } finally {
+      tgBusy = false;
+    }
+  }
+
   // Panel Doctor
   let doctor = $state<any>(null);
   let doctorBusy = $state(false);
@@ -195,6 +271,7 @@
 
   onMount(() => {
     loadData();
+    loadTelegram();
   });
 </script>
 
@@ -296,6 +373,37 @@
   {#if regenErr}<p class="err-text">{regenErr}</p>{/if}
 </Modal>
 
+<div class="card" data-testid="telegram-card">
+  <h3>{tr('systemhealth.telegram_alerts')}</h3>
+  <p class="hint">{tr('systemhealth.telegram_hint')}</p>
+  <div class="form-grid">
+    <input type="password" bind:value={tgToken} data-testid="tg-token"
+           placeholder={tg?.has_token ? tr('systemhealth.telegram_token_set') : tr('systemhealth.telegram_token_placeholder')} />
+    <input bind:value={tgChats} data-testid="tg-chats" placeholder={tr('systemhealth.telegram_chats_placeholder')} />
+    <button class="btn-secondary" data-testid="tg-test" onclick={testTelegram} disabled={tgBusy}>
+      {tgBusy ? tr('systemhealth.telegram_working') : tr('systemhealth.telegram_send_test')}
+    </button>
+    <button class="btn-primary" data-testid="tg-save" onclick={() => saveTelegram(true)} disabled={tgBusy}>
+      {tr('systemhealth.telegram_test_and_save')}
+    </button>
+  </div>
+  <label class="chk">
+    <input type="checkbox" bind:checked={tgBackup} data-testid="tg-backup" />
+    <span>{tr('systemhealth.telegram_send_backups')}</span>
+  </label>
+  <p class="hint">{tr('systemhealth.telegram_backup_hint')}</p>
+  {#if tgErr}
+    <p class="err-text" data-testid="tg-error">{tgErr}</p>
+    {#if tgRemedy}<p class="hint" data-testid="tg-remedy">{tgRemedy}</p>{/if}
+  {/if}
+  {#if tg}
+    <p class="hint" data-testid="tg-status">
+      {tg.running ? tr('systemhealth.telegram_running') : tr('systemhealth.telegram_not_running')}
+      {#if tg.token_source === 'environment'}· {tr('systemhealth.telegram_from_env')}{/if}
+    </p>
+  {/if}
+</div>
+
 <div class="card">
   <h3>{tr('systemhealth.change_administrator_password')}</h3>
   <div class="form-grid">
@@ -351,6 +459,7 @@
 </Modal>
 
 <style>
+  .chk { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
   .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }

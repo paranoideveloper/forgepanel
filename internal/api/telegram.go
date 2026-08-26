@@ -1,15 +1,13 @@
 package api
 
 import (
-	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
-	"github.com/forgepanel/forgepanel/internal/telegram"
 )
 
 const gbBytes = 1024 * 1024 * 1024
@@ -163,21 +161,24 @@ func (d tgPanelData) DeleteUser(name string) error {
 	return nil
 }
 
-// startBot launches the Telegram bot if a token is configured (spec §13).
-func (s *Server) startBot(ctx context.Context) {
-	if s.cfg.TelegramToken == "" {
-		return
+
+
+// MakeBackup implements telegram.BackupProvider so the bot's /backup command has
+// something to send.
+//
+// It takes a fresh backup rather than shipping the newest file on disk: an
+// operator asking for one over Telegram is usually reacting to something, and
+// yesterday's copy is not what they mean.
+func (d tgPanelData) MakeBackup() (string, []byte, error) {
+	master := d.s.masterKey()
+	if master == "" {
+		return "", nil, fmt.Errorf("this data directory has no master key, so nothing can be encrypted")
 	}
-	var ids []int64
-	for _, p := range strings.Split(s.cfg.TelegramAdmins, ",") {
-		if id, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64); err == nil {
-			ids = append(ids, id)
-		}
+	files := backup.PanelFiles(d.s.cfg.DataDir)
+	blob, err := backup.CreateWithManifest(master, d.s.cfg.DataDir, files, d.s.backupManifest())
+	if err != nil {
+		return "", nil, err
 	}
-	bot := telegram.New(s.cfg.TelegramToken, ids, tgPanelData{s})
-	// The bot could always SEND; nothing ever asked it to. Without this the
-	// panel knew a node was down, a quota had tripped or an account had expired
-	// and told nobody until someone thought to ask.
-	s.notifier = telegram.NewNotifier(bot, ids)
-	go bot.Run(ctx)
+	name := fmt.Sprintf("forgepanel-%s.fpbk", time.Now().UTC().Format("20060102-150405"))
+	return name, blob, nil
 }

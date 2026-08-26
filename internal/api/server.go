@@ -78,6 +78,13 @@ type Server struct {
 	// every method on it is a safe no-op in that state, so no call site checks.
 	notifier *telegram.Notifier
 
+	// bots owns the Telegram bot's goroutine so a settings change can restart it
+	// without restarting the panel.
+	bots *botControl
+	// tgSend overrides how a test message is delivered. Nil means the real Bot
+	// API; a test replaces it rather than dialling api.telegram.org.
+	tgSend telegramTestSender
+
 	// poolProber overrides how the scheduled rotation-pool sweep health-checks a
 	// domain. Nil means a real TLS handshake, which is what production wants and
 	// what a test must not do. It lives on the Server rather than in a package
@@ -223,6 +230,7 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		BackupConfig: func() (string, string, time.Duration, int) {
 			return cfg.DataDir, cfg.MasterKey, 24 * time.Hour, 7
 		},
+		DeliverBackup: func(path string) { s.deliverBackupToTelegram(path) },
 		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
 			if s.engine == nil {
 				return nil, nil
@@ -276,7 +284,8 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		},
 	})
 	s.sched.Start()
-	s.startBot(ctx)
+	s.bots = &botControl{base: ctx}
+	s.restartBot()
 	return s, nil
 }
 
@@ -759,6 +768,12 @@ func (s *Server) routes() {
 			admin.GET("/2fa/recovery", s.handle2FARecoveryStatus)
 			admin.POST("/2fa/recovery/regenerate", s.handle2FARecoveryRegenerate)
 			admin.POST("/change-password", s.handleChangePassword)
+			// The bot token is a bearer credential for the bot; owner-only, like
+			// every other panel-level secret. /api/admin/settings already
+			// resolves to ownerOnly in the authz table.
+			admin.GET("/settings/telegram", s.handleGetTelegramSettings)
+			admin.POST("/settings/telegram", s.handleSetTelegramSettings)
+			admin.POST("/settings/telegram/test", s.handleTestTelegram)
 			admin.GET("/settings/subscription", s.handleGetSubSettings)
 			admin.POST("/settings/subscription", s.handleSetSubSettings)
 			admin.GET("/geoip", s.handleGeoIP)
