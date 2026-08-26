@@ -668,6 +668,10 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 			continue
 		}
 		stampIdentity(n, u)
+		// A WireGuard user's .conf must carry THEIR key and tunnel address, not
+		// the inbound's shared pair — otherwise every user downloads the same
+		// config and they take the tunnel from each other in turn.
+		s.stampWGIdentity(n, inID, u.ID)
 		if in.NodeID > 0 {
 			if node, err := s.db.NodeByID(in.NodeID); err == nil && node.Address != "" {
 				n.Address = node.Address

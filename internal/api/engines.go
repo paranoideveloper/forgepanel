@@ -104,6 +104,10 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 				n.Address = node.Address
 			}
 		}
+		// Per-client WireGuard peers, so several users on one WG inbound each get
+		// their own key and tunnel address instead of sharing one and taking the
+		// session from each other in turn.
+		s.applyWGPeers(n, in.ID, byInbound[in.ID])
 		sp := engine.InboundSpec{Node: n}
 		// The inbound's OWN credential — the UUID/password embedded in the config
 		// link the panel shows and hands out (handleInboundConfig → export.URI) —

@@ -96,6 +96,24 @@ func AmneziaWGServerConf(server *model.Node, peers []*model.Node) (string, error
 	fmt.Fprintf(&b, "Address = %s\n", strings.Join(saddr, ", "))
 	fmt.Fprintf(&b, "ListenPort = %d\n", server.Port)
 	awgObfuscation(&b, a)
+	// Per-client peers when the panel has resolved them. This is the path that
+	// makes several users on one WireGuard inbound possible at all; the loop
+	// below stays for an inbound with none assigned, which renders exactly as
+	// it always did.
+	if len(w.Peers) > 0 {
+		for _, pe := range w.Peers {
+			if pe.PublicKey == "" || len(pe.AllowedIPs) == 0 {
+				continue
+			}
+			b.WriteString("\n[Peer]\n")
+			fmt.Fprintf(&b, "PublicKey = %s\n", pe.PublicKey)
+			if pe.PresharedKey != "" {
+				fmt.Fprintf(&b, "PresharedKey = %s\n", pe.PresharedKey)
+			}
+			fmt.Fprintf(&b, "AllowedIPs = %s\n", strings.Join(pe.AllowedIPs, ", "))
+		}
+		return b.String(), nil
+	}
 	for _, p := range peers {
 		if p == nil || p.AmneziaWG == nil {
 			continue

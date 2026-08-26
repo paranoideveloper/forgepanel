@@ -39,6 +39,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 	"github.com/forgepanel/forgepanel/internal/version"
+	"github.com/forgepanel/forgepanel/internal/wgpeer"
 )
 
 //go:embed web/*
@@ -63,6 +64,11 @@ type Server struct {
 	nodeCAOnce sync.Once
 	nodeCARef  *nodeca.CA
 	nodeCAErr  error
+
+	// The per-client WireGuard peer manager, opened lazily.
+	wgOnce sync.Once
+	wgMgr  *wgpeer.Manager
+	wgErr  error
 	// notifier pushes operator alerts. Nil when Telegram is not configured, and
 	// every method on it is a safe no-op in that state, so no call site checks.
 	notifier *telegram.Notifier

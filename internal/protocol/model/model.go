@@ -418,6 +418,28 @@ type WireGuardOptions struct {
 	// LocalAddress is the legacy field name kept for parse/back-compat; it maps to
 	// ServerAddress when set.
 	LocalAddress []string `json:"local_address,omitempty"`
+
+	// Peers is the per-client peer list the SERVER config renders.
+	//
+	// PeerPublicKey/PeerAddress above describe exactly ONE client, which made
+	// "assign five users to this WireGuard inbound" inexpressible: WireGuard
+	// keys a session by public key, so five clients sharing a key take the
+	// tunnel from each other in turn rather than sharing it.
+	//
+	// Populated by the panel when it builds engine configs, not by the operator
+	// and not stored on the inbound: peers belong to the (inbound, user) pairing
+	// and change as users are assigned. Empty keeps the legacy single-peer
+	// behaviour, so an inbound with no assigned users renders exactly as before.
+	Peers []WGPeerEntry `json:"peers,omitempty"`
+}
+
+// WGPeerEntry is one client's [Peer] block in a server config.
+type WGPeerEntry struct {
+	PublicKey    string `json:"public_key"`
+	PresharedKey string `json:"pre_shared_key,omitempty"`
+	// AllowedIPs must pin ONE host. Wider than that and a peer receives traffic
+	// addressed to its neighbours on the same tunnel.
+	AllowedIPs []string `json:"allowed_ips"`
 }
 
 // AmneziaWGOptions is a WireGuard config plus AmneziaWG's obfuscation parameters

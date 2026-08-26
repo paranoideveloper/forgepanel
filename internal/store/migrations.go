@@ -44,6 +44,7 @@ const (
 	migVNodeSbStats   uint64 = 14
 	migVNodeMTLS      uint64 = 15
 	migVInboundHosts  uint64 = 16
+	migVWGPeers       uint64 = 17
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -239,6 +240,17 @@ func migrations() []migrate.Migration {
 				"an operator defined simply stop being published.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&InboundHost{}})
+				return err
+			},
+		},
+		{
+			Version: migVWGPeers,
+			Name:    "wireguard_per_client_peers",
+			Rollback: "NOT safe to drop while WireGuard inbounds have several users: every user " +
+				"falls back to the inbound's single shared keypair, and WireGuard keys a session " +
+				"by public key, so they take the tunnel from each other in turn.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&WGPeer{}})
 				return err
 			},
 		},
