@@ -198,6 +198,34 @@ fallbacks (`?serverless=`, `?smartfrag=`), an end-user import page
 (`/import/<token>` with QR), and external-subscription merging. See the ForgeEdge
 docs under `deploy/cloudflare/forgeedge/docs/`.
 
+**Configure** on a deployment opens an editor for that Worker's live
+configuration — every field it holds, read from the Worker itself a moment
+before: clean IPs, ports and protocols, fingerprint, fragment and UDP noise,
+proxyIP/NAT64, chain proxy, CDN fronting, DNS, routing rules, WARP tuning,
+backend mode and external subscriptions.
+
+Only the fields you change are sent. They are merged into whatever the Worker
+currently holds, which has two consequences worth knowing:
+
+- A field newer than your panel build is never touched. The Worker ships on its
+  own cadence, and a panel that wrote its own idea of the whole document would
+  silently delete every field it had not heard of — discovered days later, when
+  whatever depended on it stopped working. Fields the panel has no layout for
+  appear under **Other fields** and are editable there.
+- Two admins editing different sections do not undo each other.
+
+The Worker validates, and its rejection is shown as-is. The panel deliberately
+keeps no copy of the Worker's schema: a second copy drifts, and the drift shows
+up as the panel refusing a value the Worker accepts.
+
+`telegramBotToken` and `feedPullToken` are never sent to the browser — they read
+as `__unchanged__` and are left alone unless you type a new value. The VLESS UUID
+and trojan password are shown, because they are in every subscription link the
+Worker hands out already and they are the fields most often rotated.
+
+**Raw JSON** replaces the whole document, including deleting anything you remove.
+The form is the safe path.
+
 ---
 
 ## 7.5 Telegram bot — run the panel from chat

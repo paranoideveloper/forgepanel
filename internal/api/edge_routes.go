@@ -436,6 +436,8 @@ func (s *Server) registerEdgeRoutes(rg gin.IRouter) {
 	g.POST("/deployments/:id/warp", s.handleEdgeWarpRegister)
 	g.GET("/deployments/:id/warp.conf", s.handleEdgeWarpConf)
 	g.GET("/deployments/:id/status", s.handleEdgeStatus)
+	g.GET("/deployments/:id/config", s.handleEdgeGetConfig)
+	g.PUT("/deployments/:id/config", s.handleEdgeUpdateConfig)
 	g.POST("/push", s.handleEdgePush)
 	g.GET("/feed", s.handleEdgePreviewFeed)
 	g.GET("/feed-token", s.handleEdgeFeedToken)

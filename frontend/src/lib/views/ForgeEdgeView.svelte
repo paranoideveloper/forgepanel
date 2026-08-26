@@ -2,6 +2,7 @@
 	import { tr } from '$lib/i18n';
   import { onMount } from 'svelte';
   import { apiFetch, getAuthToken } from '$lib/api';
+  import EdgeConfigEditor from '$lib/components/EdgeConfigEditor.svelte';
   import { showToast } from '$lib/components/Toast.svelte';
 
   interface Deployment {
@@ -21,6 +22,7 @@
   }
 
   let deployments = $state<Deployment[]>([]);
+  let configId = $state<number | null>(null);
   let embedded = $state(false);
   let tokenURL = $state('');
   let loading = $state(true);
@@ -212,11 +214,18 @@
               </button>
               <button class="btn sm" onclick={() => downloadConf(d, true)} title={tr('forgeedge.download_the_amneziawg_conf_for_the')}>{tr('forgeedge.amnezia_conf')}</button>
               <button class="btn sm" onclick={() => downloadConf(d, false)} title={tr('forgeedge.download_the_plain_wireguard_warp_conf')}>{tr('forgeedge.wg_conf')}</button>
+              <button class="btn sm" onclick={() => (configId = configId === d.id ? null : d.id)}
+                title={tr('forgeedge.edit_every_field_of_this_workers')}>{tr('forgeedge.configure')}</button>
               <button class="btn sm" onclick={() => pushFeed(d)}>{tr('forgeedge.push_feed')}</button>
               <a class="btn sm" href={panelUrl(d)} target="_blank" rel="noopener">{tr('forgeedge.open_panel')}</a>
               <button class="btn sm danger" onclick={() => destroy(d)}>{tr('forgeedge.delete')}</button>
             </div>
           </div>
+          {#if configId === d.id}
+            {#key d.id}
+              <EdgeConfigEditor deploymentId={d.id} onClose={() => (configId = null)} />
+            {/key}
+          {/if}
         {/each}
       {/if}
     </div>
