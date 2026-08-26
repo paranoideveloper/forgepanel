@@ -30,7 +30,12 @@ import (
 
 type NodeAgent struct {
 	panel string
+	// token is the LEGACY credential — a permanent bearer string. Kept so a
+	// node can still reach a panel that has not been upgraded, and unused once
+	// a client certificate has been obtained.
 	token string
+	// bootstrapToken is spent ONCE for a client certificate and then worthless.
+	bootstrapToken string
 	// pin is the panel's certificate SHA-256, hex. Empty means "use the system
 	// trust store", which is correct once the panel has a real certificate.
 	pin     string
@@ -68,9 +73,13 @@ func main() {
 	}
 	panel := os.Getenv("PANEL")
 	token := os.Getenv("TOKEN")
+	bootstrap := os.Getenv("BOOTSTRAP")
 	pin := os.Getenv("PANEL_FINGERPRINT")
-	if panel == "" || token == "" {
-		fmt.Fprintln(os.Stderr, "forgenode: set PANEL and TOKEN environment variables")
+	// Either credential is enough to start: BOOTSTRAP on a current panel, TOKEN
+	// against one that has not been upgraded yet. Requiring both would refuse to
+	// run on exactly the mixed fleet this change has to survive.
+	if panel == "" || (token == "" && bootstrap == "") {
+		fmt.Fprintln(os.Stderr, "forgenode: set PANEL and either BOOTSTRAP or TOKEN")
 		os.Exit(2)
 	}
 
@@ -82,12 +91,13 @@ func main() {
 
 	bm := binmgr.New(dataDir)
 	agent := &NodeAgent{
-		panel:   panel,
-		token:   token,
-		pin:     pin,
-		dataDir: dataDir,
-		binMgr:  bm,
-		engines: map[string]*engineProc{},
+		panel:          panel,
+		token:          token,
+		bootstrapToken: bootstrap,
+		pin:            pin,
+		dataDir:        dataDir,
+		binMgr:         bm,
+		engines:        map[string]*engineProc{},
 	}
 	for _, spec := range engineSpecs() {
 		// Resolved LAZILY per engine, and a failure is not fatal: a node that
@@ -99,6 +109,16 @@ func main() {
 			bin, _ = exec.LookPath(spec.name)
 		}
 		agent.engines[spec.name] = &engineProc{spec: spec, bin: bin}
+	}
+
+	// Obtain a client certificate before anything else, so register and every
+	// heartbeat after it are authenticated by the certificate rather than by a
+	// bearer string. A failure here is not fatal: a panel that predates mTLS has
+	// no bootstrap endpoint, and the node must still be able to enrol against it.
+	if err := agent.bootstrap(); err != nil {
+		fmt.Fprintln(os.Stderr, "forgenode: continuing with token authentication:", err)
+	} else if fp := agent.identityFingerprint(); fp != "" {
+		fmt.Println("forgenode: client certificate", fp)
 	}
 
 	if err := agent.register(); err != nil {
@@ -123,6 +143,9 @@ func nodeVersionRequested(args []string) bool {
 }
 
 func (a *NodeAgent) step() {
+	// Renew from the heartbeat loop rather than a timer of its own: the
+	// heartbeat is already this node's proof that it can reach the panel.
+	a.renewIfNeeded()
 	cfgs, err := a.heartbeat()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "forgenode: heartbeat error:", err)
@@ -235,24 +258,30 @@ func (a *NodeAgent) httpClient() *http.Client {
 		return a.client
 	}
 	c := &http.Client{Timeout: 10 * time.Second}
+	tlsCfg := &tls.Config{}
+	// The node's own identity for the handshake. Presenting it is what replaces
+	// sending a bearer token in the request body: the private key stays here,
+	// so nothing that authenticates this node is ever transmitted.
+	if pair := a.clientCertificate(); pair != nil {
+		tlsCfg.Certificates = []tls.Certificate{*pair}
+	}
 	if a.pin != "" {
 		want := strings.ToLower(strings.NewReplacer(":", "", " ", "").Replace(a.pin))
-		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{
-			// The pin IS the verification, so the default chain check is
-			// bypassed and replaced below rather than simply switched off.
-			InsecureSkipVerify: true,
-			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-				for _, raw := range rawCerts {
-					sum := sha256.Sum256(raw)
-					if hex.EncodeToString(sum[:]) == want {
-						return nil
-					}
+		// The pin IS the verification, so the default chain check is bypassed
+		// and replaced below rather than simply switched off.
+		tlsCfg.InsecureSkipVerify = true
+		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			for _, raw := range rawCerts {
+				sum := sha256.Sum256(raw)
+				if hex.EncodeToString(sum[:]) == want {
+					return nil
 				}
-				return fmt.Errorf("panel certificate does not match the pinned fingerprint %s; "+
-					"re-run enrolment to get the current pin, or the connection is being intercepted", want)
-			},
-		}}
+			}
+			return fmt.Errorf("panel certificate does not match the pinned fingerprint %s; "+
+				"re-run enrolment to get the current pin, or the connection is being intercepted", want)
+		}
 	}
+	c.Transport = &http.Transport{TLSClientConfig: tlsCfg}
 	a.client = c
 	return c
 }

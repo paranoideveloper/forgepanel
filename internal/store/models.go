@@ -294,9 +294,30 @@ func AllModels() []any {
 // one-time secret printed in the `curl | bash` enrollment command.
 type Node struct {
 	Base
-	Name        string     `gorm:"uniqueIndex;not null" json:"name"`
-	Address     string     `json:"address"`
-	EnrollToken string     `gorm:"uniqueIndex" json:"-"`
+	Name    string `gorm:"uniqueIndex;not null" json:"name"`
+	Address string `json:"address"`
+	// EnrollToken is the LEGACY credential: a permanent bearer string that was
+	// the whole of a node's identity. It is kept so a fleet enrolled before
+	// mTLS keeps working, and is refused outright once RequireNodeMTLS is set.
+	EnrollToken string `gorm:"uniqueIndex" json:"-"`
+
+	// --- mTLS control plane -------------------------------------------------
+
+	// BootstrapHash is the SHA-256 of the one-time bootstrap token, hex.
+	//
+	// Hashed, not stored: the token is spent once to obtain a certificate, and
+	// a panel database that has been read should not hand over a working
+	// credential for every node in it. Cleared the moment it is used.
+	BootstrapHash string `gorm:"index" json:"-"`
+	// BootstrapExpires bounds how long the bootstrap token is usable. An
+	// enrolment command pasted into a chat six months ago should not still work.
+	BootstrapExpires *time.Time `json:"-"`
+	// CertSerial identifies the node's current client certificate, so it can be
+	// revoked by the panel alone.
+	CertSerial string `gorm:"index" json:"cert_serial,omitempty"`
+	// CertNotAfter is when that certificate stops being accepted.
+	CertNotAfter *time.Time `json:"cert_not_after,omitempty"`
+
 	Enrolled    bool       `json:"enrolled"`
 	LastSeen    *time.Time `json:"last_seen"`
 	CoreVersion string     `json:"core_version"`

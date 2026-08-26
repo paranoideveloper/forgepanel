@@ -384,6 +384,22 @@ func (s *Store) NodeByID(id uint) (*Node, error) {
 	return &n, nil
 }
 
+// NodeByBootstrapHash resolves a hashed one-time bootstrap token to its node.
+//
+// The hash is what is stored: the token is spent once to obtain a certificate,
+// and a database that has been read should not yield a working credential for
+// every node in it.
+func (s *Store) NodeByBootstrapHash(hash string) (*Node, error) {
+	var n Node
+	if hash == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if err := s.db.Where("bootstrap_hash = ?", hash).First(&n).Error; err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
 // NodeByToken resolves an enroll/auth token to a node.
 func (s *Store) NodeByToken(token string) (*Node, error) {
 	var n Node

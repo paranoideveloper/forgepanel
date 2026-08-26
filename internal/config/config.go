@@ -44,6 +44,15 @@ type PanelSettings struct {
 	SetupExpires   string       `json:"setup_token_expires,omitempty"`
 	ACME           ACMESettings `json:"acme"`
 
+	// RequireNodeMTLS refuses the legacy enrol-token authentication on
+	// node-facing routes, so every node must present a client certificate.
+	//
+	// Off by default so an upgrade does not disconnect a fleet that has not
+	// re-enrolled yet. Turning it on is the point of the change, not an
+	// optional extra: the tokens those nodes still hold are exactly the
+	// permanent bearer credentials mTLS exists to replace.
+	RequireNodeMTLS bool `json:"require_node_mtls"`
+
 	// extra preserves any unknown/forward-compat keys so a rewrite by an older
 	// binary never silently drops fields written by a newer one.
 	extra map[string]json.RawMessage

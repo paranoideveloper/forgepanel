@@ -31,6 +31,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/domain"
 	"github.com/forgepanel/forgepanel/internal/job"
+	"github.com/forgepanel/forgepanel/internal/nodeca"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -57,6 +58,11 @@ type Server struct {
 	fdns    *core.ForgeDNSController // DNS-tunnel manager (spec §5)
 	domains *domain.Registry         // domain registry + DNS health (spec §7)
 	certs   *cert.Store              // cert store + ACME (spec §7)
+
+	// The node control plane's own CA, opened lazily from DataDir.
+	nodeCAOnce sync.Once
+	nodeCARef  *nodeca.CA
+	nodeCAErr  error
 	// notifier pushes operator alerts. Nil when Telegram is not configured, and
 	// every method on it is a safe no-op in that state, so no call site checks.
 	notifier *telegram.Notifier
@@ -396,7 +402,22 @@ func (s *Server) Handler() http.Handler { return s.router }
 
 // CertTLSConfig returns the panel's TLS config (imported certs + ACME fallback),
 // used by main to serve the panel over HTTPS.
-func (s *Server) CertTLSConfig() *tls.Config { return s.certs.TLSConfig() }
+func (s *Server) CertTLSConfig() *tls.Config {
+	cfg := s.certs.TLSConfig()
+	// Ask every client for a certificate, and REQUEST rather than REQUIRE it.
+	//
+	// Requiring one would break the panel for browsers, which have none — the
+	// same listener serves the admin UI and the node control plane. Requesting
+	// it means a node's certificate arrives and is verified against the node CA
+	// (ClientCAs), while a browser simply sends nothing and is handled as
+	// before. The node-facing handlers are what decide whether the absence of a
+	// certificate is acceptable.
+	cfg.ClientAuth = tls.VerifyClientCertIfGiven
+	if pool := s.nodeClientCAPool(); pool != nil {
+		cfg.ClientCAs = pool
+	}
+	return cfg
+}
 
 // ACMEHTTPHandler returns the handler for the :80 helper: it answers ACME
 // HTTP-01 challenges and redirects everything else to HTTPS.
@@ -735,6 +756,8 @@ func (s *Server) routes() {
 
 	// Node agent endpoints (token-authenticated, spec §10).
 	if s.db != nil {
+		r.POST("/api/node/bootstrap", s.handleNodeBootstrap)
+		r.POST("/api/node/renew", s.handleNodeRenew)
 		r.POST("/api/node/register", s.handleNodeRegister)
 		r.POST("/api/node/heartbeat", s.handleNodeHeartbeat)
 		r.GET("/node-install.sh", s.handleNodeInstallScript)

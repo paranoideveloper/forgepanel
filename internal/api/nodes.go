@@ -46,7 +46,16 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 		return
 	}
 	tok, _ := keygen.Password(24)
-	n := &store.Node{Name: req.Name, Address: req.Address, EnrollToken: tok}
+	// The bootstrap token is separate from the legacy enrol token, hashed at
+	// rest, and expires. It buys ONE client certificate and is then spent — an
+	// enrolment command that still works after the node has enrolled is a
+	// permanent credential again, just with extra steps.
+	bootstrap, _ := keygen.Password(32)
+	expires := time.Now().Add(BootstrapTTL)
+	n := &store.Node{
+		Name: req.Name, Address: req.Address, EnrollToken: tok,
+		BootstrapHash: hashBootstrap(bootstrap), BootstrapExpires: &expires,
+	}
 	if err := s.db.CreateNode(n); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -75,13 +84,15 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 	// An empty fingerprint is not an error: it means the panel presents a
 	// CA-issued certificate, and the node should use the system trust store.
 	fp := s.panelCertFingerprint()
-	enroll := "curl -fsSL " + panelURL + "/node-install.sh | PANEL=" + panelURL + " TOKEN=" + tok
+	enroll := "curl -fsSL " + panelURL + "/node-install.sh | PANEL=" + panelURL +
+		" BOOTSTRAP=" + bootstrap + " TOKEN=" + tok
 	if fp != "" {
 		enroll += " PANEL_FINGERPRINT=" + fp
 	}
 	enroll += " bash"
 	c.JSON(201, gin.H{"id": n.ID, "name": n.Name, "enroll_command": enroll,
-		"token": tok, "panel_fingerprint": fp})
+		"token": tok, "bootstrap": bootstrap,
+		"bootstrap_expires": expires, "panel_fingerprint": fp})
 }
 
 // handleNodeRegister is called by a node agent with its enroll token to complete
@@ -95,9 +106,12 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	n, err := s.db.NodeByToken(req.Token)
+	// mTLS first, then the legacy token. The order matters: a node that holds a
+	// certificate must be judged on it, so revoking that certificate actually
+	// stops the node even while its old token row still exists.
+	n, err := s.authenticateNode(c, req.Token)
 	if err != nil {
-		c.JSON(401, gin.H{"error": "invalid enroll token"})
+		c.JSON(401, gin.H{"error": err.Error()})
 		return
 	}
 	now := time.Now()
@@ -140,7 +154,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	n, err := s.db.NodeByToken(req.Token)
+	n, err := s.authenticateNode(c, req.Token)
 	if err != nil {
 		c.JSON(401, gin.H{"error": "invalid token"})
 		return
@@ -194,6 +208,13 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 // handleDeleteNode removes a node.
 func (s *Server) handleDeleteNode(c *gin.Context) {
 	id := parseID(c)
+	// Revoke BEFORE deleting. The certificate outlives the row, and a deleted
+	// node whose certificate still verifies is a credential for a node the
+	// operator believes is gone — read the row while it is still there so the
+	// serial is known.
+	if n, err := s.db.NodeByID(id); err == nil {
+		s.revokeNodeCert(n)
+	}
 	if err := s.db.DeleteNode(id); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -212,7 +233,13 @@ func (s *Server) handleNodeInstallScript(c *gin.Context) {
 # version always matches the panel that will drive it, and so this works with a
 # private release repo or a node that cannot reach GitHub.
 set -euo pipefail
-: "${PANEL:?set PANEL}" ; : "${TOKEN:?set TOKEN}"
+# Either credential is enough: BOOTSTRAP on a current panel, TOKEN against one
+# that predates the mTLS control plane. Requiring both would refuse to install
+# on exactly the mixed fleet this has to survive.
+: "${PANEL:?set PANEL}"
+if [ -z "${BOOTSTRAP:-}" ] && [ -z "${TOKEN:-}" ]; then
+  echo "set BOOTSTRAP (preferred) or TOKEN" >&2; exit 2
+fi
 # The enroll command exports PANEL_FINGERPRINT, and the agent's own unit reads
 # the same name, so the script uses it too: one name end to end. A mismatch here
 # would leave the pin empty and the node would refuse to trust a self-signed
@@ -276,6 +303,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Environment=PANEL=$PANEL
+Environment=BOOTSTRAP=$BOOTSTRAP
 Environment=TOKEN=$TOKEN
 Environment=PANEL_FINGERPRINT=$PANEL_FINGERPRINT
 ExecStart=/usr/local/bin/forgenode

@@ -42,6 +42,7 @@ const (
 	migVProfiles      uint64 = 12
 	migVImportSource  uint64 = 13
 	migVNodeSbStats   uint64 = 14
+	migVNodeMTLS      uint64 = 15
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -213,6 +214,17 @@ func migrations() []migrate.Migration {
 			Rollback: "safe to drop. The column caches what the node reports on every heartbeat; " +
 				"losing it makes the panel omit the sing-box stats section for one cycle, after " +
 				"which the next heartbeat restores it.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Node{}})
+				return err
+			},
+		},
+		{
+			Version: migVNodeMTLS,
+			Name:    "node_mtls_control_plane",
+			Rollback: "safe to drop, but every node then falls back to its legacy enrol token — " +
+				"which is exactly the permanent bearer credential this replaced. Re-enrol the " +
+				"fleet rather than staying there.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Node{}})
 				return err
