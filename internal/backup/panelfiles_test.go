@@ -159,7 +159,7 @@ func TestScheduledBackupsRotate(t *testing.T) {
 	dir := dataDir(t)
 	base := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
-		if _, err := WriteLocal("master", dir, base.Add(time.Duration(i)*time.Hour)); err != nil {
+		if _, err := WriteLocal("master", dir, base.Add(time.Duration(i)*time.Hour), Manifest{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -193,7 +193,7 @@ func TestScheduledBackupsRotate(t *testing.T) {
 // A half-written backup must never be counted as a good one.
 func TestPartialWritesAreNotCountedAsBackups(t *testing.T) {
 	dir := dataDir(t)
-	if _, err := WriteLocal("master", dir, time.Now()); err != nil {
+	if _, err := WriteLocal("master", dir, time.Now(), Manifest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(LocalDir(dir), "forgepanel-inprogress.fpbk.part"), []byte("half"), 0o600); err != nil {

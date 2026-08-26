@@ -10,10 +10,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/migrate"
+	"github.com/forgepanel/forgepanel/internal/store"
+	fpversion "github.com/forgepanel/forgepanel/internal/version"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
@@ -266,7 +270,7 @@ func cmdBackup(args []string) error {
 		// here is why the certificates were outside every CLI backup while the
 		// package doc claimed otherwise.
 		files := backup.PanelFiles(cfg.DataDir)
-		blob, err := backup.CreateFrom(cfg.MasterKey, cfg.DataDir, files)
+		blob, err := backup.CreateWithManifest(cfg.MasterKey, cfg.DataDir, files, backupManifest(cfg.DataDir))
 		if err != nil {
 			return err
 		}
@@ -281,11 +285,32 @@ func cmdBackup(args []string) error {
 		if err != nil {
 			return err
 		}
+		// Check BEFORE stopping the panel. A backup this build cannot migrate is
+		// refused either way; doing it first means a refused restore costs no
+		// downtime at all instead of taking the panel down to say no.
+		m, err := backup.ReadManifest(cfg.MasterKey, blob)
+		if err != nil {
+			return err
+		}
+		if err := backup.CheckRestorable(m, store.LatestSchemaVersion()); err != nil {
+			return err
+		}
+		if m != nil {
+			fmt.Printf("backup: written %s by panel %s at schema version %d (%d files)\n",
+				m.CreatedAt.UTC().Format(time.RFC3339), orUnknown(m.PanelVersion), m.SchemaVersion, m.Files)
+		}
 		if err := systemctl("stop", "forgepanel"); err != nil {
 			return err
 		}
 		files, err := backup.Restore(cfg.MasterKey, blob, cfg.DataDir)
 		if err != nil {
+			// Start it again. Leaving the panel stopped because a restore failed
+			// turns a failed restore into an outage, and the data directory is
+			// either untouched or half-written — in both cases the running panel
+			// is what the operator needs in order to do anything next.
+			if startErr := systemctl("start", "forgepanel"); startErr != nil {
+				return fmt.Errorf("%w (and the panel could not be restarted: %v)", err, startErr)
+			}
 			return err
 		}
 		if err := systemctl("start", "forgepanel"); err != nil {
@@ -316,4 +341,28 @@ func cmdMigrate(args []string) error {
 		fmt.Println("  warning:", w)
 	}
 	return printJSON(res)
+}
+
+// backupManifest describes the database being backed up. Every field is
+// best-effort: a manifest that cannot be filled in completely is still worth
+// more than none, and a backup must never fail because the schema version could
+// not be read.
+func backupManifest(dataDir string) backup.Manifest {
+	m := backup.Manifest{CreatedAt: time.Now().UTC(), PanelVersion: fpversion.Version}
+	db, err := store.Open(filepath.Join(dataDir, "forgepanel.db"))
+	if err != nil {
+		return m
+	}
+	defer db.Close()
+	if v, err := db.SchemaVersion(); err == nil {
+		m.SchemaVersion = v
+	}
+	return m
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "(unknown version)"
+	}
+	return s
 }

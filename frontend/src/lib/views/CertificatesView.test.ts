@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import CertificatesView from './CertificatesView.svelte';
 
 // The panel-address endpoint is the single source of truth for domain + cert
@@ -127,5 +127,118 @@ describe('CertificatesView Component', () => {
     await fireEvent.click(importBtn);
 
     expect(await screen.findByText('Network Error')).toBeTruthy();
+  });
+});
+
+// The panel-address surface was write-one-field / read-none. POST accepts
+// domain, port, bind_address, https_enabled, acme_email and verify_dns, and this
+// view posted {domain}. GET returns port, bind_address, admin_path,
+// https_enabled and server_ipv6, and rendered none of them. So the panel's own
+// port and bind address could only be changed by hand-editing panel.json and
+// restarting — on the one screen whose entire subject is where the panel lives.
+describe('CertificatesView panel listener', () => {
+  function api(onPost?: (body: any) => any, addrOverrides: Record<string, unknown> = {}) {
+    const posts: any[] = [];
+    const gets: string[] = [];
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      const path = String(url);
+      if (opts?.method === 'POST') {
+        const body = opts.body ? JSON.parse(opts.body) : {};
+        posts.push(body);
+        if (onPost) return { ok: true, json: async () => onPost(body) } as Response;
+        return { ok: true, json: async () => ({ restart_required: true, public_url: 'x' }) } as Response;
+      }
+      gets.push(path);
+      if (path.includes('/panel-address/port-check')) {
+        const port = Number(new URL(path, 'http://x').searchParams.get('port'));
+        return { ok: true, json: async () => ({ port, available: port !== 80, current: port === 2053 }) } as Response;
+      }
+      if (path.includes('/panel-address')) return { ok: true, json: async () => panelAddress(addrOverrides) } as Response;
+      return { ok: true, json: async () => ({}) } as Response;
+    };
+    return { posts, gets };
+  }
+
+  it('renders the listener fields the endpoint has always returned', async () => {
+    api();
+    render(CertificatesView);
+    const port = (await screen.findByTestId('port-input')) as HTMLInputElement;
+    expect(port.value).toBe('2053');
+    expect((screen.getByTestId('bind-input') as HTMLInputElement).value).toBe('0.0.0.0');
+    expect((screen.getByTestId('https-toggle') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId('admin-path').textContent).toContain('/panel/abc');
+  });
+
+  it('pre-flights the port before the panel is moved onto it', async () => {
+    const { gets } = api();
+    render(CertificatesView);
+    const port = (await screen.findByTestId('port-input')) as HTMLInputElement;
+    await fireEvent.input(port, { target: { value: '80' } });
+    await fireEvent.click(screen.getByTestId('check-port'));
+    const result = await screen.findByTestId('port-result');
+    expect(result.textContent).toContain('already in use');
+    expect(gets.some((g) => g.includes('/panel-address/port-check?port=80'))).toBe(true);
+  });
+
+  it('distinguishes the port the panel is already on from a free one', async () => {
+    api();
+    render(CertificatesView);
+    await screen.findByTestId('port-input');
+    await fireEvent.click(screen.getByTestId('check-port'));
+    expect((await screen.findByTestId('port-result')).textContent).toContain('already on');
+  });
+
+  it('sends every field the endpoint accepts, not just the domain', async () => {
+    const { posts } = api();
+    render(CertificatesView);
+    const port = (await screen.findByTestId('port-input')) as HTMLInputElement;
+    await fireEvent.input(port, { target: { value: '8443' } });
+    await fireEvent.input(screen.getByTestId('bind-input'), { target: { value: '127.0.0.1' } });
+    await fireEvent.click(screen.getByTestId('save-address'));
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+    expect(posts[0]).toMatchObject({
+      domain: 'panel.example.com', port: 8443, bind_address: '127.0.0.1', https_enabled: true
+    });
+  });
+
+  it('refuses a port outside the range before it becomes a bare 400', async () => {
+    api();
+    render(CertificatesView);
+    const port = (await screen.findByTestId('port-input')) as HTMLInputElement;
+    await fireEvent.input(port, { target: { value: '70000' } });
+    expect(await screen.findByTestId('port-invalid')).toBeTruthy();
+    expect((screen.getByTestId('save-address') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('refuses a bind address that is not an IP', async () => {
+    api();
+    render(CertificatesView);
+    await screen.findByTestId('bind-input');
+    await fireEvent.input(screen.getByTestId('bind-input'), { target: { value: 'localhost' } });
+    expect(await screen.findByTestId('bind-invalid')).toBeTruthy();
+  });
+
+  it('explains the domain rule rather than letting the server answer with a 400', async () => {
+    api();
+    render(CertificatesView);
+    // Wait for the load first. The domain input renders before the fetch
+    // resolves, and typing into it early is overwritten when loadData lands —
+    // the test would then be asserting against the SERVER's domain, not the
+    // typed one, and would pass or fail for the wrong reason.
+    await screen.findByTestId('port-input');
+    const domain = screen.getByTestId('domain-input') as HTMLInputElement;
+    await fireEvent.input(domain, { target: { value: 'not a domain' } });
+    expect(await screen.findByTestId('domain-invalid')).toBeTruthy();
+  });
+
+  it('says HTTPS needs a domain instead of posting a request that cannot succeed', async () => {
+    // A panel on a bare IP with HTTPS still switched on: the state a save would
+    // be rejected from, reached without touching anything.
+    api(undefined, { domain: '' });
+    render(CertificatesView);
+    await screen.findByTestId('port-input');
+    expect((screen.getByTestId('https-toggle') as HTMLInputElement).checked).toBe(true);
+    expect(await screen.findByTestId('https-needs-domain')).toBeTruthy();
+    expect((screen.getByTestId('save-address') as HTMLButtonElement).disabled).toBe(true);
   });
 });

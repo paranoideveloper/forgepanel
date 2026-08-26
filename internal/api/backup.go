@@ -23,6 +23,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/backup"
+	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 func (s *Server) masterKey() string {
@@ -40,7 +42,7 @@ func (s *Server) handleCreateBackup(c *gin.Context) {
 		return
 	}
 	files := backup.PanelFiles(s.cfg.DataDir)
-	blob, err := backup.CreateFrom(master, s.cfg.DataDir, files)
+	blob, err := backup.CreateWithManifest(master, s.cfg.DataDir, files, s.backupManifest())
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -99,13 +101,33 @@ func (s *Server) handleVerifyBackup(c *gin.Context) {
 		return
 	}
 	s.audit(c, "backup.verify", fmt.Sprintf("%s (%d files)", file.Filename, len(names)))
-	c.JSON(200, gin.H{
+	out := gin.H{
 		"ok":    true,
 		"files": names,
 		"note": "This backup opens with this panel's master key and contains the files listed. " +
 			"To restore it, stop the panel and run: forgectl backup restore <file> — " +
 			"restoring into a running panel would corrupt the database it currently holds open.",
-	})
+	}
+	// Verifying is exactly when an operator wants to know whether this backup
+	// can be restored HERE, not only whether it decrypts. A backup from a newer
+	// panel decrypts perfectly and would still ruin the database.
+	if m, mErr := backup.ReadManifest(master, blob); mErr == nil && m != nil {
+		out["manifest"] = m
+		if err := backup.CheckRestorable(m, store.LatestSchemaVersion()); err != nil {
+			out["restorable"] = false
+			out["restore_error"] = err.Error()
+		} else {
+			out["restorable"] = true
+		}
+	} else {
+		// A pre-manifest backup. Say so rather than leaving the field absent and
+		// letting a UI read "not restorable" into a missing key.
+		out["manifest"] = nil
+		out["restorable"] = true
+		out["manifest_note"] = "this backup predates backup manifests, so its schema version is unknown; " +
+			"it is from an older panel by definition, which is the safe direction to restore from"
+	}
+	c.JSON(200, out)
 }
 
 // handleBackupStatus reports what the scheduled backups are doing.
@@ -125,4 +147,19 @@ func (s *Server) handleBackupStatus(c *gin.Context) {
 	}
 	out["has_master_key"] = strings.TrimSpace(s.masterKey()) != ""
 	c.JSON(200, out)
+}
+
+// backupManifest describes the database this panel is backing up.
+//
+// Best-effort in every field: a backup must never fail because the schema
+// version could not be read, and a manifest with a zero schema version still
+// carries the panel version and the file count.
+func (s *Server) backupManifest() backup.Manifest {
+	m := backup.Manifest{CreatedAt: time.Now().UTC(), PanelVersion: version.Version}
+	if s.db != nil {
+		if v, err := s.db.SchemaVersion(); err == nil {
+			m.SchemaVersion = v
+		}
+	}
+	return m
 }

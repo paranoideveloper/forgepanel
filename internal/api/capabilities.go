@@ -95,6 +95,11 @@ func (s *Server) handleCapabilities(c *gin.Context) {
 		// range silently did nothing.
 		"port_hopping": s.portHoppingCapability(),
 		"securities":   []string{"none", "tls", "reality"},
+		// Every protocol/transport/security triple the builder can offer, each
+		// one put through the same model.Validate that would reject it on save.
+		// The prose note below says the same thing in English; only this can
+		// grey out an option before the operator fills in the rest of the form.
+		"combinations": combinationMatrix(),
 		"note":         "REALITY only wraps tcp/xhttp/grpc; normal HTTP CDNs only front ws/xhttp/httpupgrade (and gRPC on capable accounts).",
 	})
 }

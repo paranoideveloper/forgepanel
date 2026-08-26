@@ -31,6 +31,26 @@
   // rules were never installed — the inbound served only its base port and the
   // range did nothing at all.
   let hopCap = $state<{ supported: boolean; reason?: string; remediation?: string } | null>(null);
+
+  // Which protocol/transport/security triples the engine will actually accept.
+  //
+  // /capabilities has always carried this, and the builder read one field of it
+  // (port_hopping) and ignored the rest — so the security dropdown offered
+  // REALITY over WebSocket, the operator filled in the whole form, pressed Save,
+  // and the validator returned a 400 it could have given before the first field
+  // was typed. The matrix comes from running model.Validate on each triple, so a
+  // greyed-out option carries the validator's own words.
+  interface Combination { protocol: string; transport: string; security: string; supported: boolean; reason?: string }
+  let combinations = $state<Combination[]>([]);
+
+  function comboFor(p: string, t: string, sec: string): Combination | undefined {
+    return combinations.find((c) => c.protocol === p && c.transport === (t || '') && c.security === (sec || ''));
+  }
+  // Unknown means allowed: an older panel, or a capability call that failed,
+  // must not silently forbid combinations that work.
+  const securityBlocked = (sec: string) => comboFor(proto, transport, sec)?.supported === false;
+  const securityReason = (sec: string) => comboFor(proto, transport, sec)?.reason ?? '';
+  let securityMoved = $state('');
   const hopRange = $derived(String(values['hysteria2.port_hopping'] ?? '').trim());
   const hopWontWork = $derived(
     proto === 'hysteria2' && hopRange !== '' && hopCap !== null && !hopCap.supported
@@ -57,12 +77,16 @@
       else applyDefaults();
       lastProto = proto;
       try {
-        const caps = await apiFetch<{ port_hopping?: typeof hopCap }>('/capabilities');
+        const caps = await apiFetch<{ port_hopping?: typeof hopCap; combinations?: Combination[] }>('/capabilities');
         hopCap = caps.port_hopping ?? null;
+        combinations = caps.combinations ?? [];
       } catch {
         // A missing capability report must not block the form. Unknown is shown
-        // as nothing rather than as a false reassurance.
+        // as nothing rather than as a false reassurance — and with no matrix
+        // every option stays selectable, which is how the form behaved before
+        // the matrix existed.
         hopCap = null;
+        combinations = [];
       }
       schedulePreview();
     } catch (e: any) {
@@ -205,6 +229,29 @@
       switchInvalid = '';
     }
     lastProto = proto;
+    schedulePreview();
+  }
+
+  // Changing the transport can invalidate the security that is already
+  // selected. Leaving it selected would leave a form whose own dropdown shows a
+  // disabled value, and saving it would fail; moving it silently would change a
+  // setting the operator chose without telling them. So it moves and says so.
+  function onTransportChange() {
+    if (securityBlocked(security)) {
+      const why = securityReason(security);
+      const fallback = (securities as string[]).find((sec) => !securityBlocked(sec));
+      if (fallback !== undefined) {
+        securityMoved = tr('inbound.security_moved', { from: security, to: fallback, why });
+        security = fallback;
+      }
+    } else {
+      securityMoved = '';
+    }
+    schedulePreview();
+  }
+
+  function onSecurityChange() {
+    securityMoved = '';
     schedulePreview();
   }
 
@@ -376,7 +423,7 @@
         {#if hasTransport}
           <div class="fg">
             <label for="transport">{tr('inbound.transport')}</label>
-            <select id="transport" data-testid="transport-select" bind:value={transport} onchange={schedulePreview}>
+            <select id="transport" data-testid="transport-select" bind:value={transport} onchange={onTransportChange}>
               {#each current?.transports || [] as t}<option value={t}>{t}</option>{/each}
             </select>
           </div>
@@ -384,9 +431,14 @@
         {#if securities.length}
           <div class="fg">
             <label for="security">{tr('inbound.security')}</label>
-            <select id="security" data-testid="security-select" bind:value={security} onchange={schedulePreview}>
-              {#each securities as sec}<option value={sec}>{sec}</option>{/each}
+            <select id="security" data-testid="security-select" bind:value={security} onchange={onSecurityChange}>
+              {#each securities as sec}
+                <option value={sec} disabled={securityBlocked(sec)} title={securityReason(sec)}>{sec}</option>
+              {/each}
             </select>
+            {#if securityMoved}
+              <span class="moved" data-testid="security-moved">{securityMoved}</span>
+            {/if}
           </div>
         {/if}
       </div>
@@ -552,6 +604,7 @@
   .sw-line { color: rgba(255,255,255,0.75); }
   .sw-line.muted-line { color: rgba(255,255,255,0.45); }
   .sw-line.err { color: #ff8f6b; }
+  .moved { font-size: 11px; color: #FF9D4D; margin-top: 4px; display: block; }
   .hop-warning {
     display: flex;
     flex-direction: column;

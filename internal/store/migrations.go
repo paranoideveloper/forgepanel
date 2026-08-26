@@ -48,6 +48,19 @@ const (
 	migVBridges       uint64 = 18
 )
 
+// LatestSchemaVersion is the highest migration this build knows how to apply.
+// A backup whose database is beyond it cannot be migrated by this binary, which
+// is what makes restoring one destructive rather than merely awkward.
+func LatestSchemaVersion() uint64 {
+	var max uint64
+	for _, m := range migrations() {
+		if m.Version > max {
+			max = m.Version
+		}
+	}
+	return max
+}
+
 // migrations is the ordered registry. Entries are append-only: a shipped version
 // is never renumbered, reordered or rewritten, because a database in the field
 // records only the number and the runner refuses a name that no longer matches.
@@ -386,4 +399,24 @@ func modelSchemaFingerprint(db *gorm.DB, models []any) (string, error) {
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// SchemaVersion is the highest migration recorded against THIS database.
+//
+// It is what a backup records about itself: migration versions are append-only
+// and strictly ascending, so they compare meaningfully across builds in a way a
+// version string does not. A database with no ledger returns 0, which reads as
+// "older than anything", and that is the safe direction for a restore.
+func (s *Store) SchemaVersion() (uint64, error) {
+	recs, err := migrate.MigrationStatus(s.db)
+	if err != nil {
+		return 0, err
+	}
+	var max uint64
+	for _, r := range recs {
+		if r.Version > max {
+			max = r.Version
+		}
+	}
+	return max, nil
 }

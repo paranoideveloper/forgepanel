@@ -12,6 +12,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -49,8 +50,15 @@ func PanelFiles(dataDir string) []string {
 		filepath.Join(dataDir, "secrets.json"),
 		filepath.Join(dataDir, "panel.json"),
 	}
-	// Certificates live in directories, so they are walked rather than named.
-	for _, dir := range []string{"acme", "certs"} {
+	// Certificates and the node CA live in directories, so they are walked
+	// rather than named.
+	//
+	// nodeca holds the CA that SIGNS every node's client certificate. Losing it
+	// does not lose a certificate that can be re-issued — it invalidates the
+	// identity of every node at once, and the whole fleet has to be re-enrolled
+	// by hand. It was outside every backup, which is a strange thing for a file
+	// whose loss is less recoverable than the database's.
+	for _, dir := range []string{"acme", "certs", "nodeca"} {
 		root := filepath.Join(dataDir, dir)
 		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info == nil || info.IsDir() {
@@ -77,16 +85,23 @@ func PanelFiles(dataDir string) []string {
 //
 // Missing files are skipped so a partial data dir still backs up cleanly.
 func CreateFrom(master, root string, files []string) ([]byte, error) {
-	return create(master, root, files)
+	return create(master, root, files, nil)
+}
+
+// CreateWithManifest is CreateFrom plus the self-description a restore needs to
+// refuse an unsafe overwrite. Panel backups take this path; the manifest's
+// Files count is filled in here so it cannot disagree with the blob.
+func CreateWithManifest(master, root string, files []string, m Manifest) ([]byte, error) {
+	return create(master, root, files, &m)
 }
 
 // Create is the flat-name form, kept for callers that have no root to relativise
 // against.
 func Create(master string, files []string) ([]byte, error) {
-	return create(master, "", files)
+	return create(master, "", files, nil)
 }
 
-func create(master, root string, files []string) ([]byte, error) {
+func create(master, root string, files []string, manifest *Manifest) ([]byte, error) {
 	var tarBuf bytes.Buffer
 	tw := tar.NewWriter(&tarBuf)
 	included := 0
@@ -125,11 +140,28 @@ func create(master, root string, files []string) ([]byte, error) {
 		}
 		included++
 	}
+	if included == 0 {
+		// Checked BEFORE the manifest is written, so an empty backup cannot
+		// become a one-member archive that looks like a successful one.
+		_ = tw.Close()
+		return nil, errors.New("backup: nothing to back up")
+	}
+	if manifest != nil {
+		manifest.Format = ManifestFormat
+		manifest.Files = included
+		mb, err := json.Marshal(manifest)
+		if err != nil {
+			return nil, err
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: ManifestName, Mode: 0o600, Size: int64(len(mb))}); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write(mb); err != nil {
+			return nil, err
+		}
+	}
 	if err := tw.Close(); err != nil {
 		return nil, err
-	}
-	if included == 0 {
-		return nil, errors.New("backup: nothing to back up")
 	}
 	return encrypt(deriveKey(master), tarBuf.Bytes())
 }
@@ -163,6 +195,11 @@ func Restore(master string, blob []byte, destDir string) ([]string, error) {
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			continue
 		}
+		// The manifest describes the backup; it is not part of the data
+		// directory and must not be written into it.
+		if hdr.Name == ManifestName {
+			continue
+		}
 		dst, err := safeJoin(destDir, hdr.Name)
 		if err != nil {
 			return nil, err
@@ -176,6 +213,23 @@ func Restore(master string, blob []byte, destDir string) ([]string, error) {
 		restored = append(restored, dst)
 	}
 	return restored, nil
+}
+
+// RestoreChecked refuses to overwrite a live data directory with a backup from a
+// panel whose schema is ahead of this build, then restores.
+//
+// Restore itself is left unguarded on purpose: it is the primitive, and a
+// disaster-recovery path that cannot be forced is its own kind of failure. This
+// is the one every caller with a running panel behind it should use.
+func RestoreChecked(master string, blob []byte, destDir string, thisSchemaVersion uint64) ([]string, error) {
+	m, err := ReadManifest(master, blob)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckRestorable(m, thisSchemaVersion); err != nil {
+		return nil, err
+	}
+	return Restore(master, blob, destDir)
 }
 
 // safeJoin resolves a tar entry name inside destDir, refusing anything that
@@ -294,11 +348,12 @@ func decrypt(key, blob []byte) ([]byte, error) {
 func LocalDir(dataDir string) string { return filepath.Join(dataDir, "backups") }
 
 // WriteLocal takes a backup and stores it under LocalDir, returning its path.
-func WriteLocal(master, dataDir string, now time.Time) (string, error) {
+func WriteLocal(master, dataDir string, now time.Time, m Manifest) (string, error) {
 	if strings.TrimSpace(master) == "" {
 		return "", errors.New("backup: no master key")
 	}
-	blob, err := CreateFrom(master, dataDir, PanelFiles(dataDir))
+	m.CreatedAt = now.UTC()
+	blob, err := CreateWithManifest(master, dataDir, PanelFiles(dataDir), m)
 	if err != nil {
 		return "", err
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/version"
 )
 
 // StatsSource abstracts the engine controller for testability.
@@ -217,7 +218,16 @@ func (s *Scheduler) runScheduledBackup() {
 	if err == nil && !last.IsZero() && s.now().Sub(last) < every {
 		return
 	}
-	if _, err := backup.WriteLocal(master, dataDir, s.now()); err != nil {
+	// The manifest lets a restore refuse a database this build cannot migrate.
+	// Best-effort: a backup must never be skipped because its schema version
+	// could not be read.
+	m := backup.Manifest{PanelVersion: version.Version}
+	if s.db != nil {
+		if v, err := s.db.SchemaVersion(); err == nil {
+			m.SchemaVersion = v
+		}
+	}
+	if _, err := backup.WriteLocal(master, dataDir, s.now(), m); err != nil {
 		// Nothing to escalate to from here; the next hour retries, and the
 		// backup status endpoint shows the age of the newest one.
 		return

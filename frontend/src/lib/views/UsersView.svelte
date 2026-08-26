@@ -69,7 +69,7 @@
   // subscription defaults (routing preset + TLS fragment) applied to every
   // generated sing-box/Xray/Clash config.
   interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; expand_sni?: boolean; front_clean_ip?: boolean; clean_ips?: string; }
   let subSettings = $state<SubSettings | null>(null);
   // The formats come from the server, which is the only thing that knows what it
   // can render. Hardcoding them here left six of nine renderers unreachable from
@@ -108,7 +108,20 @@
     try {
       await apiFetch('/admin/settings/subscription', {
         method: 'POST',
-        body: JSON.stringify({ routing_preset: subSettings.routing_preset, fragment: subSettings.fragment, name_template: subSettings.name_template ?? '', pattern: subSettings.pattern ?? 'off', front_domain: subSettings.front_domain ?? '', front_mode: subSettings.front_mode ?? 'none' })
+        body: JSON.stringify({
+          routing_preset: subSettings.routing_preset,
+          fragment: subSettings.fragment,
+          name_template: subSettings.name_template ?? '',
+          pattern: subSettings.pattern ?? 'off',
+          front_domain: subSettings.front_domain ?? '',
+          front_mode: subSettings.front_mode ?? 'none',
+          // Three settings the renderer reads on every request. Two could only
+          // be written as a side effect of applying a Preset Wizard theme, and
+          // the clean-IP list could not be seen at all.
+          expand_sni: subSettings.expand_sni ?? true,
+          front_clean_ip: subSettings.front_clean_ip ?? false,
+          clean_ips: subSettings.clean_ips ?? ''
+        })
       });
       showToast(tr('users.subscription_defaults_saved'), 'success');
     } catch (err: any) {
@@ -512,6 +525,26 @@
       </label>
       <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>{tr('users.save')}</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field checkbox">
+        <input type="checkbox" bind:checked={subSettings.expand_sni} data-testid="expand-sni" />
+        <span>{tr('users.expand_sni')}</span>
+      </label>
+      <label class="field checkbox">
+        <input type="checkbox" bind:checked={subSettings.front_clean_ip} data-testid="front-clean-ip" />
+        <span>{tr('users.front_clean_ip')}</span>
+      </label>
+    </div>
+    <p class="hint">{tr('users.expand_sni_hint')}</p>
+    <div class="row" style="margin-top:10px">
+      <label class="field" style="flex:1;min-width:280px">
+        <span>{tr('users.clean_ips')} <span class="hint" style="font-weight:400">{tr('users.clean_ips_hint')}</span></span>
+        <input bind:value={subSettings.clean_ips} placeholder={tr('users.clean_ips_placeholder')} data-testid="clean-ips" />
+      </label>
+    </div>
+    {#if (subSettings.front_clean_ip ?? false) && !(subSettings.clean_ips ?? '').trim()}
+      <p class="hint warn-hint" data-testid="clean-ip-empty">{tr('users.front_clean_ip_needs_a_list')}</p>
+    {/if}
     <p class="hint">{tr('users.pattern_adds')} <code>{tr('users.cs')}</code> {tr('users.cipher_suites')} <code>{tr('users.fm')}</code> {tr('users.tls_fragment')} <code>{tr('users.fp_unsafe')}</code> {tr('users.to_vless_trojan_vmess_links_the')} <code>{tr('users.patt_1')}</code> {tr('users.pattern_or')} <code>{tr('users.patt_both')}</code>{tr('users.needs_a_recent_xray_client_v2rayng')}</p>
     <div class="row" style="margin-top:10px">
       <label class="field" style="flex:1;min-width:280px">
@@ -807,6 +840,7 @@
 </Modal>
 
 <style>
+  .warn-hint { color: #FF9D4D; }
   .badge.held { background: rgba(217,155,43,0.18); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); margin-inline-start: 6px; }
   label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.5); font-size: 11px; line-height: 1.5; }
 

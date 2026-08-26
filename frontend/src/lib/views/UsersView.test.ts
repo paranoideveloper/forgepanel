@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import UsersView from './UsersView.svelte';
 
 // Credential rotation. The API has always taken three independent flags and the
@@ -294,5 +294,69 @@ describe('UsersView subscription formats', () => {
   it('falls back to the three it always had when the server sends no list', async () => {
     const sel = await openSubDialog();
     expect([...sel.options].map((o) => o.value)).toEqual(['v2ray', 'clash', 'sing-box']);
+  });
+});
+
+// expand_sni, front_clean_ip and clean_ips are read by the subscription
+// renderer on every request. Two of them could only be written as a side effect
+// of applying a Preset Wizard theme, and the clean-IP list could not be seen at
+// all — so an operator who had never run the wizard had no way to reach any of
+// them, and one who had could not change them without running it again.
+describe('UsersView subscription output settings', () => {
+  function stub(settings: any) {
+    const posts: any[] = [];
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'POST') {
+        posts.push(JSON.parse(opts.body ?? '{}'));
+        return { ok: true, json: async () => ({}) } as Response;
+      }
+      const table: Record<string, any> = {
+        '/api/admin/users': [user],
+        '/api/admin/groups': [],
+        '/api/admin/inbounds': [],
+        '/api/admin/settings/subscription': settings
+      };
+      return { ok: true, json: async () => table[String(url)] ?? {} } as Response;
+    };
+    return posts;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('renders the three settings the renderer reads', async () => {
+    stub({ ...subSettings, expand_sni: true, front_clean_ip: false, clean_ips: '104.16.0.1' });
+    render(UsersView);
+    await screen.findByText('alice');
+    expect(((await screen.findByTestId('expand-sni')) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId('front-clean-ip') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByTestId('clean-ips') as HTMLInputElement).value).toBe('104.16.0.1');
+  });
+
+  it('sends them on save', async () => {
+    const posts = stub({ ...subSettings, expand_sni: true, front_clean_ip: false, clean_ips: '' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(await screen.findByTestId('expand-sni'));
+    await fireEvent.input(screen.getByTestId('clean-ips'), { target: { value: '104.17.0.1' } });
+    await fireEvent.click(screen.getByTestId('save-sub-settings'));
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0));
+    expect(posts[0]).toMatchObject({ expand_sni: false, front_clean_ip: false, clean_ips: '104.17.0.1' });
+  });
+
+  // Turning fronting on with no addresses configured is a setting that silently
+  // does nothing — the exact shape of defect this whole card exists to end.
+  it('says fanning out over clean IPs needs a list', async () => {
+    stub({ ...subSettings, expand_sni: true, front_clean_ip: true, clean_ips: '' });
+    render(UsersView);
+    await screen.findByText('alice');
+    expect(await screen.findByTestId('clean-ip-empty')).toBeTruthy();
+  });
+
+  it('does not nag once the list has addresses', async () => {
+    stub({ ...subSettings, expand_sni: true, front_clean_ip: true, clean_ips: '104.16.0.1' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await screen.findByTestId('clean-ips');
+    expect(screen.queryByTestId('clean-ip-empty')).toBeNull();
   });
 });

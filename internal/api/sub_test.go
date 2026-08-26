@@ -689,3 +689,96 @@ func TestSubscriptionUserinfoAlwaysSumsToTheBilledTotal(t *testing.T) {
 		t.Fatalf("userinfo = %q, want upload=200 and download=800 (the unattributed remainder)", got)
 	}
 }
+
+// Three settings the subscription renderer reads on EVERY request — expand_sni,
+// front_clean_ip and clean_ips — were readable by the renderer and writable only
+// by the Preset Wizard, which set two of them as a side effect of applying a
+// theme. An operator who had never run the wizard could not reach them at all,
+// and one who had could not change them again without running it again.
+func TestSubscriptionOutputSettingsRoundTripThroughTheSettingsEndpoint(t *testing.T) {
+	s, token := adminAPI(t)
+
+	// The defaults the readers document: expansion on, fronting off.
+	code, body := doGET(t, s, "/api/admin/settings/subscription", token)
+	if code != 200 {
+		t.Fatalf("GET returned %d: %s", code, body)
+	}
+	var got struct {
+		ExpandSNI    *bool   `json:"expand_sni"`
+		FrontCleanIP *bool   `json:"front_clean_ip"`
+		CleanIPs     *string `json:"clean_ips"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ExpandSNI == nil || got.FrontCleanIP == nil || got.CleanIPs == nil {
+		t.Fatalf("the settings endpoint does not report the three output settings at all: %s", body)
+	}
+	if !*got.ExpandSNI {
+		t.Error("expand_sni defaults off; the reader documents it as on")
+	}
+	if *got.FrontCleanIP {
+		t.Error("front_clean_ip defaults on; the reader documents it as off")
+	}
+
+	// Now change all three and confirm the RENDERER's own accessors see it —
+	// asserting on the response alone would pass even if the write went to a
+	// key nothing reads.
+	code, body = realPost(t, s, "/api/admin/settings/subscription", token, map[string]any{
+		"expand_sni": false, "front_clean_ip": true,
+		"clean_ips": "104.16.0.1, 104.17.0.1\n104.18.0.1",
+	})
+	if code != 200 {
+		t.Fatalf("POST returned %d: %s", code, body)
+	}
+	if s.subExpandSNI() {
+		t.Error("subExpandSNI still reports on after being turned off")
+	}
+	if !s.subFrontCleanIP() {
+		t.Error("subFrontCleanIP still reports off after being turned on")
+	}
+	ips := s.subCleanIPs()
+	if len(ips) != 3 || ips[0] != "104.16.0.1" || ips[2] != "104.18.0.1" {
+		t.Errorf("subCleanIPs = %v, want the three that were saved", ips)
+	}
+}
+
+// expand_sni defaults ON and its reader treats anything other than "0" as on, so
+// the off case must be written as exactly "0". A boolean stored as "false" would
+// read back as ON and the setting would appear not to save.
+func TestExpandSNIOffIsStoredAsTheReaderExpects(t *testing.T) {
+	s, token := adminAPI(t)
+	if code, body := realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"expand_sni": false}); code != 200 {
+		t.Fatalf("POST returned %d: %s", code, body)
+	}
+	if raw := s.db.GetSetting("sub_expand_sni"); raw != "0" {
+		t.Fatalf("sub_expand_sni = %q; subExpandSNI reads anything but %q as ON", raw, "0")
+	}
+	// And back on again, so the control is not one-way.
+	if code, _ := realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"expand_sni": true}); code != 200 {
+		t.Fatal("turning it back on failed")
+	}
+	if !s.subExpandSNI() {
+		t.Error("expand_sni could be turned off but not back on")
+	}
+}
+
+// A field left out of the request must not be reset. The endpoint takes pointers
+// for exactly this reason, and a save from one card must not clear what another
+// card set.
+func TestAnAbsentOutputSettingIsLeftAlone(t *testing.T) {
+	s, token := adminAPI(t)
+	if code, _ := realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"clean_ips": "104.16.0.1"}); code != 200 {
+		t.Fatal("first save failed")
+	}
+	if code, _ := realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"routing_preset": "iran"}); code != 200 {
+		t.Fatal("second save failed")
+	}
+	if ips := s.subCleanIPs(); len(ips) != 1 || ips[0] != "104.16.0.1" {
+		t.Errorf("clean IPs = %v; a save that never mentioned them cleared them", ips)
+	}
+}

@@ -21,6 +21,85 @@
   let checkingDns = $state(false);
   let restartNote = $state(false);
 
+  // The panel's listener.
+  //
+  // POST /admin/panel-address has always accepted domain, port, bind_address,
+  // https_enabled, acme_email and verify_dns, and this view posted {domain}. GET
+  // has always returned port, bind_address, admin_path, https_enabled and
+  // server_ipv6, and none of them was rendered. So the panel's own port and bind
+  // address could only be changed by editing panel.json by hand and restarting —
+  // on the one surface whose whole subject is where the panel lives.
+  let panelPort = $state(0);
+  let bindAddress = $state('');
+  let httpsEnabled = $state(false);
+  let acmeEmail = $state('');
+  let verifyDns = $state(false);
+  let savingAddr = $state(false);
+  let addrErr = $state('');
+
+  // Port pre-flight. GET /admin/panel-address/port-check answers
+  // {port, available, current} and had no caller, so the first time anyone
+  // learned the port was taken was after the save, from a bare 400.
+  let portCheck = $state<{ port: number; available: boolean; current: boolean } | null>(null);
+  let checkingPort = $state(false);
+
+  // The server's rules, mirrored so a typo is caught before it becomes a 400
+  // with no hint about what the rule is. Server-side validation stays the
+  // authority; this only explains it earlier.
+  const DOMAIN_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  const normalizedDomain = $derived(panelDomain.trim().toLowerCase().replace(/\.$/, ''));
+  const domainInvalid = $derived(normalizedDomain !== '' && !DOMAIN_RE.test(normalizedDomain));
+  const portInvalid = $derived(!Number.isInteger(panelPort) || panelPort < 1 || panelPort > 65535);
+  const bindInvalid = $derived(bindAddress.trim() !== '' && !isIP(bindAddress.trim()));
+  const httpsWithoutDomain = $derived(httpsEnabled && normalizedDomain === '');
+  const emailInvalid = $derived(
+    acmeEmail.trim() !== '' && !/^[^\s@]+@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(acmeEmail.trim())
+  );
+  const addressFormBlocked = $derived(domainInvalid || portInvalid || bindInvalid || httpsWithoutDomain || emailInvalid);
+
+  function isIP(v: string): boolean {
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) return v.split('.').every((o) => Number(o) <= 255);
+    return /^[0-9a-f:]+$/i.test(v) && v.includes(':');
+  }
+
+  async function checkPort() {
+    if (portInvalid) return;
+    checkingPort = true;
+    portCheck = null;
+    try {
+      portCheck = await apiFetch(`/admin/panel-address/port-check?port=${panelPort}`);
+    } catch (err: any) {
+      showToast(err.message || tr('certificates.port_check_failed'), 'error');
+    } finally {
+      checkingPort = false;
+    }
+  }
+
+  async function saveAddress() {
+    addrErr = '';
+    savingAddr = true;
+    try {
+      const res = await apiFetch<{ restart_required: boolean; public_url: string }>('/admin/panel-address', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain: normalizedDomain,
+          port: panelPort,
+          bind_address: bindAddress.trim(),
+          https_enabled: httpsEnabled,
+          acme_email: acmeEmail.trim(),
+          verify_dns: verifyDns
+        })
+      });
+      restartNote = !!res.restart_required;
+      showToast(tr('certificates.panel_address_saved'), 'success');
+      await loadData();
+    } catch (err: any) {
+      addrErr = err.message || tr('certificates.failed_to_update_domain');
+    } finally {
+      savingAddr = false;
+    }
+  }
+
   // The host the admin is currently viewing the panel through. If it isn't the
   // configured domain, the browser is being served the self-signed fallback —
   // which is exactly why a panel opened by IP shows "Not Secure".
@@ -32,6 +111,11 @@
     try {
       addr = await apiFetch<PanelAddress>('/admin/panel-address');
       panelDomain = addr.domain || '';
+      panelPort = addr.port ?? 0;
+      bindAddress = addr.bind_address || '';
+      httpsEnabled = !!addr.https_enabled;
+      acmeEmail = addr.cert?.acme?.email || '';
+      portCheck = null;
     } catch (err: any) {
       showToast(err.message || tr('certificates.failed_to_load_tls_status'), 'error');
     } finally {
@@ -129,6 +213,9 @@
       {checkingDns ? tr('certificates.checking') : tr('certificates.check_dns')}
     </button>
   </div>
+  {#if domainInvalid}
+    <p class="err-text" data-testid="domain-invalid">{tr('certificates.domain_rule')}</p>
+  {/if}
 
   {#if restartNote}
     <div class="dns-box warn">{tr('certificates.saved_a_restart_applies_the_change')} <code>{tr('certificates.docker_compose_restart_forgepanel')}</code> {tr('certificates.or_restart_the_service')}</div>
@@ -146,6 +233,66 @@
 </div>
 
 {#if addr}
+  <div class="card" data-testid="panel-listener">
+    <h3>{tr('certificates.where_the_panel_listens')}</h3>
+    <p class="hint">{tr('certificates.listener_hint')}</p>
+
+    <div class="status-grid">
+      <div><span class="lbl">{tr('certificates.public_url')}</span> <code data-testid="public-url">{addr.public_url}</code></div>
+      <div><span class="lbl">{tr('certificates.admin_path')}</span> <code data-testid="admin-path">{addr.admin_path}</code></div>
+      <div><span class="lbl">{tr('certificates.server_ipv4')}</span> <code>{addr.server_ipv4 || tr('certificates.unknown')}</code></div>
+      <div><span class="lbl">{tr('certificates.server_ipv6')}</span> <code data-testid="server-ipv6">{addr.server_ipv6 || tr('certificates.none')}</code></div>
+    </div>
+
+    <div class="form-row">
+      <label class="fl">{tr('certificates.port')}
+        <input type="number" bind:value={panelPort} data-testid="port-input" min="1" max="65535" />
+      </label>
+      <button class="btn-secondary" onclick={checkPort} disabled={checkingPort || portInvalid} data-testid="check-port">
+        {checkingPort ? tr('certificates.checking') : tr('certificates.check_port')}
+      </button>
+      <label class="fl">{tr('certificates.bind_address')}
+        <input type="text" bind:value={bindAddress} placeholder="0.0.0.0" data-testid="bind-input" />
+      </label>
+    </div>
+    {#if portInvalid}
+      <p class="err-text" data-testid="port-invalid">{tr('certificates.port_rule')}</p>
+    {/if}
+    {#if bindInvalid}
+      <p class="err-text" data-testid="bind-invalid">{tr('certificates.bind_rule')}</p>
+    {/if}
+    {#if portCheck}
+      {#if portCheck.current}
+        <div class="dns-box ok" data-testid="port-result">{tr('certificates.port_is_the_current_one', { port: portCheck.port })}</div>
+      {:else if portCheck.available}
+        <div class="dns-box ok" data-testid="port-result">{tr('certificates.port_is_free', { port: portCheck.port })}</div>
+      {:else}
+        <div class="dns-box err" data-testid="port-result">{tr('certificates.port_is_taken', { port: portCheck.port })}</div>
+      {/if}
+    {/if}
+
+    <div class="form-row">
+      <label class="chk"><input type="checkbox" bind:checked={httpsEnabled} data-testid="https-toggle" /> {tr('certificates.serve_https_acme')}</label>
+      <label class="fl">{tr('certificates.acme_email')}
+        <input type="text" bind:value={acmeEmail} placeholder={tr('certificates.acme_email_placeholder')} data-testid="acme-email" />
+      </label>
+      <label class="chk"><input type="checkbox" bind:checked={verifyDns} data-testid="verify-dns" /> {tr('certificates.verify_dns_before_saving')}</label>
+    </div>
+    {#if httpsWithoutDomain}
+      <p class="err-text" data-testid="https-needs-domain">{tr('certificates.https_needs_a_domain')}</p>
+    {/if}
+    {#if emailInvalid}
+      <p class="err-text" data-testid="email-invalid">{tr('certificates.email_rule')}</p>
+    {/if}
+
+    <div style="margin-top:16px">
+      <button class="btn-primary" onclick={saveAddress} disabled={savingAddr || addressFormBlocked} data-testid="save-address">
+        {savingAddr ? tr('certificates.saving') : tr('certificates.save_listener')}
+      </button>
+    </div>
+    {#if addrErr}<p class="err-text" data-testid="address-error">{addrErr}</p>{/if}
+  </div>
+
   <div class="card">
     <h3>{tr('certificates.active_tls_certificate_status')}</h3>
     <div class="status-grid">
@@ -214,4 +361,7 @@
   .dns-box.warn { background: rgba(255,176,32,0.12); color: #FFC24B; }
   .dns-box.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
   .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
+  .fl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.6); }
+  .fl input { min-width: 120px; }
+  .chk { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 </style>

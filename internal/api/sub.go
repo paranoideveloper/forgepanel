@@ -142,6 +142,12 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 		// Loon and Quantumult X renderers — complete, tested, and reachable by
 		// typing the URL — were invisible to every operator who used the panel.
 		"formats": subFormats,
+		// Read on every subscription request and, until now, writable only by
+		// the Preset Wizard (two of them) or not at all (clean_ips as a list the
+		// operator can see).
+		"expand_sni":     s.subExpandSNI(),
+		"front_clean_ip": s.subFrontCleanIP(),
+		"clean_ips":      strings.Join(s.subCleanIPs(), ", "),
 	})
 }
 
@@ -158,6 +164,14 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		// theme's template and front_mode to the theme's fronting model in one
 		// step, so the wizard is a single click plus a domain.
 		FancyTheme *string `json:"fancy_theme"`
+		// Three settings the subscription renderer reads on every request and
+		// that this endpoint could not write. The Preset Wizard set two of them
+		// as a side effect of applying a preset, so an operator who had never
+		// run the wizard had no way to reach them at all, and one who had could
+		// not change them afterwards without running it again.
+		ExpandSNI    *bool   `json:"expand_sni"`
+		FrontCleanIP *bool   `json:"front_clean_ip"`
+		CleanIPs     *string `json:"clean_ips"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid payload"})
@@ -205,9 +219,30 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	if req.FrontMode != nil {
 		_ = s.db.SetSetting("sub_front_mode", string(model.ParseFrontMode(*req.FrontMode)))
 	}
+	if req.ExpandSNI != nil {
+		// Stored as the reader expects: subExpandSNI defaults ON and treats
+		// anything other than "0" as on, so the off case must be exactly "0".
+		v := "1"
+		if !*req.ExpandSNI {
+			v = "0"
+		}
+		_ = s.db.SetSetting("sub_expand_sni", v)
+	}
+	if req.FrontCleanIP != nil {
+		v := "0"
+		if *req.FrontCleanIP {
+			v = "1"
+		}
+		_ = s.db.SetSetting("sub_front_cleanip", v)
+	}
+	if req.CleanIPs != nil {
+		_ = s.db.SetSetting("sub_clean_ips", strings.TrimSpace(*req.CleanIPs))
+	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
 	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault(),
-		"name_template": s.subNameTemplate(), "front_domain": s.subFrontDomain(), "front_mode": string(s.subFrontMode())})
+		"name_template": s.subNameTemplate(), "front_domain": s.subFrontDomain(), "front_mode": string(s.subFrontMode()),
+		"expand_sni": s.subExpandSNI(), "front_clean_ip": s.subFrontCleanIP(),
+		"clean_ips": strings.Join(s.subCleanIPs(), ", ")})
 }
 
 // subFormats are the subscription formats this endpoint can render. It is the
