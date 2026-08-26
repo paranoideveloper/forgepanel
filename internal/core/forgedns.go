@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/forgedns/adapter"
+	"github.com/forgepanel/forgepanel/internal/forgedns/egress"
 	fdnsserver "github.com/forgepanel/forgepanel/internal/forgedns/server"
 	"github.com/forgepanel/forgepanel/internal/forgedns/session"
 	"github.com/forgepanel/forgepanel/internal/forgedns/upstream"
@@ -32,6 +33,7 @@ type ForgeDNSController struct {
 	mu       sync.Mutex
 	server   *fdnsserver.Server
 	sessions map[string]*session.Manager // zone -> session manager (persists across resyncs)
+	bridges  map[string]*egress.Bridge   // zone -> egress bridge (ditto)
 	started  bool
 	lastErr  string
 	upErr    string
@@ -53,7 +55,7 @@ type ForgeDNSController struct {
 // NewForgeDNSController builds a controller that will listen on addr (e.g.
 // ":53") for native zones and keep upstream zone state under dataDir.
 func NewForgeDNSController(addr, dataDir string) *ForgeDNSController {
-	c := &ForgeDNSController{addr: addr, sessions: map[string]*session.Manager{}}
+	c := &ForgeDNSController{addr: addr, sessions: map[string]*session.Manager{}, bridges: map[string]*egress.Bridge{}}
 	if dataDir != "" {
 		c.up = upstream.NewManager(dataDir)
 	}
@@ -66,10 +68,45 @@ type ZoneSpec struct {
 	Zone     string
 	Adapter  string
 	Upstream *upstream.Spec
+	// Egress says where a NATIVE zone's tunnelled bytes go. Upstream zones carry
+	// the same settings inside Upstream.Config, because the binary does its own
+	// forwarding.
+	Egress EgressSpec
+}
+
+// EgressSpec is the destination for a native zone's tunnelled traffic.
+type EgressSpec struct {
+	// Mode is "socks5" (this process answers SOCKS5 over the tunnel) or "tcp"
+	// (every session is forwarded to Forward). Empty defaults to socks5, which
+	// is what the client config the panel hands out expects.
+	Mode string
+	// Forward is host:port for tcp mode.
+	Forward string
+	// AllowPrivate permits destinations on loopback and RFC 1918 ranges.
+	//
+	// Off by default. A DNS tunnel is reachable by anyone who can send a UDP
+	// packet to the zone, so a socks5 endpoint with no policy is a route into
+	// whatever private network the panel sits in — its own admin interfaces, the
+	// cloud metadata endpoint, the database on the next host. An operator
+	// tunnelling INTO their own LAN is a real use case, so it is a setting; it
+	// is just not the default.
+	AllowPrivate bool
 }
 
 // Upstream exposes the real-binary manager (bundles, explicit installs, health).
 func (c *ForgeDNSController) Upstream() *upstream.Manager { return c.up }
+
+// dialerFor builds the egress dialer a zone spec describes.
+func dialerFor(e EgressSpec) egress.Dialer {
+	if e.Mode == upstream.ModeTCP && e.Forward != "" {
+		return egress.TCPDialer(e.Forward)
+	}
+	opts := egress.SOCKS5Options{}
+	if !e.AllowPrivate {
+		opts.Allow = egress.DenyPrivate
+	}
+	return egress.SOCKS5Dialer(opts)
+}
 
 // Stop shuts down the native listener and every supervised upstream zone.
 func (c *ForgeDNSController) Stop() {
@@ -82,7 +119,18 @@ func (c *ForgeDNSController) Stop() {
 	// port 53 bound after shutdown, so the next start fails with "address
 	// already in use" — which reads as a foreign process holding the port.
 	c.stopFrontLocked()
+	// Every live tunnel connection belongs to a bridge. Leaving them behind
+	// keeps a socket open per session with nobody left to read it, and keeps the
+	// bridge's own goroutines running after the controller is gone.
+	bridges := make([]*egress.Bridge, 0, len(c.bridges))
+	for zone, br := range c.bridges {
+		bridges = append(bridges, br)
+		delete(c.bridges, zone)
+	}
 	c.mu.Unlock()
+	for _, br := range bridges {
+		br.Shutdown()
+	}
 	if srv != nil {
 		_ = srv.Shutdown()
 	}
@@ -129,8 +177,29 @@ func (c *ForgeDNSController) SyncZones(specs []ZoneSpec) ([]string, error) {
 			mgr = session.NewManager(60 * time.Second)
 			c.sessions[sp.Zone] = mgr
 		}
-		srv.AddZone(&fdnsserver.Zone{Name: sp.Zone, Adapter: ad, Sessions: mgr})
+		// The bridge persists across resyncs alongside the session manager. A
+		// resync rebuilds the zone table on every zone add/remove; tearing down
+		// the bridge with it would drop every live tunnel connection whenever an
+		// unrelated zone was created.
+		br := c.bridges[sp.Zone]
+		if br == nil {
+			br = egress.New(mgr, dialerFor(sp.Egress), egress.Options{})
+			c.bridges[sp.Zone] = br
+		}
+		srv.AddZone(&fdnsserver.Zone{Name: sp.Zone, Adapter: ad, Sessions: mgr, Egress: br})
 		served = append(served, sp.Zone)
+	}
+	// Retire bridges for zones that are no longer served, so a deleted zone does
+	// not keep its upstream sockets open.
+	live := map[string]bool{}
+	for _, sp := range native {
+		live[sp.Zone] = true
+	}
+	for zone, br := range c.bridges {
+		if !live[zone] {
+			br.Shutdown()
+			delete(c.bridges, zone)
+		}
 	}
 	// Swap in the new server. (miekg/dns has no live zone-hot-swap, so we run a
 	// single mux server and replace its zone table by replacing the server; the

@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,7 +45,17 @@ func (s *Server) syncForgeDNS() {
 		if !z.Enabled {
 			continue
 		}
-		sp := core.ZoneSpec{Zone: z.Zone, Adapter: z.Adapter}
+		sp := core.ZoneSpec{
+			Zone:    z.Zone,
+			Adapter: z.Adapter,
+			// A native zone honours the same mode/forward settings the operator
+			// already sets for the upstream binaries, rather than inventing a
+			// second place to configure the same thing.
+			Egress: core.EgressSpec{
+				Mode:    z.Mode,
+				Forward: forwardAddr(z.ForwardIP, z.ForwardPort),
+			},
+		}
 		if upstream.IsUpstream(z.Adapter) {
 			// A zone switched to an upstream adapter after creation (or migrated
 			// from an older schema) has no shared secret yet; mint it once here so
@@ -153,6 +165,15 @@ func (s *Server) pinUpstreamTags(zones []store.ForgeDNSZone) {
 }
 
 // upstreamConfig projects a stored zone onto the renderer's input (§4b).
+// forwardAddr joins the zone's forward host and port, or returns "" when the
+// zone has no complete forward target.
+func forwardAddr(host string, port int) string {
+	if strings.TrimSpace(host) == "" || port <= 0 {
+		return ""
+	}
+	return net.JoinHostPort(strings.TrimSpace(host), strconv.Itoa(port))
+}
+
 func upstreamConfig(z *store.ForgeDNSZone) upstream.ZoneConfig {
 	return upstream.ZoneConfig{
 		Zone:            z.Zone,

@@ -19,6 +19,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/forgepanel/forgepanel/internal/forgedns/adapter"
+	"github.com/forgepanel/forgepanel/internal/forgedns/codec"
 	"github.com/forgepanel/forgepanel/internal/forgedns/session"
 )
 
@@ -47,6 +49,14 @@ type Zone struct {
 	Adapter  adapter.Adapter
 	Sessions *session.Manager
 
+	// Egress carries a session's reassembled bytes to their destination and the
+	// replies back. Without it the zone answers DNS, creates sessions and counts
+	// traffic while moving nothing — which is what the native path did.
+	//
+	// nil is a legitimate configuration: a zone served by an upstream binary
+	// adapter tunnels in that process, not this one.
+	Egress SessionBridge
+
 	// NS are the zone's nameserver hostnames, answered at the apex and used in
 	// the authority section. Defaults to ns1.<zone>.
 	NS []string
@@ -58,6 +68,15 @@ type Zone struct {
 	Serial uint32
 	// TTL applies to synthesised records. Defaults to defaultTTL.
 	TTL uint32
+}
+
+// SessionBridge is the egress side of a tunnel zone. It is an interface so this
+// package does not depend on the bridge implementation, and so a zone can be
+// tested without opening sockets.
+type SessionBridge interface {
+	// Deliver moves whatever the session has reassembled to its destination.
+	// It is called with the id of the session the frame belongs to.
+	Deliver(ctx context.Context, sessionID uint64)
 }
 
 // RateLimit bounds responses per client prefix. Identical and error traffic get
@@ -197,6 +216,21 @@ func (s *Server) HandleFrom(src net.Addr, m *dns.Msg) *dns.Msg {
 			return s.finish(src, m, z.nxdomain(m))
 		}
 		resp := z.Sessions.Ingest(frame)
+		// Forward whatever that frame completed. A DNS tunnel has no clock other
+		// than the client's next query, so this is the only moment reassembled
+		// bytes can move.
+		//
+		// The reply the destination sends back rides the NEXT answer, not this
+		// one. That is deliberate: Ingest has already committed this response's
+		// in-flight chunk and request sequence, and re-running it to fold in
+		// late-arriving bytes would corrupt the replay buffer the stop-and-wait
+		// delivery depends on — trading a lost round trip for a lost byte. The
+		// client polls continuously, so the round trip is what it already costs.
+		if z.Egress != nil {
+			if id, ok := sessionIDOf(frame, resp); ok {
+				z.Egress.Deliver(context.Background(), id)
+			}
+		}
 		out, err := z.Adapter.Encode(z.Name, m, resp)
 		if err != nil {
 			return s.finish(src, m, servfail(m))
@@ -210,6 +244,27 @@ func (s *Server) HandleFrom(src net.Addr, m *dns.Msg) *dns.Msg {
 		return s.finish(src, m, z.apex(m))
 	}
 	return s.finish(src, m, z.nxdomain(m))
+}
+
+// sessionIDOf resolves the 64-bit session id a frame belongs to.
+//
+// v2 sessions carry a full 64-bit CSPRNG id in the extension; v1 sessions have
+// only the 16-bit header field. On the handshake the client sends no id at all
+// and the server mints one, so the answer is the only place it appears.
+func sessionIDOf(req, resp codec.Frame) (uint64, bool) {
+	if req.Has(codec.FlagEXT) {
+		if req.Ext != nil && req.Ext.SessionID != 0 {
+			return req.Ext.SessionID, true
+		}
+		if resp.Ext != nil && resp.Ext.SessionID != 0 {
+			return resp.Ext.SessionID, true
+		}
+		return 0, false
+	}
+	if resp.Flags == 0 && resp.Ext == nil && len(resp.Payload) == 0 {
+		return 0, false // the frame was rejected; no session exists for it
+	}
+	return uint64(req.SessionID), true
 }
 
 func (s *Server) bump(p *uint64) {

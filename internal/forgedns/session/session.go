@@ -430,6 +430,44 @@ func (m *Manager) QueueOutbound(id uint64, b []byte) {
 	s.outbound = append(s.outbound, b...)
 }
 
+// OutboundRoom reports how many downstream bytes this session can accept right
+// now.
+//
+// A producer MUST consult this before calling QueueOutbound. QueueOutbound
+// truncates silently past the cap and counts the remainder as dropped, which is
+// the correct policy for a queue but the wrong thing to do to a TCP stream:
+// dropping bytes out of the middle of one does not slow the sender down, it
+// corrupts the stream, and the client sees a protocol error somewhere far from
+// the cause. Callers use this to apply backpressure instead.
+func (m *Manager) OutboundRoom(id uint64) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[id]
+	if s == nil {
+		return m.opts.MaxOutboundBytes
+	}
+	room := m.opts.MaxOutboundBytes - len(s.outbound)
+	if room < 0 {
+		return 0
+	}
+	return room
+}
+
+// LiveIDs returns the ids of every session the manager currently holds.
+//
+// Used by an egress bridge to notice sessions the manager has evicted, so the
+// upstream connection they own is closed rather than left holding a socket for
+// a client that is never coming back.
+func (m *Manager) LiveIDs() []uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]uint64, 0, len(m.sessions))
+	for id := range m.sessions {
+		out = append(out, id)
+	}
+	return out
+}
+
 // PendingOutbound returns the queued (unacknowledged) downstream byte count.
 func (m *Manager) PendingOutbound(id uint64) int {
 	m.mu.Lock()
