@@ -107,6 +107,25 @@ func presetList() []Preset {
 			Node: &model.Node{Protocol: model.ProtoTUIC, Security: tls},
 		},
 		{
+			ID: "anytls", Name: "AnyTLS",
+			Description: "AnyTLS over TLS: many streams multiplexed inside one real TLS connection.",
+			Engine:      "sing-box", CDN: false,
+			Node: &model.Node{Protocol: model.ProtoAnyTLS, Security: tls},
+		},
+		{
+			ID: "shadowtls", Name: "ShadowTLS v3",
+			Description: "A real TLS handshake to a decoy host, with Shadowsocks carrying the traffic behind it.",
+			Engine:      "sing-box", CDN: false,
+			Node: &model.Node{Protocol: model.ProtoShadowTLS,
+				ShadowTLS: &model.ShadowTLSOptions{Version: 3, HandshakeHost: "www.apple.com", HandshakePort: 443}},
+		},
+		{
+			ID: "amneziawg", Name: "AmneziaWG",
+			Description: "WireGuard plus junk-packet obfuscation, in kernel mode. Ships a ready awg-quick client config.",
+			Engine:      "amneziawg", CDN: false,
+			Node: &model.Node{Protocol: model.ProtoAmneziaWG},
+		},
+		{
 			ID: "wireguard", Name: "WireGuard",
 			Description: "Standard WireGuard endpoint. Ships a ready wg-quick client config.",
 			Engine:      "sing-box", CDN: false,

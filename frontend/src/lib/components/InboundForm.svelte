@@ -55,6 +55,7 @@
       // looked wrong because a value was always selected.
       if (initial) prefillFrom(initial);
       else applyDefaults();
+      lastProto = proto;
       try {
         const caps = await apiFetch<{ port_hopping?: typeof hopCap }>('/capabilities');
         hopCap = caps.port_hopping ?? null;
@@ -79,7 +80,14 @@
     // this on save so fields the studio schema does not describe (Egress, xmux,
     // download_settings, ECH, peer keys) survive an edit instead of being
     // replaced with nothing.
-    originalNode = structuredClone(node);
+    //
+    // Snapshot first. structuredClone THROWS on a Svelte $state proxy —
+    // "#<Object> could not be cloned" — and the throw lands in onMount, so the
+    // whole form renders as a load error with no field on it. The edit path
+    // never hit it because that node comes straight out of apiFetch as plain
+    // JSON; a caller holding the node in reactive state does, which is exactly
+    // what the Config Studio does with the preset it picked.
+    originalNode = structuredClone($state.snapshot(node));
     proto = node.protocol || proto;
     transport = node.transport?.network || 'tcp';
     security = node.security?.type || 'none';
@@ -131,8 +139,86 @@
     }
   }
 
-  function onProtoChange() {
-    applyDefaults();
+  // Switching protocol used to call applyDefaults() and nothing else: every
+  // field the operator had filled in was silently replaced, and on an edit that
+  // includes the credential every existing client is using. The server has an
+  // endpoint that says exactly what a switch keeps, what it clears and what it
+  // mints fresh — POST /protocols/switch/preview, built and never called from
+  // anywhere in the panel.
+  //
+  // The switch is applied straight away, because nothing is saved until Save is
+  // pressed and a modal in front of a dropdown is friction for no safety. What
+  // was missing is the STATEMENT of what happened, so the summary appears above
+  // the form and the switch can be undone from it.
+  interface FieldChange { field: string; value?: string; why?: string }
+  interface SwitchSummary {
+    from_protocol: string; to_protocol: string;
+    from_engine: string; to_engine: string; engine_changed: boolean;
+    retained: FieldChange[]; reset: FieldChange[]; regenerated: FieldChange[];
+    required_ports?: { port: number; why?: string }[];
+    warnings?: string[];
+  }
+  type FormState = { proto: string; transport: string; security: string; values: Record<string, any> };
+
+  let switchSummary = $state<SwitchSummary | null>(null);
+  let switchInvalid = $state('');
+  let undoSwitch$ = $state<FormState | null>(null);
+  // The protocol the current `values` belong to. `bind:value` has already moved
+  // `proto` to the new one by the time onchange fires, so without this the node
+  // sent for preview would claim to be the target already and the server would
+  // be asked to describe a switch from a protocol to itself.
+  let lastProto = initialProto;
+
+  async function onProtoChange() {
+    const target = proto;
+    if (!schema || target === lastProto) return;
+    const previous: FormState = { proto: lastProto, transport, security, values: { ...values } };
+
+    let node: Record<string, any>;
+    try {
+      node = buildNode(schema, previous.proto, previous.transport, previous.security, previous.values,
+                       editId ? originalNode : null);
+    } catch {
+      applyDefaults();
+      lastProto = target;
+      schedulePreview();
+      return;
+    }
+
+    try {
+      const res = await apiFetch<{ summary: SwitchSummary; node: Record<string, any>; valid: boolean; error?: string }>(
+        '/protocols/switch/preview',
+        { method: 'POST', body: JSON.stringify({ node, target_protocol: target }) }
+      );
+      prefillFrom(res.node);
+      proto = target;
+      undoSwitch$ = previous;
+      switchSummary = res.summary;
+      switchInvalid = res.valid ? '' : (res.error ?? '');
+    } catch {
+      // The preview is an explanation, not a gate. If it cannot be reached the
+      // switch still happens the way it always did — refusing to change protocol
+      // because the description of the change is unavailable would be worse.
+      applyDefaults();
+      undoSwitch$ = null;
+      switchSummary = null;
+      switchInvalid = '';
+    }
+    lastProto = proto;
+    schedulePreview();
+  }
+
+  function undoProtoSwitch() {
+    const prev = undoSwitch$;
+    if (!prev) return;
+    proto = prev.proto;
+    transport = prev.transport;
+    security = prev.security;
+    values = { ...prev.values };
+    lastProto = prev.proto;
+    undoSwitch$ = null;
+    switchSummary = null;
+    switchInvalid = '';
     schedulePreview();
   }
 
@@ -290,7 +376,7 @@
         {#if hasTransport}
           <div class="fg">
             <label for="transport">{tr('inbound.transport')}</label>
-            <select id="transport" bind:value={transport} onchange={schedulePreview}>
+            <select id="transport" data-testid="transport-select" bind:value={transport} onchange={schedulePreview}>
               {#each current?.transports || [] as t}<option value={t}>{t}</option>{/each}
             </select>
           </div>
@@ -298,7 +384,7 @@
         {#if securities.length}
           <div class="fg">
             <label for="security">{tr('inbound.security')}</label>
-            <select id="security" bind:value={security} onchange={schedulePreview}>
+            <select id="security" data-testid="security-select" bind:value={security} onchange={schedulePreview}>
               {#each securities as sec}<option value={sec}>{sec}</option>{/each}
             </select>
           </div>
@@ -369,6 +455,41 @@
         </div>
       {/if}
 
+      <!-- What the protocol switch just did. Shown after the fact, because
+           nothing is written until Save; the point is that the operator is told
+           which fields were cleared and which credentials were re-minted, rather
+           than watching the form empty itself with no explanation. -->
+      {#if switchSummary}
+        <div class="switch-summary" data-testid="switch-summary">
+          <div class="sw-head">
+            <strong>{tr('inbound.switched_protocol', { from: switchSummary.from_protocol, to: switchSummary.to_protocol })}</strong>
+            <button type="button" class="sm" data-testid="switch-undo" onclick={undoProtoSwitch}>{tr('inbound.undo_switch')}</button>
+            <button type="button" class="sm" data-testid="switch-dismiss" onclick={() => (switchSummary = null)}>{tr('inbound.dismiss')}</button>
+          </div>
+          {#if switchSummary.engine_changed}
+            <span class="sw-line" data-testid="switch-engine">{tr('inbound.switch_engine_changed', { from: switchSummary.from_engine, to: switchSummary.to_engine })}</span>
+          {/if}
+          {#if switchInvalid}
+            <span class="sw-line err" data-testid="switch-invalid">{tr('inbound.switch_invalid', { why: switchInvalid })}</span>
+          {/if}
+          {#if switchSummary.reset?.length}
+            <span class="sw-line" data-testid="switch-reset">{tr('inbound.switch_cleared')} {switchSummary.reset.map((c) => c.field).join(', ')}</span>
+          {/if}
+          {#if switchSummary.regenerated?.length}
+            <span class="sw-line" data-testid="switch-regenerated">{tr('inbound.switch_regenerated')} {switchSummary.regenerated.map((c) => c.field).join(', ')}</span>
+          {/if}
+          {#if switchSummary.retained?.length}
+            <span class="sw-line muted-line" data-testid="switch-retained">{tr('inbound.switch_kept')} {switchSummary.retained.map((c) => c.field).join(', ')}</span>
+          {/if}
+          {#each switchSummary.required_ports ?? [] as rp}
+            <span class="sw-line" data-testid="switch-port">{tr('inbound.switch_needs_port', { port: rp.port, why: rp.why ?? '' })}</span>
+          {/each}
+          {#each switchSummary.warnings ?? [] as w}
+            <span class="sw-line err" data-testid="switch-warning">{w}</span>
+          {/each}
+        </div>
+      {/if}
+
       <button class="save" data-testid="save-inbound" onclick={save} disabled={saving}>
         {saving ? tr('inbound.saving') : editId ? tr('inbound.update_inbound') : tr('inbound.save_inbound')}
       </button>
@@ -415,6 +536,22 @@
 {/if}
 
 <style>
+  .switch-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 10px 0 14px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255,122,26,0.35);
+    background: rgba(255,122,26,0.08);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .sw-head { display: flex; align-items: center; gap: 8px; }
+  .sw-head strong { flex: 1; }
+  .sw-line { color: rgba(255,255,255,0.75); }
+  .sw-line.muted-line { color: rgba(255,255,255,0.45); }
+  .sw-line.err { color: #ff8f6b; }
   .hop-warning {
     display: flex;
     flex-direction: column;
