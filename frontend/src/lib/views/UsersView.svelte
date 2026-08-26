@@ -37,6 +37,12 @@
   let mLimitGB = $state(0);
   let mExpireDays = $state(0);
   let mIPLimit = $state(0);
+  let mReset = $state('no_reset');
+  let mExpireAt = $state('');       // absolute, yyyy-mm-dd; '' clears
+  let mTelegramID = $state('');
+  let mNote = $state('');
+  let mUpdatedAt = $state('');      // optimistic-concurrency token
+  let mSubRevoked = $state(false);
   let mStatus = $state('active');
   let mGroupId = $state<number | undefined>(undefined);
   let mAssigned = $state<Set<number>>(new Set());
@@ -47,6 +53,7 @@
   let gEditing = $state<UserGroup | null>(null);
   let gName = $state('');
   let gDesc = $state('');
+  let gIsDefault = $state(false);
   let gInbounds = $state<Set<number>>(new Set());
 
   // subscription defaults (routing preset + TLS fragment) applied to every
@@ -157,7 +164,10 @@
       await apiFetch('/admin/users', {
         method: 'POST',
         body: JSON.stringify({ username: newUsername.trim(), group_id: newGroupId,
-          data_limit_gb: newLimitGB || 0, expire_days: newExpireDays || 0 }),
+          // Bytes, not whole gigabytes: a 500 MB trial sent as data_limit_gb
+          // truncates to 0, and 0 is UNLIMITED.
+          data_limit: Math.round((newLimitGB || 0) * 1024 ** 3),
+          expire_days: newExpireDays || 0 }),
       });
       newUsername = ''; newLimitGB = 0; newExpireDays = 0;
       showToast(tr('users.user_created'), 'success');
@@ -233,6 +243,21 @@
     }
   }
 
+  // toggleSubRevoked stops (or restores) a leaked subscription URL WITHOUT
+  // invalidating the credentials in every config the user already imported,
+  // which is what rotating does.
+  async function toggleSubRevoked(u: User, revoked: boolean) {
+    try {
+      await apiFetch(`/admin/users/${u.id}/sub-revoked`, {
+        method: 'POST', body: JSON.stringify({ revoked })
+      });
+      showToast(revoked ? tr('users.sub_revoked') : tr('users.sub_restored'), 'success');
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || tr('users.failed_to_save'), 'error');
+    }
+  }
+
   async function deleteUser(id: number) {
     if (!confirm(tr('users.delete_this_user'))) return;
     try {
@@ -251,11 +276,20 @@
   // --- manage (edit + assign inbounds) ---
   async function openManage(user: User) {
     mUser = user;
-    mLimitGB = Math.round(((user as any).data_limit || 0) / (1024 ** 3));
+    mLimitGB = Number(((((user as any).data_limit || 0) / (1024 ** 3)).toFixed(3)));
     mStatus = (user as any).status || 'active';
     mGroupId = user.group_id;
     mExpireDays = 0;
     mIPLimit = (user as any).ip_limit || 0;
+    mReset = (user as any).reset_strategy || 'no_reset';
+    // The current expiry was never shown anywhere: it was write-only and
+    // relative-only, so an operator could extend an expiry they could not see
+    // and could never set an exact date or clear one.
+    mExpireAt = (user as any).expire_at ? String((user as any).expire_at).slice(0, 10) : '';
+    mTelegramID = String((user as any).telegram_id ?? '');
+    mNote = (user as any).note ?? '';
+    mUpdatedAt = (user as any).updated_at ?? '';
+    mSubRevoked = Boolean((user as any).sub_revoked_at);
     mAssigned = new Set();
     mInherited = new Set();
     try {
@@ -298,9 +332,31 @@
       // data_limit only when it actually changed, and never for a reseller: it
       // is outside resellerUserFields, so including it untouched made EVERY
       // reseller edit fail with a 422 about a field they had not touched.
-      const originalGB = Math.round(((mUser as any).data_limit || 0) / (1024 ** 3));
-      if (mLimitGB !== originalGB) patch.data_limit = mLimitGB * 1024 ** 3;
-      if (mExpireDays > 0) patch.expire_at = new Date(Date.now() + mExpireDays * 86400_000).toISOString();
+      // GB may be fractional. It was parsed as a whole number, so a 500 MB
+      // trial became 0 — and 0 means UNLIMITED, the exact opposite of the
+      // intent. Rounded to bytes, not truncated to gigabytes.
+      const originalGB = ((mUser as any).data_limit || 0) / (1024 ** 3);
+      if (Math.abs(mLimitGB - originalGB) > 1e-9) patch.data_limit = Math.round(mLimitGB * 1024 ** 3);
+
+      patch.reset_strategy = mReset;
+      patch.telegram_id = Number(mTelegramID) || 0;
+      patch.note = mNote;
+
+      // Expiry: an absolute date wins, a relative extension is still offered,
+      // and an empty date CLEARS it — which was previously impossible.
+      if (mExpireDays > 0) {
+        patch.expire_at = new Date(Date.now() + mExpireDays * 86400_000).toISOString();
+      } else if (mExpireAt) {
+        patch.expire_at = new Date(mExpireAt + 'T00:00:00Z').toISOString();
+      } else {
+        patch.expire_at = '';
+      }
+
+      // The optimistic-concurrency token. The UI read updated_at and never sent
+      // it, so the backend's ifUnchanged check never engaged and two admins
+      // editing the same user silently overwrote each other — last write wins,
+      // no warning to either.
+      if (mUpdatedAt) patch.updated_at = mUpdatedAt;
       await apiFetch(`/admin/users/${mUser.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
       await apiFetch(`/admin/users/${mUser.id}/inbounds`, { method: 'PUT', body: JSON.stringify({ inbound_ids: [...mAssigned] }) });
       showToast(tr('users.user_updated_inbounds_assigned'), 'success');
@@ -310,9 +366,10 @@
   }
 
   // --- groups ---
-  function openGroupNew() { gEditing = null; gName = ''; gDesc = ''; gInbounds = new Set(); groupOpen = true; }
+  function openGroupNew() { gEditing = null; gName = ''; gDesc = ''; gIsDefault = false; gInbounds = new Set(); groupOpen = true; }
   function openGroupEdit(g: UserGroup) {
     gEditing = g; gName = g.name; gDesc = (g as any).description || '';
+    gIsDefault = Boolean((g as any).is_default);
     gInbounds = new Set(((g as any).inbound_ids || []) as number[]); groupOpen = true;
   }
   function toggleGroupInbound(id: number) {
@@ -323,10 +380,10 @@
     try {
       if (gEditing) {
         await apiFetch(`/admin/groups/${gEditing.id}`, { method: 'PATCH',
-          body: JSON.stringify({ name: gName, description: gDesc, inbound_ids: [...gInbounds] }) });
+          body: JSON.stringify({ name: gName, description: gDesc, is_default: gIsDefault, inbound_ids: [...gInbounds] }) });
       } else {
         const g = await apiFetch<{ id: number }>('/admin/groups', { method: 'POST',
-          body: JSON.stringify({ name: gName, description: gDesc }) });
+          body: JSON.stringify({ name: gName, description: gDesc, is_default: gIsDefault }) });
         if (gInbounds.size) {
           await apiFetch(`/admin/groups/${g.id}`, { method: 'PATCH', body: JSON.stringify({ inbound_ids: [...gInbounds] }) });
         }
@@ -489,7 +546,7 @@
       <option value={undefined}>{tr('users.no_group')}</option>
       {#each groups as g}<option value={g.id}>{g.name}</option>{/each}
     </select>
-    <input type="number" placeholder={tr('users.limit_gb_0')} bind:value={newLimitGB} title={tr('users.data_limit_in_gb')} />
+    <input type="number" step="0.001" min="0" placeholder={tr('users.limit_gb_0')} bind:value={newLimitGB} title={tr('users.data_limit_in_gb')} data-testid="create-limit" />
     <input type="number" placeholder={tr('users.expire_days_0_never')} bind:value={newExpireDays} title={tr('users.expire_in_n_days')} />
     <button class="primary" data-testid="create-user" onclick={createUser}>{tr('users.create')}</button>
   </div>
@@ -526,7 +583,19 @@
             </td>
             <td>{groups.find(g => g.id === u.group_id)?.name || '—'}</td>
             <td>{fmtBytes((u as any).data_limit)}</td>
-            <td>{fmtBytes((u as any).used_traffic)}</td>
+            <td>
+              {fmtBytes((u as any).used_traffic)}
+              <!-- used_traffic alone is ambiguous the moment a reset strategy is
+                   set: it is the CURRENT period only, and without knowing when
+                   that period began the number cannot be read. lifetime is what
+                   the account has ever moved. -->
+              {#if (u as any).lifetime_traffic && (u as any).lifetime_traffic !== (u as any).used_traffic}
+                <span class="muted sub" data-testid="lifetime">{tr('users.lifetime_total', { total: fmtBytes((u as any).lifetime_traffic) })}</span>
+              {/if}
+              {#if (u as any).last_reset_at}
+                <span class="muted sub">{tr('users.since_reset', { when: new Date((u as any).last_reset_at).toLocaleDateString() })}</span>
+              {/if}
+            </td>
             <td>
               <span class="badge {(u as any).status === 'active' ? 'ok' : 'off'}">{(u as any).status || 'active'}</span>
               <!-- The hold is separate from status on purpose, so it is shown
@@ -563,7 +632,7 @@
       <tbody>
         {#each groups as g (g.id)}
           <tr>
-            <td><strong>{g.name}</strong></td>
+            <td><strong>{g.name}</strong>{#if (g as any).is_default}<span class="badge">{tr('users.default_badge')}</span>{/if}</td>
             <td class="muted">{(g as any).description || '—'}</td>
             <td>{((g as any).inbound_ids || []).length}</td>
             <td class="acts">
@@ -643,8 +712,24 @@
   <div class="mgrid">
     <label>{tr('users.status')}<select bind:value={mStatus}><option value="active">{tr('users.active')}</option><option value="disabled">{tr('users.disabled')}</option></select></label>
     <label>{tr('users.group')}<select bind:value={mGroupId} data-testid="manage-group"><option value={undefined}>{tr('users.no_group')}</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
-    <label>{tr('users.data_limit_gb_0')}<input type="number" bind:value={mLimitGB} /></label>
+    <label>{tr('users.data_limit_gb_0')}<input type="number" step="0.001" min="0" bind:value={mLimitGB} data-testid="manage-limit" /></label>
+    <label>{tr('users.reset_strategy')}
+      <select bind:value={mReset} data-testid="manage-reset">
+        <option value="no_reset">{tr('users.reset_no')}</option>
+        <option value="day">{tr('users.reset_day')}</option>
+        <option value="week">{tr('users.reset_week')}</option>
+        <option value="month">{tr('users.reset_month')}</option>
+        <option value="year">{tr('users.reset_year')}</option>
+        <option value="on_expire">{tr('users.reset_on_expire')}</option>
+      </select>
+    </label>
+    <label>{tr('users.expires_on')}
+      <input type="date" bind:value={mExpireAt} data-testid="manage-expire-at" />
+      <small>{tr('users.expiry_blank_clears')}</small>
+    </label>
     <label>{tr('users.extend_expiry_days_from_now_0')}<input type="number" bind:value={mExpireDays} /></label>
+    <label>{tr('users.telegram_id')}<input bind:value={mTelegramID} data-testid="manage-telegram" /></label>
+    <label>{tr('users.note')}<input bind:value={mNote} data-testid="manage-note" /></label>
     <label>
       {tr('users.devices_max_addresses_at_once_0')}
       <input type="number" min="0" bind:value={mIPLimit} data-testid="ip-limit" />
@@ -666,6 +751,14 @@
     {/each}
     {#if inbounds.length === 0}<p class="muted">{tr('users.no_inbounds_yet_create_one_in')}</p>{/if}
   </div>
+  <h4>{tr('users.subscription_access')}</h4>
+  <p class="hint">{tr('users.revoke_explainer')}</p>
+  {#if mUser}
+    <button class="sm" class:danger={!mSubRevoked} data-testid="toggle-sub-revoked"
+      onclick={() => toggleSubRevoked(mUser!, !mSubRevoked)}>
+      {mSubRevoked ? tr('users.restore_subscription') : tr('users.revoke_subscription')}
+    </button>
+  {/if}
   <button class="primary" data-testid="save-manage" onclick={saveManage}>{tr('users.save')}</button>
 </Modal>
 
@@ -674,6 +767,10 @@
   <div class="mgrid">
     <label>{tr('users.name')}<input data-testid="group-name" bind:value={gName} /></label>
     <label>{tr('users.description')}<input bind:value={gDesc} /></label>
+    <!-- is_default has a whole transactional single-writer implementation
+         behind it — setting one group default clears the others in the same
+         transaction — and no way to reach it. -->
+    <label class="chk"><input type="checkbox" bind:checked={gIsDefault} data-testid="group-default" /> {tr('users.is_default_group')}</label>
   </div>
   <h4>{tr('users.inbounds_in_this_group_assigned_to')}</h4>
   <div class="assign">
@@ -741,6 +838,7 @@
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
   .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+  .sub { display: block; font-size: 11px; }
   .quota { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,0.65); }
   .quota .low { color: #d99b2b; }
   .lbl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin: 10px 0; }

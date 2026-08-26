@@ -496,3 +496,44 @@ func (s *Server) handleDeleteGroup(c *gin.Context) {
 	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"deleted": true, "members_moved": moved})
 }
+
+// handleSetSubRevoked revokes or restores a user's subscription.
+//
+// SubRevoked was enforced end to end and could not be set: a non-nil value
+// makes subscriptionNodes return an empty list and excludes the user from the
+// edge feed, and both of those were live — but nothing anywhere wrote the
+// field, so the whole mechanism was unreachable. It is the one action that
+// stops a leaked subscription URL without invalidating the credentials in every
+// config the user has already imported, which is what rotating does.
+func (s *Server) handleSetSubRevoked(c *gin.Context) {
+	u, _, ok := s.userOr404(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Revoked bool `json:"revoked"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "send {\"revoked\": true} or {\"revoked\": false}"})
+		return
+	}
+	if req.Revoked {
+		now := time.Now().UTC()
+		u.SubRevoked = &now
+	} else {
+		u.SubRevoked = nil
+	}
+	if err := s.db.SaveUser(u); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	action := "user.sub.restore"
+	if req.Revoked {
+		action = "user.sub.revoke"
+	}
+	s.audit(c, action, u.Username)
+	// The engines carry the user's credentials; a revoked subscription still
+	// needs its configs to stop resolving, and the feed is rebuilt from this.
+	s.startBackground(s.reloadEngines)
+	c.JSON(http.StatusOK, gin.H{"username": u.Username, "sub_revoked_at": u.SubRevoked})
+}

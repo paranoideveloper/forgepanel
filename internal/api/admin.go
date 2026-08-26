@@ -534,10 +534,17 @@ func max64(a, b int64) int64 {
 func (s *Server) handleCreateUser(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	var req struct {
-		Username    string `json:"username"`
-		GroupID     uint   `json:"group_id"`
-		DataLimitGB int64  `json:"data_limit_gb"`
-		ExpireDays  int    `json:"expire_days"`
+		Username string `json:"username"`
+		GroupID  uint   `json:"group_id"`
+		// DataLimitGB is whole gigabytes, kept for existing callers. It cannot
+		// express a sub-gigabyte plan: a 500 MB trial arrives as 0, and 0 means
+		// UNLIMITED — the exact opposite of the intent, discovered only when the
+		// account has moved a hundred gigabytes.
+		DataLimitGB int64 `json:"data_limit_gb"`
+		// DataLimit is bytes and takes precedence when present. Bytes rather
+		// than a float so there is no rounding to argue about at the boundary.
+		DataLimit  *int64 `json:"data_limit"`
+		ExpireDays int    `json:"expire_days"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" {
 		c.JSON(400, gin.H{"error": "username required"})
@@ -548,6 +555,13 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		Username: req.Username, Status: store.StatusActive, GroupID: req.GroupID,
 		OwnerAdminID: claims.AdminID, UUID: keygen.UUID(), Password: pw,
 		SubToken: token26(), DataLimit: req.DataLimitGB * 1024 * 1024 * 1024,
+	}
+	if req.DataLimit != nil {
+		if *req.DataLimit < 0 {
+			c.JSON(400, gin.H{"error": "data_limit must not be negative"})
+			return
+		}
+		u.DataLimit = *req.DataLimit
 	}
 	if req.ExpireDays > 0 {
 		t := time.Now().AddDate(0, 0, req.ExpireDays)

@@ -4,7 +4,11 @@ import UsersView from './UsersView.svelte';
 
 const user = {
   id: 7, username: 'alice', uuid: 'u-7', sub_token: 'tok7',
-  group_id: 3, data_limit: 5 * 1024 ** 3, used_traffic: 0, status: 'active', ip_limit: 2
+  group_id: 3, data_limit: 5 * 1024 ** 3, used_traffic: 1024 ** 3,
+  lifetime_traffic: 9 * 1024 ** 3, last_reset_at: '2026-08-01T00:00:00Z',
+  status: 'active', ip_limit: 2, reset_strategy: 'no_reset',
+  expire_at: '2026-12-31T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
+  telegram_id: 0, note: ''
 };
 const groups = [{ id: 3, name: 'gold' }, { id: 4, name: 'silver' }];
 
@@ -182,5 +186,104 @@ describe('UsersView group delete', () => {
       const d = calls.filter((c) => c.method === 'DELETE');
       expect(d.some((c) => c.url.includes('reassign_to=4'))).toBe(true);
     });
+  });
+});
+
+describe('UsersView user fields that had no control', () => {
+  beforeEach(() => {
+    (globalThis as any).confirm = () => true;
+  });
+
+  it('sends a sub-gigabyte data limit as bytes, not truncated gigabytes', async () => {
+    // The bug with real money behind it: the limit was an int64 of whole GB, so
+    // a 500 MB trial arrived as 0 — and 0 means UNLIMITED. The account then
+    // moves a hundred gigabytes before anybody notices.
+    const calls = world({ role: 'owner' });
+    render(UsersView);
+    await screen.findByText('alice');
+    const limit = (await screen.findByTestId('create-limit')) as HTMLInputElement;
+    await fireEvent.input(limit, { target: { value: '0.5' } });
+    await fireEvent.input(screen.getByPlaceholderText(/username/i), { target: { value: 'trial' } });
+    await fireEvent.click(screen.getByTestId('create-user'));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    const body = calls.find((c) => c.method === 'POST')!.body;
+    expect(body.data_limit).toBe(Math.round(0.5 * 1024 ** 3));
+    expect(body.data_limit).toBeGreaterThan(0);
+  });
+
+  it('sends the optimistic-concurrency token so two admins cannot clobber each other', async () => {
+    // updated_at was READ and never sent, so the backend's ifUnchanged check
+    // never engaged: last write won, and neither admin was told.
+    const calls = world({ role: 'owner' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(screen.getByTestId('manage-user'));
+    await screen.findByTestId('save-manage');
+    await fireEvent.click(screen.getByTestId('save-manage'));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body.updated_at).toBe('2026-08-01T00:00:00Z');
+  });
+
+  it('can clear an expiry, which was previously impossible', async () => {
+    // expire_at was write-only and relative-only: you could extend an expiry you
+    // could not see, and never remove one.
+    const calls = world({ role: 'owner' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(screen.getByTestId('manage-user'));
+    const date = (await screen.findByTestId('manage-expire-at')) as HTMLInputElement;
+    expect(date.value).toBe('2026-12-31'); // the current expiry is now visible
+    await fireEvent.input(date, { target: { value: '' } });
+    await fireEvent.click(screen.getByTestId('save-manage'));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body.expire_at).toBe('');
+  });
+
+  it('sends the reset strategy, telegram id and note', async () => {
+    // All three are PATCH-able and validated server-side; two are in the
+    // reseller allowlist. None had a control anywhere.
+    const calls = world({ role: 'owner' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(screen.getByTestId('manage-user'));
+    await fireEvent.change(await screen.findByTestId('manage-reset'), { target: { value: 'month' } });
+    await fireEvent.input(screen.getByTestId('manage-telegram'), { target: { value: '12345' } });
+    await fireEvent.input(screen.getByTestId('manage-note'), { target: { value: 'paid til June' } });
+    await fireEvent.click(screen.getByTestId('save-manage'));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const b = calls.find((c) => c.method === 'PATCH')!.body;
+    expect(b.reset_strategy).toBe('month');
+    expect(b.telegram_id).toBe(12345);
+    expect(b.note).toBe('paid til June');
+  });
+
+  it('can revoke a subscription without rotating the credentials', async () => {
+    // sub_revoked_at was enforced end to end — a non-nil value empties the node
+    // list and drops the user from the edge feed — and NOTHING wrote it, so the
+    // whole mechanism was unreachable.
+    const calls = world({ role: 'owner' });
+    render(UsersView);
+    await screen.findByText('alice');
+    await fireEvent.click(screen.getByTestId('manage-user'));
+    await fireEvent.click(await screen.findByTestId('toggle-sub-revoked'));
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/sub-revoked'))).toBe(true));
+    const call = calls.find((c) => c.url.includes('/sub-revoked'))!;
+    expect(call.body.revoked).toBe(true);
+    // Rotating is the other action and must not be involved.
+    expect(calls.some((c) => c.url.includes('reset-credentials'))).toBe(false);
+  });
+
+  it('shows lifetime traffic alongside the current period', async () => {
+    // used_traffic alone is ambiguous once a reset strategy is set: it is the
+    // current period only, and the number cannot be read without knowing when
+    // that period began.
+    world({ role: 'owner' });
+    render(UsersView);
+    expect(await screen.findByTestId('lifetime')).toBeTruthy();
   });
 });

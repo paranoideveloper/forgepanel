@@ -621,6 +621,7 @@ func (s *Server) routes() {
 			admin.PATCH("/users/:id", s.handleUpdateUser)
 			admin.PUT("/users/:id/inbounds", s.handleSetUserInbounds)
 			admin.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
+			admin.POST("/users/:id/sub-revoked", s.handleSetSubRevoked)
 			admin.GET("/quota", s.handleQuota)
 			// The audit trail. Entries carry the actor, their IP and what they
 			// did across every admin, so this is owner/admin only.
