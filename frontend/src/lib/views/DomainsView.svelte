@@ -131,7 +131,7 @@
       <div class="free-list">
         {#each status.domain_free as p}
           <div class="free-item" class:recommended={p.recommended}>
-            <strong>{p.label}{p.recommended ? ' — recommended' : ''}</strong>
+            <strong>{p.label}{p.recommended ? tr('domains.recommended') : ''}</strong>
             <span>{p.why}</span>
           </div>
         {/each}
@@ -153,7 +153,7 @@
         <option value="desec">{tr('domains.desec')}</option>
       </select>
       <button class="btn-primary" onclick={addDomain} disabled={adding || !newName.trim()}>
-        {adding ? 'Adding…' : 'Add domain'}
+        {adding ? tr('domains.adding') : tr('domains.add_domain')}
       </button>
     </div>
     <p class="hint">

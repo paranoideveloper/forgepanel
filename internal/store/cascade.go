@@ -38,6 +38,14 @@ func deleteInboundTx(tx *gorm.DB, id uint) error {
 	if err := detachInboundFromGroups(tx, id); err != nil {
 		return err
 	}
+	// The inbound's public endpoints go with it, inside the same transaction.
+	// An orphaned host row publishes nothing and would be inherited outright by
+	// whatever inbound next takes that id — SQLite hands out the lowest free
+	// rowid, which is the same mechanism that made the assignment leak above
+	// worth fixing.
+	if err := tx.Where("inbound_id = ?", id).Delete(&InboundHost{}).Error; err != nil {
+		return fmt.Errorf("delete inbound %d hosts: %w", id, err)
+	}
 	return tx.Delete(&Inbound{}, id).Error
 }
 

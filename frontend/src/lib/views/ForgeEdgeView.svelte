@@ -178,7 +178,7 @@
         <label>{tr('forgeedge.worker_name')} <span class="opt">{tr('forgeedge.optional')}</span><input type="text" bind:value={workerName} placeholder={tr('forgeedge.auto_generated')} /></label>
         <label>{tr('forgeedge.proxy_ip')} <span class="opt">{tr('forgeedge.optional_relay_for_cloudflare_hosted_sites')}</span><input type="text" bind:value={proxyIP} placeholder={tr('forgeedge.host_port')} /></label>
       </div>
-      <button class="btn primary" onclick={deploy} disabled={deploying}>{deploying ? 'Deploying…' : 'Deploy to Cloudflare'}</button>
+      <button class="btn primary" onclick={deploy} disabled={deploying}>{deploying ? tr('forgeedge.deploying') : tr('forgeedge.deploy_to_cloudflare')}</button>
       <p class="note">{tr('forgeedge.the_token_is_used_only_for')}</p>
 
       {#if lastResult}
@@ -208,7 +208,7 @@
             </div>
             <div class="dep-actions">
               <button class="btn sm warp" onclick={() => registerWarp(d)} disabled={warpingId === d.id} title={tr('forgeedge.register_free_cloudflare_warp_and_add')}>
-                {warpingId === d.id ? 'Registering…' : '⚡ WARP + Amnezia'}
+                {warpingId === d.id ? tr('forgeedge.registering') : tr('forgeedge.warp_amnezia')}
               </button>
               <button class="btn sm" onclick={() => downloadConf(d, true)} title={tr('forgeedge.download_the_amneziawg_conf_for_the')}>{tr('forgeedge.amnezia_conf')}</button>
               <button class="btn sm" onclick={() => downloadConf(d, false)} title={tr('forgeedge.download_the_plain_wireguard_warp_conf')}>{tr('forgeedge.wg_conf')}</button>

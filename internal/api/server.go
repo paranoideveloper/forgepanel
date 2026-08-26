@@ -543,6 +543,10 @@ func (s *Server) routes() {
 			admin.POST("/inbounds/:id/undo", s.handleUndoInbound)
 			admin.POST("/inbounds/bulk", s.handleBulkInbounds)
 			// Validation & Proof engine (§3).
+			admin.GET("/inbounds/:id/hosts", s.handleListHosts)
+			admin.POST("/inbounds/:id/hosts", s.handleCreateHost)
+			admin.PUT("/inbounds/:id/hosts/:hostID", s.handleUpdateHost)
+			admin.DELETE("/inbounds/:id/hosts/:hostID", s.handleDeleteHost)
 			admin.POST("/inbounds/validate", s.handleValidateInbound)
 			admin.POST("/inbounds/:id/verify", s.handleVerifyInbound)
 			admin.GET("/doctor", s.handleDoctor)

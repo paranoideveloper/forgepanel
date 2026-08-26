@@ -137,7 +137,7 @@
     <TrafficChart
       {points}
       {period}
-      label={selectedKey ? `${scope === 'user' ? 'User' : 'Node'} ${nameFor(selectedKey)}` : 'Traffic'}
+      label={selectedKey ? `${scope === 'user' ? tr('usage.user') : tr('usage.node')} ${nameFor(selectedKey)}` : 'Traffic'}
     />
   </div>
 
@@ -150,7 +150,7 @@
     {:else}
       <table>
         <thead>
-          <tr><th>{scope === 'user' ? 'User' : 'Node'}</th><th>{tr('usage.used')}</th><th></th></tr>
+          <tr><th>{scope === 'user' ? tr('usage.user') : tr('usage.node')}</th><th>{tr('usage.used')}</th><th></th></tr>
         </thead>
         <tbody>
           {#each top as row}

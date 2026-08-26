@@ -121,12 +121,12 @@
 
 <div class="card">
   <h3>{tr('certificates.panel_domain_amp_auto_tls_let')}</h3>
-  <p class="hint">{tr('certificates.point_an_a_record_for_your')} <code>{addr?.server_ipv4 || 'this server'}</code>{tr('certificates.save_it_here_then_reopen_the')} <strong>{tr('certificates.port_80')}</strong> {tr('certificates.reachable_from_the_internet_open_it')} <code>80:80</code>).</p>
+  <p class="hint">{tr('certificates.point_an_a_record_for_your')} <code>{addr?.server_ipv4 || tr('certificates.this_server')}</code>{tr('certificates.save_it_here_then_reopen_the')} <strong>{tr('certificates.port_80')}</strong> {tr('certificates.reachable_from_the_internet_open_it')} <code>80:80</code>).</p>
   <div class="form-row">
     <input type="text" bind:value={panelDomain} placeholder={tr('certificates.panel_example_com')} data-testid="domain-input" />
     <button class="btn-primary" onclick={updateDomain} data-testid="save-domain">{tr('certificates.save_domain')}</button>
     <button class="btn-secondary" onclick={checkDns} disabled={checkingDns} data-testid="check-dns">
-      {checkingDns ? 'Checking...' : 'Check DNS'}
+      {checkingDns ? tr('certificates.checking') : tr('certificates.check_dns')}
     </button>
   </div>
 
@@ -149,7 +149,7 @@
   <div class="card">
     <h3>{tr('certificates.active_tls_certificate_status')}</h3>
     <div class="status-grid">
-      <div><span class="lbl">{tr('certificates.domain')}</span> <strong>{addr.domain || 'N/A (self-signed on IP)'}</strong></div>
+      <div><span class="lbl">{tr('certificates.domain')}</span> <strong>{addr.domain || tr('certificates.n_a_self_signed_on_ip')}</strong></div>
       <div>
         <span class="lbl">{tr('certificates.status')}</span>
         {#if addr.cert?.available}
@@ -160,8 +160,8 @@
           <span class="badge badge-err" data-testid="cert-status">{tr('certificates.self_signed')}</span>
         {/if}
       </div>
-      <div><span class="lbl">{tr('certificates.issuer')}</span> <code>{addr.cert?.issuer || 'Self-Signed'}</code></div>
-      <div><span class="lbl">{tr('certificates.valid_until')}</span> {addr.cert?.not_after ? new Date(addr.cert.not_after).toLocaleDateString() : 'Indefinite'}{addr.cert?.days_remaining != null ? ` (${addr.cert.days_remaining}d)` : ''}</div>
+      <div><span class="lbl">{tr('certificates.issuer')}</span> <code>{addr.cert?.issuer || tr('certificates.self_signed_2')}</code></div>
+      <div><span class="lbl">{tr('certificates.valid_until')}</span> {addr.cert?.not_after ? new Date(addr.cert.not_after).toLocaleDateString() : tr('certificates.indefinite')}{addr.cert?.days_remaining != null ? ` (${addr.cert.days_remaining}d)` : ''}</div>
     </div>
     {#if addr.cert?.acme?.renewal_error}
       <div class="dns-box err">{tr('certificates.last_acme_error', { renewal_error: addr.cert.acme.renewal_error })}</div>

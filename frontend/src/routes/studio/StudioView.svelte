@@ -51,7 +51,7 @@
 
   <div class="card builder-card">
     {#key formKey}
-      <InboundForm initialProto={selected} onSaved={() => showToast('Saved as inbound — see the Inbounds tab', 'success')} />
+      <InboundForm initialProto={selected} onSaved={() => showToast(tr('studio.saved_as_inbound_see_the_inbounds'), 'success')} />
     {/key}
   </div>
 </div>

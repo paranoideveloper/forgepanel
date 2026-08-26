@@ -649,6 +649,13 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 	expandSNI := s.subExpandSNI()
 	frontCleanIP := s.subFrontCleanIP()
 	cleanIPs := s.subCleanIPs()
+	// One query for every inbound's endpoints rather than one per inbound: this
+	// runs on every client refresh, and a panel with 200 inbounds would
+	// otherwise issue 200 queries per fetch.
+	hostsByInbound, hostErr := s.db.HostsForInbounds(inboundIDs)
+	if hostErr != nil {
+		hostsByInbound = nil
+	}
 	date := time.Now().UTC().Format("2006-01-02")
 	var out []*model.Node
 	for idx, inID := range inboundIDs {
@@ -687,7 +694,15 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 		// Fan the inbound out into every camouflage variation it advertises: one
 		// config per borrowed REALITY SNI, and (when a clean-IP list is set) one
 		// per clean Cloudflare edge IP for CDN-frontable transports.
-		out = append(out, expandNodeVariations(n, cleanIPs, expandSNI, frontCleanIP)...)
+		// Endpoints first, then the existing camouflage fan-out on each one.
+		//
+		// This order is the useful one: a CDN endpoint fanned across the clean
+		// edge IPs is exactly what an operator wants, whereas fanning first and
+		// then applying endpoints would multiply every SNI variation by every
+		// endpoint and produce a subscription nobody can read.
+		for _, hosted := range applyHosts(n, hostsByInbound[inID]) {
+			out = append(out, expandNodeVariations(hosted, cleanIPs, expandSNI, frontCleanIP)...)
+		}
 	}
 	return out
 }

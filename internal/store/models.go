@@ -285,6 +285,7 @@ func (e *EdgeDeployment) StatusURL() string {
 func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}, &TrafficRollup{},
+		&InboundHost{},
 		&Outbound{}, &RoutingRule{}, &APIToken{},
 		&Profile{}, &ProfileBinding{}}
 }

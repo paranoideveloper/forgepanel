@@ -200,12 +200,12 @@
                   <td><code>{u.sub_token}</code></td>
                   <td>
                     <span class="badge {u.enabled ? 'ok' : 'err'}">
-                      {u.enabled ? 'Active' : 'Disabled'}
+                      {u.enabled ? tr('admin.active') : tr('admin.disabled')}
                     </span>
                   </td>
                   <td>
                     <button class="sm" onclick={() => toggleUser(u)}>
-                      {u.enabled ? 'Disable' : 'Enable'}
+                      {u.enabled ? tr('admin.disable') : tr('admin.enable')}
                     </button>
                   </td>
                 </tr>
@@ -239,7 +239,7 @@
                   <td>{tr('admin.mb', { mem_mb: n.mem_mb })}</td>
                   <td>
                     <span class="badge {n.healthy ? 'ok' : 'err'}">
-                      {n.healthy ? 'Online' : 'Offline'}
+                      {n.healthy ? tr('admin.online') : tr('admin.offline')}
                     </span>
                   </td>
                   <td>

@@ -136,7 +136,7 @@
             <td class="mono">{ago(u.last_seen)}</td>
             <td>
               <button class="btn-sm" data-testid="toggle" onclick={() => toggle(u.username)}>
-                {expanded[u.username] ? 'Hide' : 'Where from'}
+                {expanded[u.username] ? tr('online.hide') : tr('online.where_from')}
               </button>
             </td>
           </tr>

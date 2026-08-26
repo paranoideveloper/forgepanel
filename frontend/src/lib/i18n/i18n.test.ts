@@ -155,7 +155,11 @@ const NOT_TRANSLATED = new Set([
 	'Brook', 'SSH', 'DNS', 'DoH', 'DoT', 'ACME', 'JSON', 'YAML', 'QR', 'URI', 'URL', 'IP',
 	'IPv4', 'IPv6', 'CIDR', 'SNI', 'ALPN', 'UUID', 'API', 'CPU', 'RAM', 'GB', 'MB', 'KB',
 	'TB', 'ms', 'OK', 'ID', 'UI', 'CDN', 'NAT', 'CA', 'JWT', 'TOTP', '2FA', 'SSL', 'Clash',
-	'v2ray', 'geoip', 'geosite', 'systemd'
+	'v2ray', 'geoip', 'geosite', 'systemd',
+	// Wire values and key names, not prose: they are compared or sent verbatim,
+	// and translating one would break the comparison rather than the wording.
+	'Escape', 'Enter', 'Tab', 'none', 'tls', 'reality', 'grpc', 'ws', 'tcp', 'xhttp',
+	'h2,http/1.1', 'http/1.1', 'success', 'error', 'info', 'warning'
 ]);
 
 /** Text runs between tags, with {moustaches} and block tags removed. */
@@ -211,6 +215,36 @@ describe('no hard-coded user-facing text', () => {
 					const v = m[1].trim();
 					if (!v || NOT_TRANSLATED.has(v) || !/[A-Za-z]{2}/.test(v)) continue;
 					offenders.push(`${relative(SRC, f)}: ${attr}=${JSON.stringify(v)}`);
+				}
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it('leaves no prose inside a moustache expression', () => {
+		// The gap the first version of this guard had: it stripped every {…}
+		// before looking, so `{r.enabled ? 'Disable' : 'Enable'}` — a ternary
+		// rendering two English words straight into a button — sailed through.
+		// Conditional labels are exactly where untranslated strings hide, because
+		// only one branch is visible at a time.
+		const offenders: string[] = [];
+		for (const f of components) {
+			const src = decomment(readFileSync(f, 'utf8'));
+			for (const m of template(src).matchAll(/\{([^{}]*)\}/g)) {
+				// Remove tr() calls first. Their argument is a KEY, and leaving
+				// them in also makes the literal scanner below run onto the next
+				// quote and report nonsense like "? tr(".
+				const expr = m[1].replace(/\btr\(\s*(['"])[^'"]*\1/g, 'tr(');
+				// Only quoted literals; an attribute value or a class name is not
+				// prose, and neither is a lone identifier.
+				for (const lit of expr.matchAll(/'([^'\\]{2,})'|"([^"\\]{2,})"/g)) {
+					const v = (lit[1] ?? lit[2]).trim();
+					if (!/[A-Za-z]{2}/.test(v)) continue;
+					if (NOT_TRANSLATED.has(v)) continue;
+					// A key passed to tr() is not prose, and neither is anything
+					// that looks like an identifier, path, class or MIME type.
+					if (/^[a-z0-9_.\-/:]+$/.test(v)) continue;
+					offenders.push(`${relative(SRC, f)}: ${JSON.stringify(v)}`);
 				}
 			}
 		}

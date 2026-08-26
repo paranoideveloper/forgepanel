@@ -328,7 +328,7 @@
       {/if}
 
       <button class="save" data-testid="save-inbound" onclick={save} disabled={saving}>
-        {saving ? 'Saving…' : editId ? 'Update Inbound' : 'Save Inbound'}
+        {saving ? tr('inbound.saving') : editId ? tr('inbound.update_inbound') : tr('inbound.save_inbound')}
       </button>
     </div>
 
@@ -336,7 +336,7 @@
       <div class="preview-head">
         <div class="tabs">
           {#each (['uri', 'xray', 'singbox', 'clash'] as const) as t}
-            <button class:active={previewTab === t} onclick={() => previewTab = t}>{t === 'uri' ? 'Client Link' : t}</button>
+            <button class:active={previewTab === t} onclick={() => previewTab = t}>{t === 'uri' ? tr('inbound.client_link') : t}</button>
           {/each}
         </div>
         <button class="copy" onclick={copyPreview}>{tr('inbound.copy')}</button>
@@ -346,7 +346,7 @@
           {#each preview.errors as e}<div class="e {e.severity}">{e.severity}: {e.message}</div>{/each}
         </div>
       {/if}
-      <pre data-testid="preview-body">{#if previewTab === 'uri'}{preview?.uri || (previewing ? 'rendering…' : '—')}{:else if previewTab === 'xray'}{preview?.xray || '—'}{:else if previewTab === 'singbox'}{preview?.singbox || '—'}{:else}{preview?.clash || '—'}{/if}</pre>
+      <pre data-testid="preview-body">{#if previewTab === 'uri'}{preview?.uri || (previewing ? tr('inbound.rendering') : '—')}{:else if previewTab === 'xray'}{preview?.xray || '—'}{:else if previewTab === 'singbox'}{preview?.singbox || '—'}{:else}{preview?.clash || '—'}{/if}</pre>
     </div>
   </div>
 {/if}

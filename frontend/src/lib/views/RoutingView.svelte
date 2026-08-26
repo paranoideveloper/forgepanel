@@ -346,7 +346,7 @@
                 <button class="btn-sm" disabled={i === 0} onclick={() => move(i, -1)} title={tr('routing.earlier')}>↑</button>
                 <button class="btn-sm" disabled={i === rules.length - 1} onclick={() => move(i, 1)} title={tr('routing.later')}>↓</button>
                 <button class="btn-sm" data-testid="toggle-rule" onclick={() => toggleRule(r)}>
-                  {r.enabled ? 'Disable' : 'Enable'}
+                  {r.enabled ? tr('routing.disable') : tr('routing.enable')}
                 </button>
                 <button class="btn-sm" onclick={() => openRule(r)}>{tr('routing.edit')}</button>
                 <button class="btn-sm danger" onclick={() => deleteRule(r)}>{tr('routing.delete')}</button>
@@ -359,7 +359,7 @@
   </div>
 {/if}
 
-<Modal title={obEditing ? 'Edit outbound' : 'New outbound'} isOpen={obOpen} onClose={() => (obOpen = false)}>
+<Modal title={obEditing ? tr('routing.edit_outbound') : tr('routing.new_outbound')} isOpen={obOpen} onClose={() => (obOpen = false)}>
   <label>{tr('routing.tag')}<input bind:value={obTag} placeholder={tr('routing.relay_de')} data-testid="ob-tag" /></label>
   <label>
     {tr('routing.protocol')}
@@ -389,7 +389,7 @@
   </div>
 </Modal>
 
-<Modal title={rEditing ? 'Edit rule' : 'New rule'} isOpen={ruleOpen} onClose={() => (ruleOpen = false)}>
+<Modal title={rEditing ? tr('routing.edit_rule') : tr('routing.new_rule')} isOpen={ruleOpen} onClose={() => (ruleOpen = false)}>
   <label>{tr('routing.name')}<input bind:value={rName} placeholder={tr('routing.block_ads')} data-testid="rule-name" /></label>
   <label>
     {tr('routing.domains')}

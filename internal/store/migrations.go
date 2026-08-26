@@ -43,6 +43,7 @@ const (
 	migVImportSource  uint64 = 13
 	migVNodeSbStats   uint64 = 14
 	migVNodeMTLS      uint64 = 15
+	migVInboundHosts  uint64 = 16
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -227,6 +228,17 @@ func migrations() []migrate.Migration {
 				"fleet rather than staying there.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Node{}})
+				return err
+			},
+		},
+		{
+			Version: migVInboundHosts,
+			Name:    "inbound_public_hosts",
+			Rollback: "safe to drop. Subscriptions fall back to one entry per inbound plus the " +
+				"clean-IP and SNI fan-outs, which is what they did before; any extra endpoints " +
+				"an operator defined simply stop being published.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&InboundHost{}})
 				return err
 			},
 		},

@@ -340,7 +340,7 @@
       <label class="field">
         <span>{tr('users.pattern_unsafe_utls')}</span>
         <select bind:value={subSettings.pattern} data-testid="pattern-mode" title={tr('users.adds_cs_fm_fp_unsafe_to')}>
-          {#each (subSettings.pattern_modes ?? ['off','only','both']) as m}<option value={m}>{m === 'off' ? 'Off (normal)' : m === 'only' ? 'Pattern only' : 'Both (normal + pattern)'}</option>{/each}
+          {#each (subSettings.pattern_modes ?? ['off','only','both']) as m}<option value={m}>{m === 'off' ? tr('users.off_normal') : m === 'only' ? tr('users.pattern_only') : tr('users.both_normal_pattern')}</option>{/each}
         </select>
       </label>
       <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>{tr('users.save')}</button>
@@ -366,7 +366,7 @@
       <label class="field">
         <span>{tr('users.fronting_model')}</span>
         <select bind:value={subSettings.front_mode} data-testid="front-mode" title={tr('users.how_the_domain_is_applied_to')}>
-          {#each (subSettings.front_modes ?? ['none','sni','cdn']) as m}<option value={m}>{m === 'none' ? 'None (raw)' : m === 'sni' ? 'SNI + Host camouflage' : 'CDN domain-fronting'}</option>{/each}
+          {#each (subSettings.front_modes ?? ['none','sni','cdn']) as m}<option value={m}>{m === 'none' ? tr('users.none_raw') : m === 'sni' ? tr('users.sni_host_camouflage') : tr('users.cdn_domain_fronting')}</option>{/each}
         </select>
       </label>
       <button class="primary" data-testid="save-front" onclick={saveSubSettings}>{tr('users.save_domain')}</button>
@@ -430,7 +430,7 @@
             <td class="acts">
               <button class="sm" data-testid="manage-user" onclick={() => openManage(u)}>{tr('users.manage')}</button>
               <button class="sm" onclick={() => openSubModal(u)}>{tr('users.sub')}</button>
-              <button class="sm" onclick={() => setStatus(u, (u as any).status === 'active' ? 'disabled' : 'active')}>{(u as any).status === 'active' ? 'Disable' : 'Enable'}</button>
+              <button class="sm" onclick={() => setStatus(u, (u as any).status === 'active' ? 'disabled' : 'active')}>{(u as any).status === 'active' ? tr('users.disable') : tr('users.enable')}</button>
               <button class="sm" data-testid="rotate" onclick={() => openRotate(u)}>{tr('users.rotate')}</button>
               <button class="sm danger" onclick={() => deleteUser(u.id)}>{tr('users.delete')}</button>
             </td>
@@ -466,7 +466,7 @@
 
 <!-- Manage user modal -->
 <Modal
-  title={'Rotate credentials · ' + (rotateUser?.username || '')}
+  title={tr('users.rotate_credentials') + (rotateUser?.username || '')}
   isOpen={rotateOpen}
   onClose={() => (rotateOpen = false)}
 >
@@ -502,12 +502,12 @@
       data-testid="rotate-confirm"
       onclick={doRotate}
     >
-      {rotating ? 'Rotating…' : 'Rotate'}
+      {rotating ? tr('users.rotating') : tr('users.rotate')}
     </button>
   </div>
 </Modal>
 
-<Modal title={'Manage · ' + (mUser?.username || '')} isOpen={manageOpen} onClose={() => manageOpen = false}>
+<Modal title={tr('users.manage_2') + (mUser?.username || '')} isOpen={manageOpen} onClose={() => manageOpen = false}>
   <div class="mgrid">
     <label>{tr('users.status')}<select bind:value={mStatus}><option value="active">{tr('users.active')}</option><option value="disabled">{tr('users.disabled')}</option></select></label>
     <label>{tr('users.group')}<select bind:value={mGroupId}><option value={undefined}>{tr('users.no_group')}</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
@@ -529,7 +529,7 @@
     {#each inbounds as inb}
       <label class="chk">
         <input type="checkbox" checked={mAssigned.has(inb.id)} disabled={mInherited.has(inb.id)} onchange={() => toggleAssign(inb.id)} />
-        {inb.remark || inb.protocol} <span class="muted">:{inb.port} {inb.protocol}{mInherited.has(inb.id) ? ' (from group)' : ''}</span>
+        {inb.remark || inb.protocol} <span class="muted">:{inb.port} {inb.protocol}{mInherited.has(inb.id) ? tr('users.from_group') : ''}</span>
       </label>
     {/each}
     {#if inbounds.length === 0}<p class="muted">{tr('users.no_inbounds_yet_create_one_in')}</p>{/if}
@@ -538,7 +538,7 @@
 </Modal>
 
 <!-- Group modal -->
-<Modal title={gEditing ? 'Edit group' : 'New group'} isOpen={groupOpen} onClose={() => groupOpen = false}>
+<Modal title={gEditing ? tr('users.edit_group') : tr('users.new_group_2')} isOpen={groupOpen} onClose={() => groupOpen = false}>
   <div class="mgrid">
     <label>{tr('users.name')}<input data-testid="group-name" bind:value={gName} /></label>
     <label>{tr('users.description')}<input bind:value={gDesc} /></label>
@@ -553,7 +553,7 @@
 </Modal>
 
 <!-- Sub modal -->
-<Modal title={'Subscription · ' + (activeSubUser?.username || '')} isOpen={subModalOpen} onClose={() => subModalOpen = false}>
+<Modal title={tr('users.subscription') + (activeSubUser?.username || '')} isOpen={subModalOpen} onClose={() => subModalOpen = false}>
   <div class="mgrid">
     <label>{tr('users.format')}<select bind:value={subFormat}><option value="v2ray">{tr('users.v2ray')}</option><option value="clash">{tr('users.clash')}</option><option value="sing-box">sing-box</option></select></label>
   </div>

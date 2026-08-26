@@ -6,6 +6,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
   import InboundForm from '$lib/components/InboundForm.svelte';
+  import HostsEditor from '$lib/components/HostsEditor.svelte';
 
   interface Row {
     id: number; remark: string; protocol: string; port: number; enabled: boolean;
@@ -165,7 +166,7 @@
     <button class="ghost" data-testid="import-toggle" onclick={() => importing = !importing}>{tr('inbounds.import')}</button>
     <button class="ghost" data-testid="quick-reality" onclick={quickReality}>{tr('inbounds.one_click_reality')}</button>
     <button class="primary" data-testid="create-inbound" onclick={() => creating = !creating}>
-      {creating ? 'Close' : '+ Create Inbound'}
+      {creating ? tr('inbounds.close') : tr('inbounds.create_inbound_2')}
     </button>
   </div>
 </div>
@@ -176,7 +177,7 @@
     <textarea data-testid="import-text" bind:value={importText} rows="4"
       placeholder={tr('inbounds.vless_10_vmess_10_https_host')}></textarea>
     <button class="primary" data-testid="import-run" onclick={runImport} disabled={importBusy}>
-      {importBusy ? 'Importing…' : 'Parse & create inbounds'}
+      {importBusy ? tr('inbounds.importing') : tr('inbounds.parse_create_inbounds')}
     </button>
   </div>
 {/if}
@@ -193,6 +194,10 @@
     <h3>{tr('inbounds.edit_inbound', { id: editRow.id, p2: editRow.remark || editRow.protocol })}</h3>
     {#key editRow.id}
       <InboundForm onSaved={onSaved} initial={editRow.node} editId={editRow.id} />
+    {/key}
+    <h4>{tr('inbounds.endpoints')}</h4>
+    {#key editRow.id}
+      <HostsEditor inboundId={editRow.id} />
     {/key}
   </div>
 {/if}
@@ -227,14 +232,14 @@
             <td>{r.node?.security?.type || 'none'}</td>
             <td>{r.port}</td>
             <td>
-              <span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? 'Enabled' : 'Disabled'}</span>
+              <span class="badge {r.enabled ? 'ok' : 'off'}">{r.enabled ? tr('inbounds.enabled') : tr('inbounds.disabled')}</span>
               <!-- An inbound no core could serve is left OUT of the running
                    config so one bad inbound cannot take the rest down. Without
                    this badge the operator sees "Enabled", the inbound carries no
                    traffic, and nothing anywhere says why. -->
               {#if r.enabled && r.not_serving_reason}
                 <span class="badge err" data-testid="not-serving"
-                      title="This inbound is enabled but is NOT in the running configuration: {r.not_serving_reason}{r.not_serving_since ? ' (since ' + new Date(r.not_serving_since).toLocaleString() + ')' : ''}">
+                      title="This inbound is enabled but is NOT in the running configuration: {r.not_serving_reason}{r.not_serving_since ? tr('inbounds.since') + new Date(r.not_serving_since).toLocaleString() + ')' : ''}">
                   {tr('inbounds.not_serving')}
                 </span>
               {/if}
@@ -254,7 +259,7 @@
               <button class="sm" data-testid="edit-btn" onclick={() => edit(r)}>{tr('inbounds.edit')}</button>
               <button class="sm" onclick={() => verify(r)}>{tr('inbounds.verify')}</button>
               <button class="sm" onclick={() => clone(r)}>{tr('inbounds.clone')}</button>
-              <button class="sm" onclick={() => toggle(r)}>{r.enabled ? 'Disable' : 'Enable'}</button>
+              <button class="sm" onclick={() => toggle(r)}>{r.enabled ? tr('inbounds.disable_toggle') : tr('inbounds.enable_toggle')}</button>
               <button class="sm danger" onclick={() => del(r)}>{tr('inbounds.delete')}</button>
             </td>
           </tr>
@@ -265,7 +270,7 @@
   {/if}
 </div>
 
-<Modal title={'Config · ' + cfgTitle} isOpen={cfgOpen} onClose={() => cfgOpen = false}>
+<Modal title={tr('inbounds.config_3') + cfgTitle} isOpen={cfgOpen} onClose={() => cfgOpen = false}>
   {#if cfgKind === 'uri'}
     <div class="cfg">
       <span class="lbl">{tr('inbounds.client_link')}</span>

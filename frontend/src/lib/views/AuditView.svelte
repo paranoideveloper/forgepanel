@@ -166,8 +166,8 @@
   {:else if entries.length === 0}
     <p class="muted" data-testid="empty">
       {total === 0 && !fActor && !fAction && !fSince && !fUntil
-        ? 'Nothing recorded yet.'
-        : 'No entries match these filters.'}
+        ? tr('audit.nothing_recorded_yet')
+        : tr('audit.no_entries_match_these_filters')}
     </p>
   {:else}
     <table>
@@ -192,7 +192,7 @@
             <td class="row-actions">
               {#if e.diff}
                 <button class="btn-sm" onclick={() => toggle(e.id)} data-testid="toggle-diff">
-                  {expanded[e.id] ? 'Hide' : 'What changed'}
+                  {expanded[e.id] ? tr('audit.hide') : tr('audit.what_changed')}
                 </button>
               {/if}
               <button class="btn-sm" onclick={() => copyRow(e)}>{tr('audit.copy')}</button>

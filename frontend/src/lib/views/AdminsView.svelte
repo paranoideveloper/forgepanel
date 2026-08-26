@@ -261,13 +261,13 @@
             <td>{a.two_factor_enabled ? '✓' : '—'}</td>
             <td>
               <span class="badge {a.disabled ? 'badge-err' : 'badge-ok'}">
-                {a.disabled ? 'Disabled' : 'Active'}
+                {a.disabled ? tr('admins.disabled') : tr('admins.active')}
               </span>
             </td>
             <td class="actions-cell">
               <button class="btn-sm" onclick={() => openEdit(a)}>{tr('admins.edit')}</button>
               <button class="btn-sm" onclick={() => toggleDisabled(a)}>
-                {a.disabled ? 'Enable' : 'Disable'}
+                {a.disabled ? tr('admins.enable') : tr('admins.disable')}
               </button>
               <button class="btn-sm danger" onclick={() => openDelete(a)}>{tr('admins.delete')}</button>
             </td>

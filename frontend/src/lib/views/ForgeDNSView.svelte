@@ -112,7 +112,7 @@
   {#if createErr}<p class="err-text">{createErr}</p>{/if}
   {#if selectedAdapter}
     <p class="muted" style="margin-top:8px;font-size:13px">
-      {tr('forgedns.forgepanel_will_automatically_manage_authoritative_dns', { p1: adapters.find((a) => a.id === selectedAdapter)?.description || 'Pick a wire format adapter and enter your delegated domain.' })}
+      {tr('forgedns.forgepanel_will_automatically_manage_authoritative_dns', { p1: adapters.find((a) => a.id === selectedAdapter)?.description || tr('forgedns.pick_a_wire_format_adapter_and') })}
     </p>
   {/if}
 </div>
@@ -140,7 +140,7 @@
             <td><code>{z.adapter}</code></td>
             <td>
               <span class="badge {z.enabled ? 'badge-ok' : 'badge-err'}">
-                {z.enabled ? 'Active' : 'Stopped'}
+                {z.enabled ? tr('forgedns.active') : tr('forgedns.stopped')}
               </span>
             </td>
             <td><code>{z.bind_host || '0.0.0.0'}:{z.bind_port || 53}</code></td>
@@ -191,7 +191,7 @@
         <div style="margin-top:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span class="muted">{tr('forgedns.client_config_the_credential_keep_it')}</span>
-            <button class="btn-sm" onclick={() => copyText(bundle!.client_config_toml, 'Client config')} data-testid="copy-config">{tr('forgedns.copy_config')}</button>
+            <button class="btn-sm" onclick={() => copyText(bundle!.client_config_toml, tr('forgedns.client_config'))} data-testid="copy-config">{tr('forgedns.copy_config')}</button>
           </div>
           <pre class="config" data-testid="client-config">{bundle.client_config_toml}</pre>
         </div>

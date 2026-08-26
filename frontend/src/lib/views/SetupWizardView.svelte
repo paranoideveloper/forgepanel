@@ -138,14 +138,14 @@
   <div class="row">
     <input placeholder={tr('setupwizard.domain_for_the_cdn_configs_e')} bind:value={pwDomain} data-testid="pw-domain" />
     <input placeholder={tr('setupwizard.cloudflare_api_token_optional_auto_creates')} bind:value={pwToken} data-testid="pw-token" />
-    <button class="primary" onclick={runPresetWizard} disabled={pwRunning} data-testid="pw-run">{pwRunning ? 'Building…' : '⚡ Build full server'}</button>
+    <button class="primary" onclick={runPresetWizard} disabled={pwRunning} data-testid="pw-run">{pwRunning ? tr('setupwizard.building') : tr('setupwizard.build_full_server')}</button>
   </div>
   <p class="tiny">{tr('setupwizard.token_needs')} <strong>{tr('setupwizard.zone_dns_edit')}</strong> {tr('setupwizard.for_the_domain_without_it_the')}</p>
   {#if pwResult}
     <div class="pw-result">
       <p class="ok-line">{tr('setupwizard.created_inbounds_reality_key', { count: pwResult.count })} <code>{pwResult.reality?.public_key}</code></p>
       <ul class="pw-list">
-        {#each pwResult.created as c}<li>{tr('setupwizard.port', { remark: c.remark, port: c.port, p3: c.cdn ? ' · behind Cloudflare' : ' · direct' })}</li>{/each}
+        {#each pwResult.created as c}<li>{tr('setupwizard.port', { remark: c.remark, port: c.port, p3: c.cdn ? tr('setupwizard.behind_cloudflare') : tr('setupwizard.direct') })}</li>{/each}
       </ul>
       {#if pwResult.warnings?.length}{#each pwResult.warnings as w}<p class="warn-line">⚠️ {w}</p>{/each}{/if}
     </div>
@@ -163,10 +163,10 @@
 <div class="card">
   {#if step === 1}
     <h3>{tr('setupwizard.1_domain_amp_automatic_tls')}</h3>
-    <p class="hint">{tr('setupwizard.point_a_domain_s_a_record')} <code>{serverIP || 'this server'}</code>{tr('setupwizard.then_save_it_here_to_get')}</p>
+    <p class="hint">{tr('setupwizard.point_a_domain_s_a_record')} <code>{serverIP || tr('setupwizard.this_server')}</code>{tr('setupwizard.then_save_it_here_to_get')}</p>
     <div class="row">
       <input placeholder={tr('setupwizard.panel_example_com')} bind:value={domain} data-testid="wiz-domain" />
-      <button class="primary" onclick={() => saveDomain(false)} disabled={savingDomain} data-testid="wiz-save-domain">{savingDomain ? 'Saving…' : 'Save & continue'}</button>
+      <button class="primary" onclick={() => saveDomain(false)} disabled={savingDomain} data-testid="wiz-save-domain">{savingDomain ? tr('setupwizard.saving') : tr('setupwizard.save_continue')}</button>
       <button class="ghost" onclick={() => saveDomain(true)} data-testid="wiz-skip-domain">{tr('setupwizard.skip')}</button>
     </div>
     {#if domain && certAvailable}<p class="ok-line">{tr('setupwizard.a_trusted_certificate_is_active_for', { domain })}</p>{/if}
@@ -174,7 +174,7 @@
     <h3>{tr('setupwizard.2_create_your_first_inbound')}</h3>
     <p class="hint">{tr('setupwizard.vless_reality_is_the_most_censorship')}</p>
     {#if !inboundCreated}
-      <button class="primary" onclick={createInbound} disabled={creatingInbound} data-testid="wiz-create-inbound">{creatingInbound ? 'Creating…' : '⚡ Create VLESS + REALITY'}</button>
+      <button class="primary" onclick={createInbound} disabled={creatingInbound} data-testid="wiz-create-inbound">{creatingInbound ? tr('setupwizard.creating') : tr('setupwizard.create_vless_reality')}</button>
     {:else}
       <p class="ok-line">{tr('setupwizard.created')} <strong>{inboundInfo}</strong></p>
     {/if}
@@ -192,7 +192,7 @@
     </div>
     <div class="nav">
       <button class="ghost" onclick={() => (step = 2)}>{tr('setupwizard.back')}</button>
-      <button class="primary" onclick={createUser} disabled={creatingUser} data-testid="wiz-create-user">{creatingUser ? 'Creating…' : 'Create user'}</button>
+      <button class="primary" onclick={createUser} disabled={creatingUser} data-testid="wiz-create-user">{creatingUser ? tr('setupwizard.creating') : tr('setupwizard.create_user')}</button>
     </div>
   {:else}
     <h3>{tr('setupwizard.4_share_the_subscription')}</h3>

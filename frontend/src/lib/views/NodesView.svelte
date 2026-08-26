@@ -200,7 +200,7 @@
             <td title={n.last_seen || 'never'}>{lastSeenLabel(n)}</td>
             <td>
               <span class="badge {n.healthy ? 'badge-ok' : 'badge-err'}">
-                {n.healthy ? 'Online' : 'Stale'}
+                {n.healthy ? tr('nodes.online') : tr('nodes.stale')}
               </span>
               {#if !n.enrolled}
                 <span class="badge badge-warn" title={tr('nodes.registered_but_the_agent_has_never')}>

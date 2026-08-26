@@ -206,7 +206,7 @@
 <div class="card" data-testid="doctor-panel">
   <div class="doctor-head">
     <h3>{tr('systemhealth.panel_doctor')}</h3>
-    <button class="btn-sm" onclick={runDoctor} disabled={doctorBusy}>{doctorBusy ? 'Running…' : 'Run diagnostics'}</button>
+    <button class="btn-sm" onclick={runDoctor} disabled={doctorBusy}>{doctorBusy ? tr('systemhealth.running') : tr('systemhealth.run_diagnostics')}</button>
   </div>
   {#if doctor?.health}
     <p class="doctor-state">
