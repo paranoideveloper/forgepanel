@@ -115,15 +115,22 @@ func singboxChainOutbounds(chain model.EgressChain, chainIndex int) ([]jobj, err
 			return nil, fmt.Errorf("hop %d of %d: %w", i+1, len(chain), err)
 		}
 		hop.Tag = chainTag(chainIndex, i)
-		o, err := render.SingboxOutbound(hop)
+		// Plural: a ShadowTLS hop is two outbounds, and rendering it as one
+		// produced a hop that completed its TLS mimicry and carried nothing.
+		rendered, err := render.SingboxOutbounds(hop)
 		if err != nil {
 			return nil, fmt.Errorf("hop %d of %d: cannot render for sing-box: %w", i+1, len(chain), err)
 		}
-		o["tag"] = hop.Tag
+		render.RetagOutbounds(rendered, hop.Tag)
 		if i > 0 {
-			o["detour"] = chainTag(chainIndex, i-1)
+			// On the OUTERMOST outbound, not the primary: for a pair the primary
+			// already detours through its own camouflage, and a second detour
+			// there would replace the first.
+			render.SetChainDetour(rendered, chainTag(chainIndex, i-1))
 		}
-		out = append(out, jobj(o))
+		for _, o := range rendered {
+			out = append(out, jobj(o))
+		}
 	}
 	return out, nil
 }

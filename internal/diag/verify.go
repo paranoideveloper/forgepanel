@@ -124,17 +124,25 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	if cli.Security.Type == model.SecTLS {
 		cli.Security.AllowInsecure = true
 	}
-	out, err := render.SingboxOutbound(cli)
+	// Plural: ShadowTLS renders as a pair, and verifying with only the
+	// camouflage half would report a protocol as working when the config it
+	// hands to clients carries no traffic.
+	rendered, err := render.SingboxOutbounds(cli)
 	if err != nil {
 		return fail(now, "cannot render client outbound: "+err.Error())
 	}
-	out["tag"] = "proxy"
+	render.RetagOutbounds(rendered, "proxy")
+	clientOuts := make([]any, 0, len(rendered)+1)
+	for _, o := range rendered {
+		clientOuts = append(clientOuts, o)
+	}
+	clientOuts = append(clientOuts, map[string]any{"type": "direct", "tag": "direct"})
 	clientCfg := map[string]any{
 		"log": map[string]any{"level": "error"},
 		"inbounds": []any{map[string]any{
 			"type": "socks", "tag": "socks-in", "listen": "127.0.0.1", "listen_port": socksPort,
 		}},
-		"outbounds": []any{out, map[string]any{"type": "direct", "tag": "direct"}},
+		"outbounds": clientOuts,
 		"route":     map[string]any{"final": "proxy"},
 	}
 

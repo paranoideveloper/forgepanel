@@ -514,27 +514,6 @@ func egressHop(uri string, index int) (*model.Node, error) {
 	return hop, nil
 }
 
-// singboxEgressOutbound turns an upstream-hop URI into a sing-box outbound.
-//
-// Without this, an Egress set on a sing-box inbound (Hysteria2, TUIC, AnyTLS,
-// ShadowTLS, Trojan-on-sing-box) was accepted by the API, stored, shown in the
-// UI and then IGNORED by the builder: the inbound exited directly, with nothing
-// logged. That is the precise leak the Xray branch refuses to allow, so the two
-// branches now behave identically — the hop is honoured, or the inbound is
-// skipped and the operator is told why.
-func singboxEgressOutbound(uri string, index int) (jobj, error) {
-	hop, err := egressHop(uri, index)
-	if err != nil {
-		return nil, err
-	}
-	out, err := render.SingboxOutbound(hop)
-	if err != nil {
-		return nil, fmt.Errorf("cannot render the upstream hop for sing-box: %w", err)
-	}
-	out["tag"] = hop.Tag
-	return jobj(out), nil
-}
-
 // egressOutbound turns an upstream-hop URI into an Xray outbound.
 //
 // The URI is parsed with the panel's own link parser and rendered with its own

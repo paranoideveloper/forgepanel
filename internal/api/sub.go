@@ -551,11 +551,18 @@ func singboxSubscription(nodes []*model.Node, route routing.Options) []byte {
 	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1}
 	var tags []string
 	for i, n := range nodes {
-		o, err := render.SingboxOutbound(n)
+		// Outbounds, plural: ShadowTLS is a PAIR — an inner Shadowsocks that
+		// carries the traffic and the shadowtls camouflage it detours through.
+		// This function used to build that pair itself, which meant every other
+		// caller of the renderer (the diagnostic verifier, the egress chain
+		// builder, RenderSingboxJSON) emitted the bare shadowtls outbound and
+		// produced a config that connected and carried nothing. One
+		// implementation now, in the renderer, where the knowledge belongs.
+		rendered, err := render.SingboxOutbounds(n)
 		if err != nil {
 			continue
 		}
-		tag, _ := o["tag"].(string)
+		tag, _ := rendered[0]["tag"].(string)
 		if tag == "" {
 			tag = fmt.Sprintf("node-%d", i)
 		}
@@ -565,25 +572,13 @@ func singboxSubscription(nodes []*model.Node, route routing.Options) []byte {
 		} else {
 			seen[tag] = 1
 		}
-		o["tag"] = tag
+		// Renames the primary AND repoints anything detouring through it, so a
+		// deduplicated tag cannot leave a detour aimed at a tag that is gone.
+		render.RetagOutbounds(rendered, tag)
 		tags = append(tags, tag)
-		if n.Protocol == model.ProtoShadowTLS && n.ShadowTLS != nil {
-			// ShadowTLS is pure TLS camouflage: on its own it carries no proxy
-			// bytes. The sing-box client needs a two-outbound chain — an inner
-			// Shadowsocks outbound that tunnels THROUGH the shadowtls outbound via
-			// `detour`. Rewrite the rendered shadowtls to be the detour target and
-			// make the Shadowsocks entry the tag the selector points at.
-			stlsTag := tag + "-stls"
-			o["tag"] = stlsTag
-			ss := map[string]any{
-				"type": "shadowsocks", "tag": tag,
-				"method": n.ShadowTLS.InnerMethod, "password": n.ShadowTLS.InnerPassword,
-				"detour": stlsTag,
-			}
-			outs = append(outs, ss, o)
-			continue
+		for _, o := range rendered {
+			outs = append(outs, o)
 		}
-		outs = append(outs, o)
 	}
 	final := sbDirectTag
 	if len(tags) > 0 {

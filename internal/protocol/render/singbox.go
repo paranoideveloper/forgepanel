@@ -31,6 +31,31 @@ import (
 // so the caller's value is never mutated and the output is a pure function of
 // the canonical form -- the same invariant XrayOutbound upholds.
 func SingboxOutbound(n *model.Node) (map[string]any, error) {
+	outs, err := SingboxOutbounds(n)
+	if err != nil {
+		return nil, err
+	}
+	return outs[0], nil
+}
+
+// SingboxOutbounds renders a node as every outbound it needs, primary FIRST.
+//
+// Most protocols are one outbound. ShadowTLS is two, and rendering it as one was
+// a client config that connected, performed the TLS mimicry perfectly, and
+// carried no traffic at all.
+//
+// ShadowTLS is camouflage, not a proxy: sing-box models it as a shadowtls
+// outbound that the REAL proxy detours through. The server side always got this
+// right — SingboxInbound sets detour to an inner Shadowsocks inbound — and the
+// client side emitted a bare {"type":"shadowtls"} with nothing inside it. That
+// object is valid, sing-box starts, the handshake to the decoy host succeeds,
+// and then there is no proxy protocol to speak, so every ShadowTLS config this
+// panel handed out was decoration.
+//
+// Any caller ASSEMBLING A CONFIG must use this rather than SingboxOutbound, or
+// the support outbound is dropped and the detour points at a tag that does not
+// exist — which sing-box refuses outright, so at least it fails loudly.
+func SingboxOutbounds(n *model.Node) ([]map[string]any, error) {
 	c := n.Clone()
 	c.Normalize()
 	if err := c.Validate(); err != nil {
@@ -40,26 +65,116 @@ func SingboxOutbound(n *model.Node) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	out["tag"] = tagOr(c.Tag, "proxy")
+	tag := tagOr(c.Tag, "proxy")
+	out["tag"] = tag
 	if sbSupportsMultiplex(c.Protocol) {
 		if m := sbMultiplex(c.Multiplex); m != nil {
 			out["multiplex"] = m
 		}
 	}
-	return out, nil
+	if c.Protocol == model.ProtoShadowTLS {
+		inner, support := sbShadowTLSPair(c, tag, out)
+		return []map[string]any{inner, support}, nil
+	}
+	return []map[string]any{out}, nil
+}
+
+// stlsSupportSuffix names the camouflage half of a ShadowTLS pair.
+const stlsSupportSuffix = "-stls"
+
+// RetagOutbounds renames the primary outbound and repoints anything that
+// detours through it, so a caller that must deduplicate tags across many nodes
+// cannot leave a detour aimed at a tag that no longer exists.
+//
+// sing-box refuses a config whose detour names an unknown outbound, so getting
+// this wrong fails loudly rather than silently — but it fails at the operator's
+// client, after the subscription has been handed out.
+func RetagOutbounds(outs []map[string]any, tag string) {
+	if len(outs) == 0 {
+		return
+	}
+	old, _ := outs[0]["tag"].(string)
+	outs[0]["tag"] = tag
+	if len(outs) == 1 || old == "" {
+		return
+	}
+	for _, o := range outs[1:] {
+		prev, _ := o["tag"].(string)
+		if !strings.HasPrefix(prev, old) {
+			continue
+		}
+		next := tag + strings.TrimPrefix(prev, old)
+		o["tag"] = next
+		if d, _ := outs[0]["detour"].(string); d == prev {
+			outs[0]["detour"] = next
+		}
+	}
+}
+
+// SetChainDetour points a rendered node's OUTERMOST outbound at the previous hop
+// in a relay chain.
+//
+// Outermost matters. A one-outbound node detours from itself, but a ShadowTLS
+// node is a pair: the inner Shadowsocks already detours through the camouflage,
+// and it is the CAMOUFLAGE that opens the connection to the server. Putting the
+// chain's detour on the primary would give one outbound two detours — the second
+// silently replacing the first — and the traffic would leave the machine without
+// the camouflage, or without the chain, depending on which won.
+func SetChainDetour(outs []map[string]any, previousTag string) {
+	if len(outs) == 0 || previousTag == "" {
+		return
+	}
+	outs[len(outs)-1]["detour"] = previousTag
+}
+
+// sbShadowTLSPair splits a rendered shadowtls outbound into the Shadowsocks that
+// actually carries traffic and the shadowtls camouflage it detours through.
+//
+// The primary keeps the node's tag, because that is the tag a route rule, a
+// selector or a chain already points at; the camouflage takes a derived one. The
+// credentials are the INNER Shadowsocks pair the panel mints for the inbound —
+// the shadowtls password authenticates the mimicry layer and is not a proxy
+// credential, so using it here would produce a config that cannot authenticate.
+func sbShadowTLSPair(c *model.Node, tag string, stls map[string]any) (inner, support map[string]any) {
+	supportTag := tag + stlsSupportSuffix
+	stls["tag"] = supportTag
+
+	method, password := "", ""
+	if c.ShadowTLS != nil {
+		method, password = c.ShadowTLS.InnerMethod, c.ShadowTLS.InnerPassword
+	}
+	inner = jobj{
+		"type": "shadowsocks", "tag": tag,
+		"method": method, "password": password,
+		// No server/server_port: the detour supplies the connection. Setting them
+		// makes sing-box dial the address itself and bypass the camouflage
+		// entirely, which is the failure this is here to prevent.
+		"detour": supportTag,
+	}
+	if m := sbMultiplex(c.Multiplex); m != nil {
+		inner["multiplex"] = m
+	}
+	// Multiplex belongs to the proxy, not to the camouflage.
+	delete(stls, "multiplex")
+	return inner, stls
 }
 
 // RenderSingboxJSON returns a complete, indented sing-box config carrying the
 // node as its single proxy outbound plus a direct outbound. This is the exact
 // shape `sing-box check -c` validates, which is how spec §18 gates a release.
 func RenderSingboxJSON(n *model.Node) ([]byte, error) {
-	out, err := SingboxOutbound(n)
+	outs, err := SingboxOutbounds(n)
 	if err != nil {
 		return nil, err
 	}
+	list := make([]any, 0, len(outs)+1)
+	for _, o := range outs {
+		list = append(list, o)
+	}
+	list = append(list, jobj{"type": "direct", "tag": "direct"})
 	cfg := jobj{
 		"log":       jobj{"level": "warn", "timestamp": true},
-		"outbounds": []any{out, jobj{"type": "direct", "tag": "direct"}},
+		"outbounds": list,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

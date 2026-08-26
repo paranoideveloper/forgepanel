@@ -2,6 +2,9 @@ package render
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -1012,31 +1015,9 @@ func TestSingboxOutboundPerProtocol(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "shadowtls v3 strict",
-			node: &model.Node{Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
-				ShadowTLS: &model.ShadowTLSOptions{Version: 3, Password: "hs", HandshakeHost: "www.apple.com", StrictMode: true}},
-			check: func(t *testing.T, o jobj) {
-				if str(t, o, "type") != "shadowtls" || num(t, o, "version") != 3 || str(t, o, "password") != "hs" ||
-					o["strict_mode"] != true {
-					t.Fatalf("shadowtls outbound = %v", o)
-				}
-				if str(t, sub(t, o, "tls"), "server_name") != "www.apple.com" {
-					t.Errorf("the handshake host must win over the node SNI, got %v", o["tls"])
-				}
-			},
-		},
-		{
-			name: "shadowtls v2 has no strict mode",
-			node: &model.Node{Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
-				ShadowTLS: &model.ShadowTLSOptions{Version: 2, Password: "hs", StrictMode: true}},
-			check: func(t *testing.T, o jobj) {
-				mustAbsent(t, o, "strict_mode")
-				if str(t, sub(t, o, "tls"), "server_name") != "a" {
-					t.Errorf("server_name = %v, want the SNI() fallback", sub(t, o, "tls")["server_name"])
-				}
-			},
-		},
+		// ShadowTLS is covered by TestShadowTLSClientRendersAPairThatCarriesTraffic:
+		// it is the one protocol whose client side is TWO outbounds, so the single
+		// -outbound shape this table asserts cannot express it.
 		{
 			name: "wireguard",
 			node: &model.Node{Protocol: model.ProtoWireGuard, Address: "a", Port: 51820,
@@ -1865,5 +1846,183 @@ func TestRenderersDoNotMutateTheirInput(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, orig) {
 		t.Fatalf("a renderer mutated its input\nbefore: %+v\nafter:  %+v", before, orig)
+	}
+}
+
+// ShadowTLS is camouflage, not a proxy.
+//
+// sing-box models the client side as a real proxy outbound that DETOURS through
+// a shadowtls outbound. The renderer emitted the shadowtls object alone: valid
+// JSON, sing-box starts, the TLS handshake to the decoy host succeeds, and then
+// there is no proxy protocol to speak — so every ShadowTLS client config this
+// panel produced connected and carried nothing.
+//
+// The server side always got this right (SingboxInbound sets detour to an inner
+// Shadowsocks inbound), which is what makes the client half worth a test of its
+// own: the two sides disagreed and only one of them was checked.
+func TestShadowTLSClientRendersAPairThatCarriesTraffic(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
+		ShadowTLS: &model.ShadowTLSOptions{
+			Version: 3, Password: "hs", HandshakeHost: "www.apple.com", StrictMode: true,
+			InnerMethod: model.SS2022AES128, InnerPassword: "MDEyMzQ1Njc4OWFiY2RlZg==",
+		},
+	}
+	outs, err := SingboxOutbounds(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outs) != 2 {
+		t.Fatalf("got %d outbound(s), want the shadowsocks + shadowtls pair: %v", len(outs), outs)
+	}
+
+	// The PRIMARY is the proxy, because that is the tag a route rule, a selector
+	// or a chain points at. If the camouflage were primary, everything that
+	// referenced this node would reference the half that carries nothing.
+	inner, support := jobj(outs[0]), jobj(outs[1])
+	if str(t, inner, "type") != "shadowsocks" {
+		t.Fatalf("primary outbound is %q, want the shadowsocks that carries traffic", inner["type"])
+	}
+	if str(t, support, "type") != "shadowtls" {
+		t.Fatalf("support outbound is %q, want shadowtls", support["type"])
+	}
+	if str(t, inner, "tag") != "proxy" {
+		t.Errorf("primary tag = %q, want the node's own tag", inner["tag"])
+	}
+	if str(t, inner, "detour") != str(t, support, "tag") {
+		t.Fatalf("the proxy detours to %q but the camouflage is tagged %q — sing-box refuses an unknown detour",
+			inner["detour"], support["tag"])
+	}
+	// The inner credentials, not the handshake password. The shadowtls password
+	// authenticates the mimicry layer; using it as the Shadowsocks key produces
+	// a config that connects and then fails to authenticate.
+	if str(t, inner, "method") != model.SS2022AES128 || str(t, inner, "password") != "MDEyMzQ1Njc4OWFiY2RlZg==" {
+		t.Errorf("inner credentials = %v/%v, want the inner Shadowsocks pair", inner["method"], inner["password"])
+	}
+	// And the primary must NOT dial the server itself: the detour supplies the
+	// connection, and a server address here bypasses the camouflage entirely.
+	mustAbsent(t, inner, "server", "server_port")
+
+	// The camouflage keeps everything that describes the mimicry.
+	if num(t, support, "version") != 3 || str(t, support, "password") != "hs" || support["strict_mode"] != true {
+		t.Errorf("camouflage outbound = %v", support)
+	}
+	if str(t, sub(t, support, "tls"), "server_name") != "www.apple.com" {
+		t.Errorf("the handshake host must win over the node SNI, got %v", support["tls"])
+	}
+}
+
+func TestShadowTLSV2HasNoStrictMode(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
+		ShadowTLS: &model.ShadowTLSOptions{Version: 2, Password: "hs", StrictMode: true}}
+	outs, err := SingboxOutbounds(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	support := jobj(outs[len(outs)-1])
+	mustAbsent(t, support, "strict_mode")
+	if str(t, sub(t, support, "tls"), "server_name") != "a" {
+		t.Errorf("server_name = %v, want the SNI() fallback", sub(t, support, "tls")["server_name"])
+	}
+}
+
+// Renaming the primary must carry the detour with it. A subscription
+// deduplicates tags across many nodes, and a rename that left the detour behind
+// would point at an outbound that no longer exists — which sing-box refuses, at
+// the operator's client, after the subscription was handed out.
+func TestRetaggingAPairKeepsTheDetourIntact(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
+		ShadowTLS: &model.ShadowTLSOptions{Version: 3, Password: "hs",
+			InnerMethod: model.SS2022AES128, InnerPassword: "MDEyMzQ1Njc4OWFiY2RlZg=="}}
+	outs, err := SingboxOutbounds(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	RetagOutbounds(outs, "node-7")
+	if got := outs[0]["tag"]; got != "node-7" {
+		t.Fatalf("primary tag = %v", got)
+	}
+	if outs[0]["detour"] != outs[1]["tag"] {
+		t.Fatalf("after renaming, the detour %v does not match the camouflage tag %v",
+			outs[0]["detour"], outs[1]["tag"])
+	}
+	if outs[1]["tag"] == "proxy-stls" {
+		t.Error("the camouflage kept the old tag prefix")
+	}
+}
+
+// A chain's detour belongs on the OUTERMOST outbound. A pair's primary already
+// detours through its own camouflage, and a second detour there would replace
+// the first — sending traffic out without the camouflage, or without the chain.
+func TestAChainDetourGoesOnTheOutermostOutbound(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoShadowTLS, Address: "a", Port: 8443,
+		ShadowTLS: &model.ShadowTLSOptions{Version: 3, Password: "hs",
+			InnerMethod: model.SS2022AES128, InnerPassword: "MDEyMzQ1Njc4OWFiY2RlZg=="}}
+	outs, _ := SingboxOutbounds(n)
+	SetChainDetour(outs, "previous-hop")
+
+	if outs[len(outs)-1]["detour"] != "previous-hop" {
+		t.Errorf("the chain detour landed on %v, not the outbound that opens the connection", outs)
+	}
+	if outs[0]["detour"] == "previous-hop" {
+		t.Error("the chain detour replaced the camouflage detour on the primary")
+	}
+	if outs[0]["detour"] != outs[1]["tag"] {
+		t.Error("the primary no longer detours through its camouflage")
+	}
+
+	// And a single-outbound node still detours from itself.
+	plain := &model.Node{Protocol: model.ProtoTrojan, Address: "a", Port: 443, Password: "p",
+		Security: model.Security{Type: model.SecTLS}}
+	one, _ := SingboxOutbounds(plain)
+	SetChainDetour(one, "previous-hop")
+	if one[0]["detour"] != "previous-hop" {
+		t.Errorf("a one-outbound node did not take the chain detour: %v", one[0])
+	}
+}
+
+// And the real core has to accept the pair.
+//
+// A two-outbound shape is exactly the kind of thing that reads correctly and is
+// refused: sing-box validates detour targets and has opinions about where the
+// tls block may sit. Only sing-box says. (Writing this test, the core rejected
+// the fixture — "bad key length, required 16, got 15" — because the inner PSK in
+// it was 15 bytes. That is the sort of thing no amount of reading finds.)
+//
+// Note what this test can NOT prove. Checked against sing-box 1.13: the OLD bare
+// {"type":"shadowtls"} outbound VALIDATES AND STARTS. It completes the handshake
+// to the decoy host and then carries nothing, because there is no proxy protocol
+// inside it. So "the core accepts it" was never evidence of anything here, which
+// is why the assertions above are about the SHAPE of the pair and this one only
+// guards against the pair being malformed.
+func TestShadowTLSPairIsAcceptedByTheRealCore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the real core")
+	}
+	bin := "/usr/bin/sing-box"
+	if _, err := os.Stat(bin); err != nil {
+		t.Skip("no sing-box binary")
+	}
+	n := &model.Node{
+		Protocol: model.ProtoShadowTLS, Address: "example.com", Port: 8443,
+		ShadowTLS: &model.ShadowTLSOptions{
+			Version: 3, Password: "handshake-pw", HandshakeHost: "www.apple.com",
+			InnerMethod: model.SS2022AES128, InnerPassword: "MDEyMzQ1Njc4OWFiY2RlZg==",
+		},
+	}
+	raw, err := RenderSingboxJSON(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Not vacuous: a config with no shadowtls outbound would also validate.
+	if !strings.Contains(string(raw), `"shadowtls"`) || !strings.Contains(string(raw), `"detour"`) {
+		t.Fatalf("nothing to validate — the config has no detoured pair:\n%s", raw)
+	}
+	path := filepath.Join(t.TempDir(), "stls.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(bin, "check", "-c", path).CombinedOutput(); err != nil {
+		t.Fatalf("sing-box refuses the ShadowTLS client config:\n%s\n%s", out, raw)
 	}
 }
