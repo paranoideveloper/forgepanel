@@ -1,7 +1,4 @@
 // Persian (فارسی). Right-to-left — see applyDocumentLocale in state.svelte.ts.
-//
-// Protocol and product names stay in Latin script on purpose: they name things
-// the panel writes into config files and that upstream docs call by those names.
 
 export const fa: Record<string, string> = {
 	'admin.actions': 'عملیات',
@@ -824,7 +821,9 @@ export const fa: Record<string, string> = {
 	'users.data_limit_gb_0': 'سقف داده (گیگابایت، ۰=بی‌نهایت)',
 	'users.data_limit_in_gb': 'سقف داده به گیگابایت',
 	'users.delete': 'حذف',
+	'users.delete_group_has_members': 'این گروه هنوز {count} عضو دارد. اعضا هرگز حذف نمی‌شوند — انتخاب کنید کجا بروند.',
 	'users.delete_group_name': 'گروه «{name}» حذف شود؟',
+	'users.delete_group_title': 'حذف گروه',
 	'users.delete_this_user': 'این کاربر حذف شود؟',
 	'users.description': 'توضیح',
 	'users.device_limit': 'سقف دستگاه',
@@ -866,11 +865,13 @@ export const fa: Record<string, string> = {
 	'users.inbounds': 'ورودی‌ها',
 	'users.inbounds_in_this_group_assigned_to': 'ورودی‌های این گروه (به همهٔ کاربرانش تخصیص می‌یابد)',
 	'users.keep_the_real_server_address_but': ': نشانی واقعی سرور حفظ می‌شود ولی دامنه به‌عنوان SNI در TLS و سرایند Host نمایش داده می‌شود (روی هر سرور / REALITY کار می‌کند).',
+	'users.leave_with_no_group': 'بدون گروه بمانند',
 	'users.limit': 'سقف',
 	'users.limit_gb_0': 'سقف گیگابایت (۰=بی‌نهایت)',
 	'users.loading': 'در حال بارگذاری…',
 	'users.manage': 'مدیریت',
 	'users.manage_2': 'مدیریت · ',
+	'users.move_members_to': 'انتقال اعضا به',
 	'users.name': 'نام',
 	'users.needs_a_recent_xray_client_v2rayng': '. به یک کلاینت Xray به‌روز نیاز دارد (v2rayNG ≥ 1.9 یا v2rayN یا Husi).',
 	'users.new_group': '+ گروه تازه',
@@ -890,6 +891,8 @@ export const fa: Record<string, string> = {
 	'users.pattern_or': '(الگو) یا',
 	'users.pattern_unsafe_utls': 'الگو (uTLS ناایمن)',
 	'users.pick_what_to_replace_each_one': 'انتخاب کنید چه چیزی جایگزین شود. هرکدام چیز متفاوتی را از کار می‌اندازد، پس در کنار هرکدام نوشته شده چه چیزی متوقف می‌شود.',
+	'users.quota_traffic': 'ترافیک: {remaining} از {total} باقی مانده',
+	'users.quota_users': 'کاربران: {remaining} از {total} باقی مانده',
 	'users.rotate': 'چرخش',
 	'users.rotate_credentials': 'چرخش اعتبارنامه‌ها · ',
 	'users.rotated': 'چرخانده شد',

@@ -1,6 +1,16 @@
 export interface ApiError {
   message: string;
   status: number;
+  /** Machine-readable reason, e.g. "group_in_use" or "quota_exceeded". */
+  code?: string;
+  /** Per-field rejection reasons, for showing an error under the input that
+   *  caused it rather than one toast for the whole form. */
+  fields?: Record<string, string>;
+  /** What the API says to do about it. */
+  remediation?: string;
+  /** The whole decoded body, for anything the fields above do not name —
+   *  `members` on a group conflict, `missing_scope` on a Cloudflare refusal. */
+  body?: Record<string, unknown>;
 }
 
 // Session handling.
@@ -122,13 +132,33 @@ async function refreshAccessToken(): Promise<boolean> {
 
 async function toError(response: Response): Promise<ApiError> {
   let message = `HTTP Error ${response.status}`;
+  let body: Record<string, unknown> | undefined;
   try {
     const data = await response.json();
+    if (data && typeof data === 'object') body = data as Record<string, unknown>;
     if (data?.error) message = data.error;
   } catch {
     /* a non-JSON body leaves the status-based message */
   }
-  return { message, status: response.status };
+  // Carry the WHOLE body, not just its `error` string.
+  //
+  // The API answers a refused request with far more than a sentence: `code` for
+  // a machine-readable reason (group_in_use), `fields` mapping each rejected
+  // field to why, `members` listing what is in the way, `remediation` and
+  // `missing_scope`. Collapsing all of it into one string meant a caller could
+  // only ever show a toast — no per-field errors under the inputs, and no way
+  // to offer the choice the backend is explicitly asking for. Every one of
+  // those endpoints was answering a question nothing could hear.
+  const err: ApiError = { message, status: response.status };
+  if (body) {
+    err.body = body;
+    if (typeof body.code === 'string') err.code = body.code;
+    if (body.fields && typeof body.fields === 'object') {
+      err.fields = body.fields as Record<string, string>;
+    }
+    if (typeof body.remediation === 'string') err.remediation = body.remediation;
+  }
+  return err;
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {

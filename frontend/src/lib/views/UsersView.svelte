@@ -54,6 +54,27 @@
   interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
   interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; }
   let subSettings = $state<SubSettings | null>(null);
+
+  interface Quota {
+    role: string;
+    unlimited: boolean;
+    user_quota: number;
+    users_used: number;
+    users_remaining?: number;
+    traffic_credit: number;
+    traffic_allocated: number;
+    traffic_remaining?: number;
+  }
+  let quota = $state<Quota | null>(null);
+  let groupDeleteOpen = $state(false);
+  let pendingGroupDelete = $state<UserGroup | null>(null);
+  let groupDeleteMembers = $state<User[]>([]);
+  let groupReassignTo = $state(0);
+  let role = $state('');
+  // Group routes are owner/admin-only. Rendering their controls to a reseller
+  // offers buttons the handler refuses — the UI promising something the API
+  // will not do.
+  let canManageGroups = $derived(role === 'owner' || role === 'admin');
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
     full: 'Full (bypass Iran + block ads/malware/porn/QUIC)',
@@ -94,10 +115,34 @@
   async function loadData() {
     loading = true;
     try {
+      // Quota first: it is the one endpoint every role may call, and its
+      // response carries the caller's ROLE — which decides what the rest of
+      // this view may even ask for.
+      try {
+        quota = await apiFetch<Quota>('/admin/quota');
+        role = quota?.role ?? '';
+      } catch (_) {
+        quota = null;
+      }
+
       users = await apiFetch<User[]>('/admin/users');
-      groups = await apiFetch<UserGroup[]>('/admin/groups');
       inbounds = await apiFetch<Inbound[]>('/admin/inbounds');
-      subSettings = await apiFetch<SubSettings>('/admin/settings/subscription');
+
+      // Groups and subscription settings are owner/admin-only. They used to be
+      // awaited inline, so for a reseller or viewer the 403 threw out of
+      // loadData and the ENTIRE view failed with an "insufficient role" toast —
+      // no users, no inbounds, nothing. A permission they were never meant to
+      // have took away the part they were.
+      try {
+        groups = await apiFetch<UserGroup[]>('/admin/groups');
+      } catch (_) {
+        groups = [];
+      }
+      try {
+        subSettings = await apiFetch<SubSettings>('/admin/settings/subscription');
+      } catch (_) {
+        subSettings = null;
+      }
     } catch (err: any) {
       showToast(err.message || tr('users.failed_to_load_users'), 'error');
     } finally {
@@ -239,7 +284,22 @@
   async function saveManage() {
     if (!mUser) return;
     try {
-      const patch: Record<string, any> = { status: mStatus, group_id: mGroupId, data_limit: mLimitGB * 1024 ** 3, ip_limit: mIPLimit };
+      // group_id is sent as a NUMBER, and "no group" is 0.
+      //
+      // It used to be `mGroupId` straight through, which is undefined for "No
+      // group" — and JSON.stringify DROPS an undefined value, so the PATCH
+      // carried no group_id at all and a user could never be taken out of a
+      // group. The control worked, the request simply did not contain it.
+      const patch: Record<string, any> = {
+        status: mStatus,
+        group_id: mGroupId ?? 0,
+        ip_limit: mIPLimit
+      };
+      // data_limit only when it actually changed, and never for a reseller: it
+      // is outside resellerUserFields, so including it untouched made EVERY
+      // reseller edit fail with a 422 about a field they had not touched.
+      const originalGB = Math.round(((mUser as any).data_limit || 0) / (1024 ** 3));
+      if (mLimitGB !== originalGB) patch.data_limit = mLimitGB * 1024 ** 3;
       if (mExpireDays > 0) patch.expire_at = new Date(Date.now() + mExpireDays * 86400_000).toISOString();
       await apiFetch(`/admin/users/${mUser.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
       await apiFetch(`/admin/users/${mUser.id}/inbounds`, { method: 'PUT', body: JSON.stringify({ inbound_ids: [...mAssigned] }) });
@@ -276,8 +336,44 @@
   }
   async function deleteGroup(g: UserGroup) {
     if (!confirm(tr('users.delete_group_name', { name: g.name }))) return;
-    try { await apiFetch(`/admin/groups/${g.id}`, { method: 'DELETE' }); showToast(tr('users.group_deleted'), 'info'); await loadData(); }
-    catch (err: any) { showToast(err.message || tr('users.failed_to_delete_group'), 'error'); }
+    try {
+      await apiFetch(`/admin/groups/${g.id}`, { method: 'DELETE' });
+      showToast(tr('users.group_deleted'), 'info');
+      await loadData();
+      return;
+    } catch (err: any) {
+      // A group with members returns 409 group_in_use, and the backend requires
+      // a DISPOSITION for those members — it will not guess. The UI used to
+      // show the raw error and offer neither, so a group with members simply
+      // could not be deleted from the panel. Members are never deleted either
+      // way; they are moved or left with no group.
+      if (err?.code !== 'group_in_use') {
+        showToast(err.message || tr('users.failed_to_delete_group'), 'error');
+        return;
+      }
+      pendingGroupDelete = g;
+      groupDeleteMembers = ((err?.body?.members as User[]) ?? []) as User[];
+      groupReassignTo = 0;
+      groupDeleteOpen = true;
+    }
+  }
+
+  // confirmGroupDelete carries out the disposition the operator chose.
+  async function confirmGroupDelete() {
+    const g = pendingGroupDelete;
+    if (!g) return;
+    const q = groupReassignTo > 0
+      ? `?reassign_to=${groupReassignTo}`
+      : '?remove_members_from_group=true';
+    try {
+      await apiFetch(`/admin/groups/${g.id}${q}`, { method: 'DELETE' });
+      showToast(tr('users.group_deleted'), 'info');
+      groupDeleteOpen = false;
+      pendingGroupDelete = null;
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || tr('users.failed_to_delete_group'), 'error');
+    }
   }
 
   function fmtBytes(b?: number) {
@@ -398,6 +494,22 @@
     <button class="primary" data-testid="create-user" onclick={createUser}>{tr('users.create')}</button>
   </div>
   {#if createErr}<p class="err">{createErr}</p>{/if}
+  {#if quota && !quota.unlimited}
+    <!-- A reseller had no view of their own headroom, so exhaustion arrived as
+         an opaque 409 quota_exceeded on the create they had already filled in. -->
+    <p class="quota" data-testid="quota-strip">
+      {#if quota.users_remaining !== undefined}
+        <span class:low={quota.users_remaining <= 3}>
+          {tr('users.quota_users', { remaining: quota.users_remaining, total: quota.user_quota })}
+        </span>
+      {/if}
+      {#if quota.traffic_remaining !== undefined}
+        <span class:low={quota.traffic_remaining <= 0}>
+          {tr('users.quota_traffic', { remaining: fmtBytes(quota.traffic_remaining), total: fmtBytes(quota.traffic_credit) })}
+        </span>
+      {/if}
+    </p>
+  {/if}
 </div>
 
 <div class="card">
@@ -441,6 +553,7 @@
   {/if}
 </div>
 
+{#if canManageGroups}
 <div class="card">
   <div class="ghead"><h3>{tr('users.groups')}</h3><button class="sm" data-testid="new-group" onclick={openGroupNew}>{tr('users.new_group')}</button></div>
   {#if groups.length === 0}<p class="muted">{tr('users.no_groups_a_group_bundles_inbounds')}</p>
@@ -455,7 +568,7 @@
             <td>{((g as any).inbound_ids || []).length}</td>
             <td class="acts">
               <button class="sm" onclick={() => openGroupEdit(g)}>{tr('users.edit')}</button>
-              <button class="sm danger" onclick={() => deleteGroup(g)}>{tr('users.delete')}</button>
+              <button class="sm danger" data-testid="group-delete" onclick={() => deleteGroup(g)}>{tr('users.delete')}</button>
             </td>
           </tr>
         {/each}
@@ -463,6 +576,25 @@
     </table>
   {/if}
 </div>
+{/if}
+
+<!-- Group delete needs a disposition for its members: the backend refuses to
+     guess, and members are never deleted either way. -->
+<Modal title={tr('users.delete_group_title')} isOpen={groupDeleteOpen} onClose={() => (groupDeleteOpen = false)}>
+  <p class="hint">{tr('users.delete_group_has_members', { count: groupDeleteMembers.length })}</p>
+  <label class="lbl">{tr('users.move_members_to')}
+    <select bind:value={groupReassignTo} data-testid="group-reassign">
+      <option value={0}>{tr('users.leave_with_no_group')}</option>
+      {#each groups.filter((g) => g.id !== pendingGroupDelete?.id) as g}
+        <option value={g.id}>{g.name}</option>
+      {/each}
+    </select>
+  </label>
+  <div class="row-actions">
+    <button class="primary danger" data-testid="group-delete-confirm" onclick={confirmGroupDelete}>{tr('users.delete')}</button>
+    <button class="sm" onclick={() => (groupDeleteOpen = false)}>{tr('users.cancel')}</button>
+  </div>
+</Modal>
 
 <!-- Manage user modal -->
 <Modal
@@ -510,7 +642,7 @@
 <Modal title={tr('users.manage_2') + (mUser?.username || '')} isOpen={manageOpen} onClose={() => manageOpen = false}>
   <div class="mgrid">
     <label>{tr('users.status')}<select bind:value={mStatus}><option value="active">{tr('users.active')}</option><option value="disabled">{tr('users.disabled')}</option></select></label>
-    <label>{tr('users.group')}<select bind:value={mGroupId}><option value={undefined}>{tr('users.no_group')}</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
+    <label>{tr('users.group')}<select bind:value={mGroupId} data-testid="manage-group"><option value={undefined}>{tr('users.no_group')}</option>{#each groups as g}<option value={g.id}>{g.name}</option>{/each}</select></label>
     <label>{tr('users.data_limit_gb_0')}<input type="number" bind:value={mLimitGB} /></label>
     <label>{tr('users.extend_expiry_days_from_now_0')}<input type="number" bind:value={mExpireDays} /></label>
     <label>
@@ -609,6 +741,9 @@
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
   .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+  .quota { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,0.65); }
+  .quota .low { color: #d99b2b; }
+  .lbl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin: 10px 0; }
   .theme-card { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: start; background: #0F1420; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; padding: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
   .theme-card:hover { border-color: rgba(39,209,124,0.5); background: #121a26; }
   .theme-card.active { border-color: #27D17C; background: rgba(39,209,124,0.10); }
