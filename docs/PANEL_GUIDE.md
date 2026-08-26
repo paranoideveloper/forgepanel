@@ -256,6 +256,47 @@ over-quota cap), `/limit <name> <GB>` (0 = unlimited), `/extend <name> <days>`.
 Only the chat IDs in `FORGEPANEL_TELEGRAM_ADMINS` can run the admin commands;
 everyone else is limited to `/sub` and `/help`.
 
+## 7.6 Bridges (reverse tunnel into Iran)
+
+A **bridge** is a machine users inside Iran can actually reach — a domestic VPS,
+a box on an ISP that is not blocked — that forwards their traffic over a single
+outbound tunnel to the real server abroad. The exit never accepts an inbound
+connection from Iran, so blocking its address achieves nothing, and the bridge
+holds no credentials worth stealing.
+
+Four backends, all checked against their own binaries before being offered:
+
+| backend  | pinned  | notes |
+|----------|---------|-------|
+| Backhaul | v0.7.2  | built for this problem, most used inside Iran. **Raises the host's rmem_max/wmem_max on start**, which changes networking for everything else on that machine |
+| rathole  | v0.5.0  | small and strict — rejects an unknown key rather than ignoring it, so a typo fails at start instead of silently disabling a service |
+| frp      | v0.71.0 | most mature, and the only one that validates a config without starting (`frps verify -c`) |
+| wstunnel | v10.6.2 | tunnels over WebSocket/HTTP2, so the hop looks like ordinary web traffic and survives a CDN or HTTP proxy in the path |
+
+**All four carry UDP.** That is the property that decides whether Hysteria2,
+TUIC and WireGuard survive the hop, and it is not cosmetic: a TCP-only bridge
+drops exactly the protocols that work best against Iranian DPI, while the
+inbound, the bridge and the panel all keep reporting healthy. Every flag was set
+from the tool's own binary — see `internal/bridge/backends_verified.md` for the
+commands and their output.
+
+The panel manages the **exit** half only, and supervises it across restarts. The
+bridge box is by definition a machine the panel cannot reach, so its half is
+handed to you as a bundle: the download URL, the pinned SHA-256 to check it
+against before running it as root, the rendered config, and the command. Release
+assets are digest-pinned, and an asset whose digest does not match is refused
+rather than run.
+
+The shared token is generated for you and never appears in the bridge list. It
+is the whole of the tunnel's authentication — anyone holding it can attach to
+your exit.
+
+A UDP service also needs its port open **inbound on the bridge**. A firewall
+that allows only TCP produces a tunnel that reports connected and carries
+nothing; the bundle warns about this per service.
+
+---
+
 ## 8. ForgeDNS
 
 A DNS toolkit for anti-censorship: manage DNS providers (Cloudflare, ArvanCloud,

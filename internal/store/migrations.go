@@ -45,6 +45,7 @@ const (
 	migVNodeMTLS      uint64 = 15
 	migVInboundHosts  uint64 = 16
 	migVWGPeers       uint64 = 17
+	migVBridges       uint64 = 18
 )
 
 // migrations is the ordered registry. Entries are append-only: a shipped version
@@ -251,6 +252,17 @@ func migrations() []migrate.Migration {
 				"by public key, so they take the tunnel from each other in turn.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&WGPeer{}})
+				return err
+			},
+		},
+		{
+			Version: migVBridges,
+			Name:    "reverse_tunnel_bridges",
+			Rollback: "safe to drop, but every configured bridge is forgotten: the exit stops " +
+				"supervising its half and any inbound reached through it becomes unreachable " +
+				"until the bridge is recreated.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&Bridge{}})
 				return err
 			},
 		},

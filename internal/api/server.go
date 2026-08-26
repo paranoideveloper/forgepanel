@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/auth"
+	"github.com/forgepanel/forgepanel/internal/bridge"
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core"
@@ -64,6 +65,10 @@ type Server struct {
 	nodeCAOnce sync.Once
 	nodeCARef  *nodeca.CA
 	nodeCAErr  error
+
+	// The reverse-tunnel bridge supervisor, opened lazily.
+	bridgeOnce sync.Once
+	bridgeMgr  *bridge.Manager
 
 	// The per-client WireGuard peer manager, opened lazily.
 	wgOnce sync.Once
@@ -636,6 +641,12 @@ func (s *Server) routes() {
 			// panel issues — is exactly what a scraper should hold, and an open
 			// /metrics tells anyone who finds it how large the deployment is and
 			// when its nodes are struggling.
+			admin.GET("/bridges/backends", s.handleListBridgeBackends)
+			admin.GET("/bridges", s.handleListBridges)
+			admin.POST("/bridges", s.handleCreateBridge)
+			admin.GET("/bridges/:id/bundle", s.handleBridgeBundle)
+			admin.POST("/bridges/:id/restart", s.handleRestartBridge)
+			admin.DELETE("/bridges/:id", s.handleDeleteBridge)
 			admin.GET("/metrics", s.handleMetrics)
 
 			admin.GET("/tokens", s.handleListAPITokens)

@@ -72,6 +72,10 @@ func main() {
 			// Issue/renew the domain's cert ahead of the first visit so the panel is
 			// browser-trusted from the start instead of on the first domain handshake.
 			srv.PrimePanelCert()
+			// Bring every enabled reverse-tunnel bridge back up. The rows survive
+			// a restart; without this the tunnels do not, and every inbound
+			// reached through one goes dark until somebody notices.
+			srv.StartBridges()
 		}
 		serveErr = httpSrv.ServeTLS(ln, "", "")
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
