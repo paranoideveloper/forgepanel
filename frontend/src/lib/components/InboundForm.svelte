@@ -44,6 +44,17 @@
   onMount(async () => {
     try {
       schema = await apiFetch<Schema>('/protocols/schema');
+      // Seed BEFORE the next await.
+      //
+      // Awaiting /capabilities yields, and Svelte flushes the DOM in that gap.
+      // The selects mount while their bound values are still undefined, and a
+      // select binding with no matching option writes the FIRST option back
+      // into the bound value. applyDefaults then sees a value that is no longer
+      // undefined and skips the default entirely — so every iselect silently
+      // took its first option instead of its documented default, and nothing
+      // looked wrong because a value was always selected.
+      if (initial) prefillFrom(initial);
+      else applyDefaults();
       try {
         const caps = await apiFetch<{ port_hopping?: typeof hopCap }>('/capabilities');
         hopCap = caps.port_hopping ?? null;
@@ -52,8 +63,6 @@
         // as nothing rather than as a false reassurance.
         hopCap = null;
       }
-      if (initial) prefillFrom(initial);
-      else applyDefaults();
       schedulePreview();
     } catch (e: any) {
       loadError = e.message || tr('inbound.failed_to_load_protocol_schema');
@@ -194,15 +203,43 @@
     }
   }
 
+  let breakingOpen = $state(false);
+  let breakingChanges = $state<string[]>([]);
+
+  // applyBreaking re-sends the edit once the operator has seen what it breaks.
+  // keep_old leaves the current inbound alive but disabled, as a migration copy,
+  // so clients already using it are not cut off the moment the change lands.
+  async function applyBreaking(keepOld: boolean) {
+    if (!schema || !editId) return;
+    saving = true;
+    try {
+      const node = buildNode(schema, proto, transport, security, values, originalNode);
+      const q = keepOld ? '?confirm=true&keep_old=true' : '?confirm=true';
+      await apiFetch(`/admin/inbounds/${editId}${q}`, { method: 'PUT', body: JSON.stringify(node) });
+      showToast(tr('inbound.inbound_editid_updated', { editId }), 'success');
+      breakingOpen = false;
+      onSaved();
+    } catch (e: any) {
+      showToast(e.message || tr('inbound.failed_to_create_inbound'), 'error');
+    } finally {
+      saving = false;
+    }
+  }
+
   async function save() {
     if (!schema) return;
     saving = true;
     try {
       const node = buildNode(schema, proto, transport, security, values, editId ? originalNode : null);
       if (editId) {
-        // confirm=true accepts breaking changes (port/proto/transport/security)
-        // the safe-edit guard would otherwise refuse.
-        await apiFetch(`/admin/inbounds/${editId}?confirm=true`, { method: 'PUT', body: JSON.stringify(node) });
+        // NOT confirm=true unconditionally.
+        //
+        // The safe-edit guard exists to tell an operator that a change
+        // invalidates every client config already handed out — a changed port,
+        // protocol, transport or security. Hardcoding confirm=true answered
+        // that question for them, every time, without asking: the guard ran,
+        // found breaking changes, and was overruled before anyone saw it.
+        await apiFetch(`/admin/inbounds/${editId}`, { method: 'PUT', body: JSON.stringify(node) });
         showToast(tr('inbound.inbound_editid_updated', { editId }), 'success');
       } else {
         const created = await apiFetch<{ id: number }>('/admin/inbounds', { method: 'POST', body: JSON.stringify(node) });
@@ -210,6 +247,11 @@
       }
       onSaved();
     } catch (e: any) {
+      if (e?.code === 'breaking_edit') {
+        breakingChanges = (e.body?.breaking as string[]) ?? [];
+        breakingOpen = true;
+        return;
+      }
       showToast(e.message || tr('inbound.failed_to_create_inbound'), 'error');
     } finally {
       saving = false;
@@ -351,6 +393,27 @@
   </div>
 {/if}
 
+<!-- The safe-edit guard's answer, shown to the operator instead of being
+     overruled on their behalf. -->
+{#if breakingOpen}
+  <div class="breaking" data-testid="breaking-edit">
+    <h4>{tr('inbound.breaking_title')}</h4>
+    <p class="hint">{tr('inbound.breaking_explainer')}</p>
+    <ul>
+      {#each breakingChanges as b}<li>{b}</li>{/each}
+    </ul>
+    <div class="brow">
+      <button class="sm" data-testid="breaking-keep-old" onclick={() => applyBreaking(true)} disabled={saving}>
+        {tr('inbound.breaking_keep_old')}
+      </button>
+      <button class="sm danger" data-testid="breaking-apply" onclick={() => applyBreaking(false)} disabled={saving}>
+        {tr('inbound.breaking_apply')}
+      </button>
+      <button class="sm" onclick={() => (breakingOpen = false)}>{tr('inbound.breaking_cancel')}</button>
+    </div>
+  </div>
+{/if}
+
 <style>
   .hop-warning {
     display: flex;
@@ -388,6 +451,10 @@
   .with-gen { display: flex; gap: 8px; }
   .with-gen input { flex: 1; }
   .gen { background: #1A2230; color: #FF9A4A; border: 1px solid rgba(255,122,26,0.4); border-radius: 8px; padding: 0 12px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .breaking { margin-top: 14px; padding: 12px; border: 1px solid rgba(248,113,113,0.4); border-radius: 10px; background: rgba(248,113,113,0.06); }
+  .breaking h4 { margin: 0 0 6px; font-size: 14px; }
+  .breaking ul { margin: 8px 0; padding-inline-start: 20px; font-size: 13px; }
+  .brow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .help { font-size: 11px; color: rgba(255,255,255,0.4); }
   .detect { background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 0 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .detect:hover { background: rgba(255,255,255,0.12); }

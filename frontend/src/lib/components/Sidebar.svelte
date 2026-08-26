@@ -1,5 +1,21 @@
 <script lang="ts">
 	import { tr, locale, setLocale, locales } from '$lib/i18n';
+  import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
+
+  // Read from GET /api/version rather than a literal. It was pinned at v1.10.0
+  // while the product shipped v1.20.0 — a badge that is confidently wrong is
+  // worse than none, because a bug report quotes it.
+  let panelVersion = $state('');
+  onMount(async () => {
+    try {
+      const v = await apiFetch<{ version?: string }>('/version');
+      if (v?.version) panelVersion = v.version.startsWith('v') ? v.version : 'v' + v.version;
+    } catch (_) {
+      // A version we could not read is left blank; guessing one is how a wrong
+      // number ends up in a bug report.
+    }
+  });
   import { fly, fade } from 'svelte/transition';
 
   let { activeTab, mobileOpen = $bindable(false), onTabChange } = $props<{
@@ -51,7 +67,7 @@
     </div>
     <div class="brand-text">
       <h2>ForgePanel</h2>
-      <span class="version-tag">v1.10.0</span>
+      <span class="version-tag" data-testid="version">{panelVersion}</span>
     </div>
   </div>
 
