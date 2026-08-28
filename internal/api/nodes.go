@@ -18,6 +18,7 @@ import (
 
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
@@ -181,8 +182,8 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// can name a certificate path that exists on that machine. Empty from an
 		// older agent, and from anything that is not the shipped agent, so it
 		// falls back to the installer's default rather than failing.
-		DataDir string `json:"data_dir"`
-		SingboxStats      bool `json:"singbox_stats"`
+		DataDir      string `json:"data_dir"`
+		SingboxStats bool   `json:"singbox_stats"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -269,7 +270,16 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 			xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
 		}
 	}
-	c.JSON(200, gin.H{"xray_config": xrayCfg, "singbox_config": singboxCfg})
+	c.JSON(200, gin.H{"xray_config": xrayCfg, "singbox_config": singboxCfg,
+		// PORT HOPPING HAS TO REACH THE NODE TOO. A hysteria2 hop range is two
+		// things: a hint in the client's link, and firewall redirects that send
+		// the whole range at the listening port. The panel installed the
+		// redirects for its OWN inbounds and nothing installed them on a node —
+		// so an inbound assigned to a node handed clients a link advertising
+		// mport=30000-30100 and redirected none of those ports. The tunnel worked
+		// until the client hopped and then broke, which is worse than not
+		// offering the feature.
+		"port_hops": nodePortHops(specs)})
 }
 
 // nodeRoutingSpecs is routingSpecs narrowed to what can apply on one node.
@@ -465,6 +475,11 @@ Environment=BOOTSTRAP=$BOOTSTRAP
 Environment=TOKEN=$TOKEN
 Environment=PANEL_FINGERPRINT=$PANEL_FINGERPRINT
 ExecStart=/usr/local/bin/forgenode
+# CAP_NET_ADMIN installs the firewall redirects a hysteria2 hop range needs, and
+# CAP_NET_BIND_SERVICE lets an inbound use a port below 1024. Without the first,
+# a hop range on this node is accepted, advertised to clients in the share link,
+# and silently not redirected.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5
 [Install]
@@ -729,4 +744,23 @@ func nodeCertPaths(dataDir string) (certPath, keyPath string) {
 		d = defaultNodeDataDir
 	}
 	return filepath.Join(d, "certs", "self.crt"), filepath.Join(d, "certs", "self.key")
+}
+
+// nodePortHops maps each hysteria2 inbound's listen port to its hop range, for
+// the inbounds this node serves.
+//
+// Only hysteria2 has one: it is the protocol whose client hops, and a range on
+// anything else would install redirects nothing dials.
+func nodePortHops(specs []engine.InboundSpec) map[int]string {
+	out := map[int]string{}
+	for _, sp := range specs {
+		n := sp.Node
+		if n == nil || n.Protocol != model.ProtoHysteria2 || n.Hysteria2 == nil {
+			continue
+		}
+		if r := strings.TrimSpace(n.Hysteria2.PortHopping); r != "" {
+			out[n.Port] = r
+		}
+	}
+	return out
 }

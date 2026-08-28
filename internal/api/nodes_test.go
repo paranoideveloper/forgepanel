@@ -9,12 +9,16 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/core/engine"
+	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
@@ -511,5 +515,85 @@ func TestTheHeartbeatShipsASingboxConfigCarryingACertificate(t *testing.T) {
 	if !strings.Contains(hb.SingboxConfig, "/certs/self.crt") {
 		t.Errorf("the sing-box config names no certificate, so the node will refuse it:\n%s",
 			hb.SingboxConfig)
+	}
+}
+
+// A hysteria2 hop range is two things: a hint in the client's share link, and
+// firewall redirects that send the whole range at the port the core listens on.
+// The panel installed the redirects for its own inbounds and nothing installed
+// them on a node — so an inbound assigned to a node handed clients a link
+// advertising mport=30000-30100 with none of those ports redirected. The tunnel
+// worked until the client hopped, and then broke. Measured on a real node:
+// sing-box listening on the base port, nft ruleset empty.
+func TestTheHeartbeatShipsHysteria2HopRangesToTheNode(t *testing.T) {
+	s, token := adminAPI(t)
+
+	code, body := realPost(t, s, "/api/admin/nodes/enroll", token,
+		map[string]any{"name": "hopnode", "address": "203.0.113.30"})
+	if code != 201 {
+		t.Fatalf("enrol: %d %s", code, body)
+	}
+	var en struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(body), &en); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, b := realPost(t, s, "/api/admin/inbounds", token, map[string]any{
+		"protocol": "hysteria2", "address": "203.0.113.30", "port": 27443,
+		"remark": "hop", "security": map[string]any{"type": "tls"},
+		"hysteria2": map[string]any{
+			"up_mbps": 200, "down_mbps": 200,
+			"port_hopping": "30000-30100", "port_hop_interval": 30,
+		},
+		"enabled": true,
+	}); code != 201 && code != 200 {
+		t.Fatalf("create inbound: %d %s", code, b)
+	}
+
+	code, body = realPost(t, s, "/api/node/heartbeat", "", map[string]any{"token": en.Token})
+	if code != 200 {
+		t.Fatalf("heartbeat: %d %s", code, body)
+	}
+	var hb struct {
+		PortHops map[int]string `json:"port_hops"`
+	}
+	if err := json.Unmarshal([]byte(body), &hb); err != nil {
+		t.Fatal(err)
+	}
+	if got := hb.PortHops[27443]; got != "30000-30100" {
+		t.Fatalf("the node was sent port_hops %v; without the range it advertises a hop it cannot serve",
+			hb.PortHops)
+	}
+}
+
+// A range belongs only to the protocol whose client hops. Shipping one for
+// anything else installs redirects nothing dials.
+func TestOnlyHysteria2InboundsContributeAHopRange(t *testing.T) {
+	vless := &model.Node{Protocol: model.ProtoVLESS, Address: "a", Port: 443}
+	hy2 := &model.Node{Protocol: model.ProtoHysteria2, Address: "a", Port: 27443,
+		Hysteria2: &model.Hysteria2Options{PortHopping: "30000-30100"}}
+	plain := &model.Node{Protocol: model.ProtoHysteria2, Address: "a", Port: 28443,
+		Hysteria2: &model.Hysteria2Options{}}
+
+	got := nodePortHops([]engine.InboundSpec{{Node: vless}, {Node: hy2}, {Node: plain}})
+	if len(got) != 1 || got[27443] != "30000-30100" {
+		t.Fatalf("hops = %v, want only the hysteria2 inbound that has a range", got)
+	}
+}
+
+// The unit the installer writes must grant CAP_NET_ADMIN, or the agent cannot
+// install a redirect however correctly the panel describes it.
+func TestTheNodeUnitGrantsTheCapabilityPortHoppingNeeds(t *testing.T) {
+	s, _ := adminAPI(t)
+	req := httptest.NewRequest(http.MethodGet, "/node-install.sh", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("node-install.sh returned %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "CAP_NET_ADMIN") {
+		t.Error("the node unit grants no CAP_NET_ADMIN, so a hop range on this node can never be installed")
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/version"
 
 	"github.com/forgepanel/forgepanel/internal/cert"
+	"github.com/forgepanel/forgepanel/internal/core/porthop"
 )
 
 type NodeAgent struct {
@@ -52,6 +53,14 @@ type NodeAgent struct {
 	// a restart.
 	sbStatsOnce sync.Once
 	sbStats     bool
+	// hops installs the firewall redirects a hysteria2 hop range needs. The
+	// same implementation the panel uses for its own inbounds, so a range
+	// behaves identically whether it is served here or there.
+	hops *porthop.Manager
+	// hopsInstalled records whether this node currently owns any redirect, so an
+	// empty map from a panel with no hop ranges does not warn on every beat
+	// about a capability nobody asked for.
+	hopsInstalled bool
 	// engines is every core this node can supervise, keyed by name.
 	//
 	// A map rather than one xray field: the node ran exactly one process, so
@@ -100,6 +109,7 @@ func main() {
 		pin:            pin,
 		dataDir:        dataDir,
 		binMgr:         bm,
+		hops:           porthop.New(),
 		engines:        map[string]*engineProc{},
 	}
 	for _, spec := range engineSpecs() {
@@ -262,14 +272,48 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 		// "sing-box has nothing to serve here" — correct, because such a panel
 		// never assigned sing-box protocols to a node in the first place.
 		SingboxConfig string `json:"singbox_config"`
+		// PortHops maps a hysteria2 inbound's listen port to its hop range.
+		// Absent from an older panel, which simply means no hopping here.
+		PortHops map[int]string `json:"port_hops"`
 	}
 	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
+	a.applyPortHops(resp.PortHops)
 	return map[string]string{
 		"xray":     resp.XrayConfig,
 		"sing-box": resp.SingboxConfig,
 	}, nil
+}
+
+// applyPortHops installs the firewall redirects a hysteria2 hop range needs.
+//
+// A hop range is TWO things: a hint in the client's share link, and redirects
+// that send the whole range at the port the core listens on. The panel installed
+// the redirects for its own inbounds; nothing installed them on a node. So a
+// hysteria2 inbound assigned to a node handed out a link advertising
+// mport=30000-30100 and redirected none of those ports — the tunnel worked until
+// the client hopped and then broke. Measured on a real node: sing-box listening,
+// nft ruleset empty.
+//
+// Failures are reported and not fatal. The inbound still serves on its base
+// port, which is a working tunnel; refusing to apply the config over a missing
+// CAP_NET_ADMIN would take that away too. The panel surfaces the same
+// distinction for its own host through PortHopStatus.
+func (a *NodeAgent) applyPortHops(want map[int]string) {
+	if want == nil {
+		want = map[int]string{}
+	}
+	// Nothing to do and nothing installed: stay quiet rather than warning about
+	// a capability this node has never been asked to use.
+	if len(want) == 0 && !a.hopsInstalled {
+		return
+	}
+	if err := a.hops.Sync(want); err != nil {
+		fmt.Fprintf(os.Stderr, "forgenode: port hopping: %v\n", err)
+		return
+	}
+	a.hopsInstalled = len(want) > 0
 }
 
 // httpClient returns the client used for every panel call.
