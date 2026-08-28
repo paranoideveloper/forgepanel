@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +23,30 @@ import (
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/version"
 )
+
+// usageText is the whole command-line surface. The panel takes its
+// configuration from the data directory and the environment, not from flags, so
+// this is short by design — but it has to SAY that, or the absence of options
+// reads as a missing help text rather than as the design.
+const usageText = `forgepanel — proxy panel server
+
+Usage:
+  forgepanel              run the panel
+  forgepanel --version    print the version and exit
+  forgepanel --help       print this message and exit
+
+Configuration comes from the data directory and the environment, not from
+flags. The main ones:
+
+  FORGEPANEL_DATA_DIR     where the database, secrets and certificates live
+                          (default /var/lib/forgepanel)
+  FORGEPANEL_PORT         port to listen on (default 2053; also settable in the
+                          panel itself, which persists it to panel.json)
+  FORGEPANEL_TELEGRAM_TOKEN, FORGEPANEL_TELEGRAM_ADMINS
+                          bot credentials; both are also settable in the panel
+
+Administration is forgectl, not this binary: forgectl --help
+`
 
 func main() {
 	// --version before anything else: it must work without a data directory,
@@ -32,6 +57,25 @@ func main() {
 			fmt.Println(version.String("forgepanel"))
 			return
 		}
+		if a == "--help" || a == "-help" || a == "-h" || a == "help" {
+			fmt.Print(usageText)
+			return
+		}
+		// Anything else is REFUSED rather than ignored.
+		//
+		// This loop used to recognise --version and let everything else fall
+		// through to start(), so `forgepanel --help` started a panel listening
+		// on :2053 — as did `forgepanel --port 8080`, `forgepanel --dry-run`,
+		// and every typo. An operator checking usage on a live box brought up a
+		// second panel instead, and a flag that looked accepted did nothing.
+		// Found by running the binary on a real server; nothing in the test
+		// suite exercised argv.
+		if strings.HasPrefix(a, "-") {
+			fmt.Fprintf(os.Stderr, "forgepanel: unknown option %q\n\n%s", a, usageText)
+			os.Exit(2)
+		}
+		fmt.Fprintf(os.Stderr, "forgepanel: unexpected argument %q\n\n%s", a, usageText)
+		os.Exit(2)
 	}
 	cfg, srv, ln, err := start()
 	if err != nil {
