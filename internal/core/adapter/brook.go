@@ -183,6 +183,11 @@ func (a *brookAdapter) Reload(ctx context.Context) error {
 	return a.run.Sync(plan.Nodes(), plan.CertPath, plan.KeyPath)
 }
 
+// Reconcile re-applies the last plan. For this core Reload is already a
+// per-inbound reconcile that leaves healthy inbounds untouched, so this is the
+// same work under the name that says it is safe to run on a timer.
+func (a *brookAdapter) Reconcile(ctx context.Context) error { return a.Reload(ctx) }
+
 // HealthCheck reports the reconciler's process table. Brook processes are
 // launched detached and the table records the pid at start; it is not re-checked
 // against the OS, so a Brook process that has since died still appears here.

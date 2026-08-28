@@ -518,3 +518,33 @@ func (c *Controller) ForgetPresence(user string) {
 		c.presence.Forget(user)
 	}
 }
+
+// ReconcileCores re-applies the last plan on every core whose Reload is a cheap
+// per-inbound reconcile, and leaves the supervised cores alone.
+//
+// The supervised cores (xray, sing-box) already come back on their own: their
+// supervisor restarts them on crash. Nothing did that for the cores that manage
+// inbounds individually — reloadHook fires only after a mutation, so an
+// AmneziaWG interface that went down stayed down until an unrelated edit to an
+// unrelated inbound happened to trigger a reload.
+//
+// It returns what it touched, so a caller can log a repair rather than repairing
+// silently. A core with nothing to do returns no error and appears in no list.
+func (c *Controller) ReconcileCores(ctx context.Context) map[string]string {
+	if c == nil || c.registry == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, a := range c.registry.All() {
+		r, ok := a.(adapter.Reconciler)
+		if !ok {
+			// A supervised core. Reload here is a restart, and a restart every
+			// maintenance cycle is an outage every maintenance cycle.
+			continue
+		}
+		if err := r.Reconcile(ctx); err != nil {
+			out[a.Name()] = err.Error()
+		}
+	}
+	return out
+}

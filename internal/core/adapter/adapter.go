@@ -106,6 +106,27 @@ type CoreAdapter interface {
 	HealthCheck(ctx context.Context) (Health, error)
 }
 
+// Reconciler is the OPTIONAL capability of a core whose Reload is a cheap,
+// idempotent, per-inbound reconcile rather than a process restart.
+//
+// The distinction decides whether a core can be reconciled on a TIMER. Brook and
+// AmneziaWG bring individual inbounds back without touching the others, so
+// running that every few minutes costs nothing and repairs an inbound that went
+// away on its own. xray and sing-box cannot re-read a config, so their Reload is
+// a restart that drops every live connection — calling THAT on a timer would be
+// an outage every cycle.
+//
+// It exists because nothing reconciled these cores periodically. reloadHook
+// fires only after a mutation, so an AmneziaWG interface that went down — a
+// reloaded kernel module, a stray `awg-quick down`, a reboot race — stayed down
+// until some unrelated edit to some unrelated inbound happened to trigger a
+// reload. The panel reported it correctly as down and did nothing about it.
+type Reconciler interface {
+	// Reconcile re-applies the last plan, doing nothing for the parts already in
+	// the desired state. It must be safe to call repeatedly on a healthy core.
+	Reconcile(ctx context.Context) error
+}
+
 // MultiUserGenerator is the OPTIONAL capability of rendering a config that
 // carries one credential per assigned user, rather than the inbound's template
 // credential. Cores that authenticate users individually (xray, sing-box)

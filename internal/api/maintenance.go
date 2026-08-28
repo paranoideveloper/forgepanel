@@ -47,6 +47,11 @@ const (
 	// waking anyone for. Warning at 30 would fire on every healthy panel.
 	certExpiryWarn = 21 * 24 * time.Hour
 
+	// reconcileTimeout bounds one pass over the per-inbound cores. awg-quick
+	// shells out per interface, so a host with many tunnels is not instant, and a
+	// hung one must not stop the rest of the maintenance cycle.
+	reconcileTimeout = 2 * time.Minute
+
 	// dns01RenewTimeout bounds one DNS-01 renewal: an order, a TXT record, and
 	// waiting for it to propagate to the authoritative nameservers.
 	dns01RenewTimeout = 10 * time.Minute
@@ -67,7 +72,30 @@ func (s *Server) runMaintenance() {
 	s.refreshCleanIPs()
 	s.checkRotationPools()
 	s.sweepCertificates()
+	s.reconcileCores()
 	s.checkNodesReachable()
+}
+
+// reconcileCores brings back inbounds that went away on their own.
+//
+// Only the cores that reconcile per inbound — Brook, AmneziaWG — take part; the
+// supervised ones restart themselves on crash and their Reload is a restart that
+// would drop every live connection. See adapter.Reconciler.
+//
+// An AmneziaWG interface goes down for reasons that have nothing to do with the
+// panel: the kernel module is reloaded, someone runs awg-quick down, a reboot
+// races the unit. Before this the panel noticed, reported it correctly, and did
+// nothing, because the only thing that re-applied a plan was a mutation to some
+// other inbound.
+func (s *Server) reconcileCores() {
+	if s.engine == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), reconcileTimeout)
+	defer cancel()
+	for name, err := range s.engine.ReconcileCores(ctx) {
+		fmt.Fprintf(os.Stderr, "forgepanel: reconciling %s: %v\n", name, err)
+	}
 }
 
 // sweepCertificates warns about certificates approaching expiry, and renews the

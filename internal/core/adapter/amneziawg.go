@@ -181,6 +181,11 @@ func (a *awgAdapter) Reload(ctx context.Context) error {
 	return a.run.Sync(plan.Nodes())
 }
 
+// Reconcile re-applies the last plan. For this core Reload is already a
+// per-inbound reconcile that leaves healthy inbounds untouched, so this is the
+// same work under the name that says it is safe to run on a timer.
+func (a *awgAdapter) Reconcile(ctx context.Context) error { return a.Reload(ctx) }
+
 // HealthCheck reports the managed interfaces and kernel readiness. A host whose
 // module or tools are missing reports StateUnavailable rather than
 // StateCrashed: nothing died, the capability was never there, and the operator
