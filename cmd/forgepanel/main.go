@@ -237,7 +237,21 @@ func banner(cfg *config.Config, srv *api.Server) {
 		fmt.Printf("  Panel:  %s\n", srv.PublicURL())
 	}
 	fmt.Printf("  Listen: %s://%s:%d  (data: %s)\n", scheme, orAll(p.BindAddress), p.Port, cfg.DataDir)
-	if pa.Enabled {
+	if pa.Enabled && pa.Domain == "" {
+		// The single most common first-boot state on Railway, and the one that
+		// looks most like a broken deploy: the service is up, the logs are
+		// clean, and there is no address anywhere to open. Railway does not
+		// create a hostname on its own — somebody has to ask for one — and
+		// until they do there is no RAILWAY_PUBLIC_DOMAIN, so the panel cannot
+		// print a URL and cannot put a working address in a client link either.
+		// Say what to do, not just what is missing.
+		fmt.Printf("  PaaS:   %s detected, but this service has NO PUBLIC DOMAIN yet.\n", pa.Platform)
+		fmt.Println("          Railway does not create one automatically:")
+		fmt.Println("            Settings → Networking → Public Networking → Generate Domain")
+		fmt.Println("          The panel has no reachable address until then, and any inbound created")
+		fmt.Println("          now gets a placeholder one. Both are corrected on the restart that")
+		fmt.Println("          follows — generating a domain restarts the service by itself.")
+	} else if pa.Enabled {
 		// Say plainly what was detected and what it changed. A platform's log is
 		// often the only diagnostic surface an operator has there — no shell, no
 		// journal — so the mode being on has to be visible in it, or an inbound

@@ -190,7 +190,23 @@ func (s *Server) handleRealityQuickstart(c *gin.Context) {
 	if req.Dest != "" {
 		n.Security.Reality = &model.Reality{Dest: req.Dest}
 	}
+	// REALITY is the right domain-free default on a machine the panel owns, and
+	// impossible on a platform edge: it terminates TLS itself, on a TCP port of
+	// its own, and the platform provides neither. Seeding it there hands a new
+	// operator a "one-click working inbound" that cannot carry a byte — which is
+	// exactly what happened on the first Railway deploy, where the quickstart
+	// created a REALITY inbound and a Shadowsocks one and neither could work.
+	// The quickstart's promise is a connectable inbound with no inputs, so on a
+	// platform it makes the one shape that IS connectable there.
+	if s.cfg.PaaS().Enabled {
+		n = model.Node{
+			Protocol: model.ProtoVLESS, Remark: "websocket-quickstart",
+			Transport: model.Transport{Network: model.NetWS},
+			Security:  model.Security{Type: model.SecNone},
+		}
+	}
 	applyCreateDefaults(&n) // mints REALITY keypair, shortId, dest, uuid
+	s.applyPaaSAddressing(&n)
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -202,6 +218,12 @@ func (s *Server) handleRealityQuickstart(c *gin.Context) {
 	}
 	s.audit(c, "inbound.reality_quickstart", in.Remark)
 	s.startBackground(s.reloadEngines)
+	if s.cfg.PaaS().Enabled {
+		c.JSON(201, gin.H{"id": in.ID, "protocol": "vless", "security": "tls", "port": n.Port,
+			"note": "VLESS over WebSocket created. On this platform it is the transport the edge " +
+				"can carry; REALITY and raw-TCP protocols cannot be served here."})
+		return
+	}
 	c.JSON(201, gin.H{"id": in.ID, "protocol": "vless", "security": "reality", "port": port,
 		"note": "REALITY inbound created. It needs no domain or certificate."})
 }

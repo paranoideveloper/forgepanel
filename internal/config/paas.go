@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -132,8 +133,22 @@ func (p *PaaS) applyPaaS(panel *PanelSettings) {
 	}
 	panel.BindAddress = "0.0.0.0"
 	panel.Port = p.Port
-	if p.Domain != "" {
+	switch {
+	case p.Domain != "":
 		panel.Domain = p.Domain
+	case panel.Domain != "":
+		// The platform did not inject a hostname, but one is stored: either the
+		// operator typed it into the panel's own address settings, or the panel
+		// learned it from a request that arrived through the edge.
+		//
+		// This is not a corner case. A Railway service has no hostname until
+		// somebody clicks "Generate Domain", and RAILWAY_PUBLIC_DOMAIN does not
+		// reach a container that has not restarted since. So the ordinary
+		// sequence — deploy, then generate a domain — leaves the panel serving
+		// happily on a public URL while believing it has no address at all, and
+		// every link it writes is unusable. Trusting what is stored closes that
+		// window without the operator having to know any of it.
+		p.Domain = panel.Domain
 	}
 	// The edge holds the certificate. Asking for one here would start an ACME
 	// challenge for a hostname that resolves to the platform, not to us, and
@@ -148,4 +163,12 @@ func (p PaaS) PublicPortString() string {
 		return ""
 	}
 	return ":" + strconv.Itoa(p.PublicPort)
+}
+
+// SavePanelSettings persists panel settings to a data directory. It exists so
+// the API layer can record a setting it discovered at runtime — the public
+// hostname a platform failed to inject — without reaching into this package's
+// file layout.
+func SavePanelSettings(dataDir string, p *PanelSettings) error {
+	return savePanel(filepath.Join(dataDir, "panel.json"), p)
 }

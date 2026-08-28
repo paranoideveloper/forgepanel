@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -331,4 +334,120 @@ func paasNeedsPath(n *model.Node) bool {
 		return strings.TrimSpace(n.Transport.Path) == ""
 	}
 	return false
+}
+
+// ReconcilePaaSAddresses corrects stored inbounds that carry an address the
+// platform does not serve.
+//
+// A Railway service has no public hostname until somebody clicks "Generate
+// Domain", and RAILWAY_PUBLIC_DOMAIN does not exist before that. So the panel's
+// first boot is routinely in a state where PaaS mode is on and the domain is
+// unknown — and an inbound created in that window is stored with whatever
+// address the form defaulted to, which is not reachable from anywhere.
+//
+// Generating the domain afterwards used to fix nothing: the platform's variable
+// appeared, every NEW inbound came out right, and the ones made in the first ten
+// minutes kept pointing at an address that never worked, with nothing anywhere
+// saying so. The operator's own conclusion is that the panel is broken, and they
+// are not wrong.
+//
+// This runs at every start, so the deploy that first sees the domain is the one
+// that repairs them. It only ever rewrites the public identity — address, port,
+// TLS, host — and only for inbounds the platform can actually serve; it never
+// touches credentials, paths, or an inbound that is unservable here anyway.
+func (s *Server) ReconcilePaaSAddresses() int {
+	pa := s.cfg.PaaS()
+	if !pa.Enabled || pa.Domain == "" || s.db == nil {
+		return 0
+	}
+	ins, err := s.db.ListInbounds()
+	if err != nil {
+		return 0
+	}
+	fixed := 0
+	for i := range ins {
+		in := &ins[i]
+		n, err := in.Node()
+		if err != nil {
+			continue
+		}
+		if _, why := paasRoutable(n); why != "" {
+			continue // not servable here; leave it exactly as entered
+		}
+		if n.Address == pa.Domain && n.Port == pa.PublicPort && n.Security.Type == model.SecTLS {
+			continue // already correct
+		}
+		was := fmt.Sprintf("%s:%d", n.Address, n.Port)
+		s.applyPaaSAddressing(n)
+		if err := in.SetNode(n); err != nil {
+			continue
+		}
+		if err := s.db.SaveInbound(in); err != nil {
+			continue
+		}
+		fixed++
+		fmt.Printf("forgepanel: inbound %q pointed at %s, which this platform does not serve — corrected to %s:%d\n",
+			n.Remark, was, n.Address, n.Port)
+	}
+	if fixed > 0 {
+		s.startBackground(s.reloadEngines)
+	}
+	return fixed
+}
+
+// learnPaaSDomain records the hostname the panel is actually reached on, when
+// the platform did not tell it.
+//
+// The panel cannot write a usable client link, or even print its own URL,
+// without knowing its public hostname — and on Railway that hostname exists
+// (the operator is looking at it in the browser) while the variable that would
+// carry it does not, because the service has not restarted since the domain was
+// generated. Every request arriving through the edge carries it in Host.
+//
+// It learns only from an AUTHENTICATED ADMIN request. Host is client-supplied,
+// and a hostname learned from any passer-by is a hostname an outsider chooses:
+// it would end up in every link and QR code the panel hands out. An admin
+// necessarily reached the login page on the right hostname, so their session is
+// both the earliest trustworthy signal and a hard one to forge.
+//
+// Once stored it is ordinary panel configuration — visible on the panel-address
+// page and editable there — not hidden state.
+func (s *Server) learnPaaSDomain() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		pa := s.cfg.PaaS()
+		if !pa.Enabled || pa.Domain != "" || c.Writer.Status() >= 400 {
+			return
+		}
+		host := c.Request.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		// A hostname, not an address: the container's own private IP is exactly
+		// what this is here to stop the panel from advertising.
+		if host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+			return
+		}
+		if err := s.setPanelDomain(host); err != nil {
+			return
+		}
+		fmt.Printf("forgepanel: learned this service's public hostname from an administrator request: %s\n", host)
+		// Inbounds created while the hostname was unknown carry a placeholder
+		// address. Now that it is known they can be repaired, which is the whole
+		// point of learning it.
+		s.ReconcilePaaSAddresses()
+	}
+}
+
+// setPanelDomain persists the panel's domain and refreshes the running config.
+func (s *Server) setPanelDomain(host string) error {
+	p := s.cfg.Panel()
+	if p == nil {
+		return fmt.Errorf("no panel settings")
+	}
+	p.Domain = host
+	if err := config.SavePanelSettings(s.cfg.DataDir, p); err != nil {
+		return err
+	}
+	return s.cfg.ReloadPanel()
 }

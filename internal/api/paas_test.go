@@ -362,3 +362,220 @@ func TestTheServedHandlerIncludesTheFrontProxy(t *testing.T) {
 		t.Fatalf("Handler() does not front the inbounds: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// paasServerNoDomain is a Railway container BEFORE anybody clicked "Generate
+// Domain": the platform's environment says railway, and RAILWAY_PUBLIC_DOMAIN
+// does not exist yet. This is the state every Railway deploy starts in.
+func paasServerNoDomain(t *testing.T) *Server {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("FORGEPANEL_DATA", dir)
+	t.Setenv("RAILWAY_ENVIRONMENT", "production")
+	t.Setenv("PORT", "8080")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(dir + "/t.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return &Server{cfg: cfg, db: db, router: gin.New(),
+		signer: auth.NewSigner([]byte("test")), login: newLoginLimiter(), subs: newLoginLimiter()}
+}
+
+// Before a domain exists the panel must not print a URL that resolves nowhere.
+// The container's own private address is not somewhere anyone can reach, and an
+// operator handed one will spend real time trying.
+func TestWithNoPlatformDomainThePanelDoesNotInventAURL(t *testing.T) {
+	s := paasServerNoDomain(t)
+	got := s.PublicURL()
+	if strings.HasPrefix(got, "https://") {
+		t.Fatalf("panel printed a URL with no domain generated: %s", got)
+	}
+	if !strings.Contains(got, "no public domain") {
+		t.Fatalf("panel URL does not say what is missing: %s", got)
+	}
+}
+
+// An inbound created before the domain existed points somewhere unreachable.
+// Generating the domain has to repair it, or the operator is left with inbounds
+// that silently never worked and no indication which ones.
+func TestAnInboundMadeBeforeTheDomainExistedIsRepairedOnceItDoes(t *testing.T) {
+	// First boot: no domain. The inbound gets whatever address was submitted.
+	early := paasServerNoDomain(t)
+	n := &model.Node{
+		Remark: "made-too-early", Protocol: model.ProtoVLESS,
+		Address: "1.2.3.4", Port: 12345,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetWS, Path: "/early"},
+		Security:  model.Security{Type: model.SecNone},
+	}
+	early.applyPaaSAddressing(n) // a no-op with no domain, which is the point
+	if _, err := early.db.CreateInbound(n); err != nil {
+		t.Fatal(err)
+	}
+	if n.Address != "1.2.3.4" {
+		t.Fatalf("precondition failed: address was already corrected to %q", n.Address)
+	}
+
+	// The operator generates a domain; Railway restarts the service with
+	// RAILWAY_PUBLIC_DOMAIN now set. Same data directory, same database.
+	t.Setenv("RAILWAY_PUBLIC_DOMAIN", "generated-later.up.railway.app")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := &Server{cfg: cfg, db: early.db, router: gin.New(),
+		signer: auth.NewSigner([]byte("test")), login: newLoginLimiter(), subs: newLoginLimiter()}
+
+	if fixed := later.ReconcilePaaSAddresses(); fixed != 1 {
+		t.Fatalf("repaired %d inbounds, want 1", fixed)
+	}
+	ins, err := later.db.ListInbounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ins[0].Node()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Address != "generated-later.up.railway.app" || got.Port != 443 {
+		t.Errorf("inbound still points at %s:%d", got.Address, got.Port)
+	}
+	if got.Security.Type != model.SecTLS {
+		t.Errorf("inbound link says %s, but the client speaks TLS to the edge", got.Security.Type)
+	}
+	if got.Transport.Path != "/early" {
+		t.Errorf("repair changed the path to %q; credentials and paths must be left alone", got.Transport.Path)
+	}
+	if got.UUID != "b831381d-6324-4d53-ad4f-8cda48b30811" {
+		t.Error("repair changed the credential")
+	}
+
+	// Idempotent: a later restart must not keep rewriting rows that are correct.
+	if fixed := later.ReconcilePaaSAddresses(); fixed != 0 {
+		t.Errorf("a correct inbound was rewritten again (%d)", fixed)
+	}
+}
+
+// An inbound the platform cannot serve is not "repaired" into looking servable.
+func TestTheRepairSkipsInboundsThePlatformCannotServe(t *testing.T) {
+	s := paasServer(t)
+	hy2 := &model.Node{
+		Remark: "hy2", Protocol: model.ProtoHysteria2, Address: "5.6.7.8", Port: 8443,
+		Password: "pw", Security: model.Security{Type: model.SecTLS, ServerName: "x"},
+	}
+	if _, err := s.db.CreateInbound(hy2); err != nil {
+		t.Fatal(err)
+	}
+	if fixed := s.ReconcilePaaSAddresses(); fixed != 0 {
+		t.Fatalf("rewrote %d unservable inbounds; that dresses them up as configured", fixed)
+	}
+	ins, _ := s.db.ListInbounds()
+	got, _ := ins[0].Node()
+	if got.Address != "5.6.7.8" {
+		t.Errorf("unservable inbound was moved to %s", got.Address)
+	}
+}
+
+// The wiring, not the function. ReconcilePaaSAddresses could be correct and
+// tested and never called, and every test above would still pass while a real
+// deploy's inbounds stayed broken after the domain appeared — the exact shape of
+// defect this codebase produces most often.
+func TestStartupRepairsPlatformAddresses(t *testing.T) {
+	src, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	call := strings.Index(body, "s.ReconcilePaaSAddresses()")
+	if call < 0 {
+		t.Fatal("nothing calls ReconcilePaaSAddresses at startup: an inbound created before the " +
+			"platform domain existed would stay pointed at an unreachable address forever")
+	}
+	if reload := strings.Index(body, "s.startBackground(s.reloadEngines)"); reload > 0 && call > reload {
+		t.Fatal("the repair runs after the engine reload, so the cores get the stale addresses")
+	}
+	if !strings.Contains(body, "s.learnPaaSDomain()") {
+		t.Fatal("no admin route learns the public hostname, so a platform that does not inject " +
+			"one leaves every generated link unusable")
+	}
+}
+
+// A platform that never injects its hostname must not leave the panel stuck.
+// The panel is reached ON that hostname, so an authenticated admin request
+// carries it, and learning it there is what unblocks every link.
+func TestThePanelLearnsItsHostnameFromAnAdminRequest(t *testing.T) {
+	s := paasServerNoDomain(t)
+	if s.cfg.PaaS().Domain != "" {
+		t.Fatal("precondition: the platform should not have supplied a domain")
+	}
+	r := gin.New()
+	r.GET("/api/admin/ping", s.learnPaaSDomain(), func(c *gin.Context) { c.String(200, "ok") })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/ping", nil)
+	req.Host = "forgepanel-production.up.railway.app"
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	if got := s.cfg.PaaS().Domain; got != "forgepanel-production.up.railway.app" {
+		t.Fatalf("panel did not learn its hostname: %q", got)
+	}
+	// It must survive a restart, or it is relearned on every boot and the window
+	// where links are wrong reopens each time.
+	reloaded, err := config.LoadFromDataDir(s.cfg.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Panel().Domain != "forgepanel-production.up.railway.app" {
+		t.Fatalf("the learned hostname was not persisted: %q", reloaded.Panel().Domain)
+	}
+}
+
+// Host is client-supplied. A hostname learned from an unauthenticated request is
+// a hostname an outsider picks, and it would end up in every link the panel
+// hands out — so a bare IP or a nonsense Host is refused.
+func TestThePanelDoesNotLearnAnAddressAsItsHostname(t *testing.T) {
+	for _, host := range []string{"10.202.65.232:8080", "127.0.0.1", "localhost", ""} {
+		s := paasServerNoDomain(t)
+		r := gin.New()
+		r.GET("/api/admin/ping", s.learnPaaSDomain(), func(c *gin.Context) { c.String(200, "ok") })
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/ping", nil)
+		req.Host = host
+		r.ServeHTTP(httptest.NewRecorder(), req)
+		if got := s.cfg.PaaS().Domain; got != "" {
+			t.Errorf("panel adopted %q as its public hostname from Host %q", got, host)
+		}
+	}
+}
+
+// The one-click quickstart must produce something that works where it runs. On
+// a platform edge REALITY cannot: it terminates TLS itself on a TCP port of its
+// own, and the platform provides neither.
+func TestTheQuickstartMakesAServableInboundOnAPlatform(t *testing.T) {
+	s := paasServer(t)
+	r := gin.New()
+	r.POST("/q", s.handleRealityQuickstart)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/q", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("quickstart failed: %d %s", rec.Code, rec.Body.String())
+	}
+	ins, err := s.db.ListInbounds()
+	if err != nil || len(ins) != 1 {
+		t.Fatalf("inbounds=%d err=%v", len(ins), err)
+	}
+	n, err := ins[0].Node()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, why := paasRoutable(n); why != "" {
+		t.Fatalf("the quickstart made an inbound this platform cannot serve: %s", why)
+	}
+	if n.Address != "forge-test.up.railway.app" || n.Port != 443 {
+		t.Errorf("quickstart inbound points at %s:%d", n.Address, n.Port)
+	}
+}

@@ -215,6 +215,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	}
 	s.router.Use(gin.Recovery(), securityHeaders())
 	s.routes()
+	// A platform hostname that appeared after an inbound was created leaves that
+	// inbound pointing somewhere unreachable. Repair those BEFORE the cores are
+	// handed the list, or this boot still serves the stale addresses and the
+	// operator has to restart a second time to get a working config.
+	s.ReconcilePaaSAddresses()
 	// Best-effort: bring the engines up for already-persisted inbounds. A fresh
 	// or offline panel simply has nothing to start yet.
 	s.startBackground(s.reloadEngines)
@@ -421,8 +426,15 @@ func (s *Server) PublicURL() string {
 	// the outside world never dials: the edge listens on 443 of the platform's
 	// hostname and forwards inward. Printing the bound port here would hand the
 	// operator a URL to their own container's private port.
-	if pa := s.cfg.PaaS(); pa.Enabled && pa.Domain != "" {
-		return "https://" + pa.Domain + pa.PublicPortString() + p.AdminPath
+	if pa := s.cfg.PaaS(); pa.Enabled {
+		if pa.Domain != "" {
+			return "https://" + pa.Domain + pa.PublicPortString() + p.AdminPath
+		}
+		// No domain generated yet. Falling through would print the container's
+		// own private address — a URL that resolves nowhere and that an operator
+		// will reasonably spend an hour trying to reach. The admin path is still
+		// the useful half, so give that and name what is missing.
+		return "(no public domain yet — generate one on the platform) " + p.AdminPath
 	}
 	// The panel always serves TLS (self-signed with no domain, ACME with one).
 	scheme, defPort := "https", 443
@@ -563,7 +575,7 @@ func (s *Server) routes() {
 			// apiTokenAuth runs FIRST and only claims requests whose bearer value
 			// is shaped like one of our tokens; everything else falls through to
 			// the JWT middleware untouched.
-			admin := api.Group("/admin", s.apiTokenAuth(), s.signer.Middleware(), s.authz())
+			admin := api.Group("/admin", s.apiTokenAuth(), s.signer.Middleware(), s.authz(), s.learnPaaSDomain())
 			admin.GET("/me", s.handleMe)
 			admin.GET("/inbounds", s.handleListInbounds)
 			// portCollisionGuard runs BEFORE the handler writes the row. Two
