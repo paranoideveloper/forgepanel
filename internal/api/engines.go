@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -152,7 +153,7 @@ func (s *Server) reloadEngines() {
 	if s.isClosed() || s.engine == nil {
 		return
 	}
-	specs := s.enabledInboundSpecs()
+	specs := s.localInboundSpecs()
 	bundle, _ := s.engine.ReloadSpecs(specs)
 	// The bundle used to be discarded. It carries the list of inbounds no core
 	// could serve, so throwing it away meant an operator created an inbound, the
@@ -210,6 +211,52 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 }
 
 // enabledInboundSpecsForNodeAddress returns inbound specs filtered for a specific node address.
+// localInboundSpecs is the panel's OWN share: everything except the inbounds
+// that belong to an enrolled node.
+//
+// The node side has always had enabledInboundSpecsForNodeAddress; the panel side
+// had no filter at all and served the whole list, including inbounds bound to a
+// node's address. A core cannot bind another machine's IP, so xray died on
+// startup —
+//
+//	failed to listen TCP on 25443 > listen tcp 94.183.174.37:25443:
+//	bind: cannot assign requested address
+//
+// — and because a core refuses a config as a WHOLE, one node-bound inbound took
+// down every inbound the panel served itself. Measured on a live panel: 270
+// restart attempts, xray never up, and every locally-created inbound dead while
+// the UI showed them all enabled.
+//
+// An inbound with no address, 0.0.0.0 or :: is served here: that is the default
+// a locally-created inbound gets, and it means "this machine".
+func (s *Server) localInboundSpecs() []engine.InboundSpec {
+	all := s.enabledInboundSpecs()
+	if s.db == nil {
+		return all
+	}
+	nodes, err := s.db.ListNodes()
+	if err != nil || len(nodes) == 0 {
+		return all
+	}
+	remote := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if a := strings.TrimSpace(n.Address); a != "" {
+			remote[a] = true
+		}
+	}
+	out := make([]engine.InboundSpec, 0, len(all))
+	for _, sp := range all {
+		if sp.Node == nil {
+			continue
+		}
+		a := strings.TrimSpace(sp.Node.Address)
+		if a == "" || a == "0.0.0.0" || a == "::" || !remote[a] {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
 func (s *Server) enabledInboundSpecsForNodeAddress(addr string) []engine.InboundSpec {
 	all := s.enabledInboundSpecs()
 	if addr == "" {
