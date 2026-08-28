@@ -99,9 +99,12 @@ type Counters struct {
 
 // Server is the authoritative DNS tunnel listener.
 type Server struct {
-	mu       sync.RWMutex
-	zones    []*Zone
-	udp      *dns.Server
+	mu    sync.RWMutex
+	zones []*Zone
+	udp   *dns.Server
+	// shutdown records that Shutdown has been called, so a ListenAndServe that
+	// loses the race does not bind a listener nothing holds a reference to.
+	shutdown bool
 	rrl      *rrl
 	counters Counters
 }
@@ -489,17 +492,39 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
 }
 
 // ListenAndServe starts the UDP listener on addr (e.g. ":53").
+//
+// ListenAndServe is called on its own goroutine and Shutdown from whoever is
+// stopping the controller, so the handle they share is written under the lock.
+// Without that the two race on s.udp — and worse, Shutdown could read a nil
+// handle a nanosecond before ListenAndServe set it, return nil, and leave a
+// listener bound to :53 that nothing has a reference to any more. The next
+// start then fails with "address already in use" from a process that believes
+// it released the port.
 func (s *Server) ListenAndServe(addr string) error {
-	s.udp = &dns.Server{Addr: addr, Net: "udp", Handler: s}
-	return s.udp.ListenAndServe()
+	srv := &dns.Server{Addr: addr, Net: "udp", Handler: s}
+	s.mu.Lock()
+	if s.shutdown {
+		// Shutdown won the race. Do not bind: nothing will ever stop it.
+		s.mu.Unlock()
+		return nil
+	}
+	s.udp = srv
+	s.mu.Unlock()
+	return srv.ListenAndServe()
 }
 
-// Shutdown stops the listener.
+// Shutdown stops the listener. Safe to call before ListenAndServe, and more than
+// once.
 func (s *Server) Shutdown() error {
-	if s.udp != nil {
-		return s.udp.Shutdown()
+	s.mu.Lock()
+	s.shutdown = true
+	srv := s.udp
+	s.udp = nil
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
 	}
-	return nil
+	return srv.Shutdown()
 }
 
 // Zones returns a snapshot of registered zone names.
