@@ -177,6 +177,11 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		DiskTotalMB       int  `json:"disk_total_mb"`
 		TCPConns          int  `json:"tcp_conns"`
 		CoreUptimeSec     int  `json:"core_uptime_sec"`
+		// DataDir is where the node keeps its state, so the config built for it
+		// can name a certificate path that exists on that machine. Empty from an
+		// older agent, and from anything that is not the shipped agent, so it
+		// falls back to the installer's default rather than failing.
+		DataDir string `json:"data_dir"`
 		SingboxStats      bool `json:"singbox_stats"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -232,7 +237,21 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	// panel. The rules are scoped to the inbounds this node actually serves —
 	// see nodeRoutingSpecs.
 	outs, rules := s.nodeRoutingSpecs(specs)
-	b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", outs, rules)
+	// THE NODE NEEDS A SERVER CERTIFICATE. These two arguments were "" and "",
+	// so every TLS-terminating inbound assigned to a node was built with no
+	// certificate and refused by the core on that node:
+	//
+	//	FATAL initialize inbound[0]: missing certificate
+	//
+	// which is every hysteria2, TUIC, AnyTLS and ShadowTLS inbound — the whole
+	// sing-box protocol family — plus any TLS xray inbound. They were accepted
+	// by the panel, shown in the UI, delivered to the node, and rejected there
+	// every ten seconds forever. Measured on a real node, not inferred.
+	//
+	// The paths are on the NODE's filesystem; the agent materialises the
+	// certificate at exactly this location before it applies any config.
+	certPath, keyPath := nodeCertPaths(req.DataDir)
+	b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, outs, rules)
 	if err != nil {
 		// A routing table that renders for the panel can still be refused for a
 		// node: RenderRules rejects a rule whose outbound tag the node's own
@@ -241,7 +260,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// fail — a node with no operator rules still serves its own inbounds,
 		// while the LastBundle fallback below would hand it the PANEL's config,
 		// whose inbounds belong to a different machine.
-		b, err = engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", nil, nil)
+		b, err = engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, nil, nil)
 	}
 	if err == nil && b != nil {
 		xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
@@ -688,4 +707,26 @@ func singboxIfServing(b *engine.Bundle) string {
 		return ""
 	}
 	return string(b.Singbox)
+}
+
+// defaultNodeDataDir is where the node installer puts a node's state. It is the
+// fallback when an agent does not report its own, which is any agent older than
+// the certificate fix.
+const defaultNodeDataDir = "/var/lib/forgepanel"
+
+// nodeCertPaths names the server certificate on the NODE's filesystem.
+//
+// It is the same layout the panel uses for itself (<data>/certs/self.{crt,key}),
+// so an operator reading either machine finds the same thing in the same place,
+// and the agent creates it with the same helper the panel does.
+//
+// The panel never ships its own key to a node: a node terminating TLS with the
+// panel's private key would mean one stolen node compromises the panel and every
+// other node with it.
+func nodeCertPaths(dataDir string) (certPath, keyPath string) {
+	d := strings.TrimSpace(dataDir)
+	if d == "" {
+		d = defaultNodeDataDir
+	}
+	return filepath.Join(d, "certs", "self.crt"), filepath.Join(d, "certs", "self.key")
 }

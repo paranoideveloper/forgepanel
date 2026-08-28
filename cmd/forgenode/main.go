@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +27,8 @@ import (
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/singboxapi"
 	"github.com/forgepanel/forgepanel/internal/version"
+
+	"github.com/forgepanel/forgepanel/internal/cert"
 )
 
 type NodeAgent struct {
@@ -161,11 +164,34 @@ func (a *NodeAgent) step() {
 // prevent. The one exception is a panel that sent nothing at all — see
 // heartbeat's note on why that is not the same as "serve nothing".
 func (a *NodeAgent) applyConfigs(cfgs map[string]string) {
+	// A server certificate has to exist before a config that references one is
+	// handed to a core. The panel names <dataDir>/certs/self.{crt,key} for every
+	// TLS-terminating inbound it assigns here; if the file is not there, sing-box
+	// refuses the whole config with "initialize inbound[0]: missing certificate"
+	// and the node serves nothing at all — not just the TLS inbounds.
+	//
+	// Generated locally, never shipped from the panel: a node holding the panel's
+	// private key would mean one stolen node compromises the panel and every
+	// other node with it. Self-signed is the right default for the protocols
+	// that need it — Hysteria2 and TUIC clients pin or accept it, and a node with
+	// a real domain can have a real certificate dropped in at the same path.
+	if err := a.ensureServerCert(); err != nil {
+		fmt.Fprintf(os.Stderr, "forgenode: could not prepare the TLS certificate: %v\n", err)
+		// Not fatal: the plaintext inbounds on this node still work, and failing
+		// the whole apply would take them down over a certificate they never
+		// needed.
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for name, e := range a.engines {
 		e.apply(a.dataDir, cfgs[name])
 	}
+}
+
+// ensureServerCert materialises the node's own TLS certificate, once.
+func (a *NodeAgent) ensureServerCert() error {
+	_, _, err := cert.EnsureSelfSigned(filepath.Join(a.dataDir, "certs"))
+	return err
 }
 
 func (a *NodeAgent) register() error {
@@ -213,6 +239,14 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 		"traffic_cumulative": true,
 		"disk_used_mb":       diskUsed, "disk_total_mb": diskTotal,
 		"tcp_conns": conns, "core_uptime_sec": coreUptime,
+		// Where this node keeps its state, so the panel can name a certificate
+		// path that exists HERE. Without it the panel built every node's config
+		// with an empty certificate path and every TLS-terminating inbound —
+		// hysteria2, TUIC, AnyTLS, ShadowTLS, and any TLS xray inbound — was
+		// refused by sing-box with "initialize inbound[0]: missing certificate",
+		// forever, on every node. An older agent omits this and the panel falls
+		// back to the default path, which is what the installer configures.
+		"data_dir": a.dataDir,
 		// Whether THIS node's sing-box can report per-user counters.
 		//
 		// The panel cannot know: the capability is a property of the binary

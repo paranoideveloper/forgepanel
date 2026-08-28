@@ -432,3 +432,84 @@ func writeSelfSignedPanelCert(t *testing.T, s *Server) {
 		t.Fatal(err)
 	}
 }
+
+// Every TLS-terminating inbound assigned to a node was built with an EMPTY
+// certificate path, so the core on that node refused the entire config:
+//
+//	FATAL initialize inbound[0]: missing certificate
+//
+// That is every hysteria2, TUIC, AnyTLS and ShadowTLS inbound — the whole
+// sing-box protocol family — plus any TLS xray inbound. The panel accepted them,
+// listed them, delivered them, and the node rejected them every ten seconds
+// forever while reporting itself healthy. Measured on a real node.
+func TestANodeIsGivenACertificatePathItCanActuallyUse(t *testing.T) {
+	certPath, keyPath := nodeCertPaths("/var/lib/forgepanel")
+	if certPath == "" || keyPath == "" {
+		t.Fatal("a node is given no certificate path, so every TLS inbound on it is refused")
+	}
+	// Same layout the panel uses for itself, so an operator finds the same thing
+	// in the same place on either machine.
+	if !strings.HasSuffix(certPath, "/certs/self.crt") || !strings.HasSuffix(keyPath, "/certs/self.key") {
+		t.Errorf("cert=%q key=%q, want the panel's own <data>/certs/self.{crt,key} layout", certPath, keyPath)
+	}
+	// An agent that does not report its data directory must still get a usable
+	// path rather than an empty one.
+	c2, k2 := nodeCertPaths("")
+	if c2 != filepath.Join(defaultNodeDataDir, "certs", "self.crt") || k2 == "" {
+		t.Errorf("an agent reporting no data dir got cert=%q key=%q", c2, k2)
+	}
+	// And a custom data directory has to be honoured, or the path names a file
+	// that is not there on that machine.
+	if c3, _ := nodeCertPaths("/srv/fp"); c3 != "/srv/fp/certs/self.crt" {
+		t.Errorf("a custom data dir produced %q", c3)
+	}
+}
+
+// The end-to-end shape: a sing-box inbound assigned to a node must arrive with
+// a certificate path in it. Asserting on nodeCertPaths alone would pass with the
+// heartbeat still calling BuildMultiFor("", "").
+func TestTheHeartbeatShipsASingboxConfigCarryingACertificate(t *testing.T) {
+	s, token := adminAPI(t)
+
+	code, body := realPost(t, s, "/api/admin/nodes/enroll", token,
+		map[string]any{"name": "n1", "address": "203.0.113.20"})
+	if code != 201 {
+		t.Fatalf("enrol: %d %s", code, body)
+	}
+	var en struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(body), &en); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hysteria2 inbound on that node's address: TLS-terminating, sing-box.
+	if code, b := realPost(t, s, "/api/admin/inbounds", token, map[string]any{
+		"protocol": "hysteria2", "address": "203.0.113.20", "port": 26443,
+		"remark": "hy2", "security": map[string]any{"type": "tls"},
+		"hysteria2": map[string]any{"up_mbps": 100, "down_mbps": 100},
+		"enabled":   true,
+	}); code != 201 && code != 200 {
+		t.Fatalf("create inbound: %d %s", code, b)
+	}
+
+	code, body = realPost(t, s, "/api/node/heartbeat", "", map[string]any{
+		"token": en.Token, "data_dir": "/var/lib/forgepanel",
+	})
+	if code != 200 {
+		t.Fatalf("heartbeat: %d %s", code, body)
+	}
+	var hb struct {
+		SingboxConfig string `json:"singbox_config"`
+	}
+	if err := json.Unmarshal([]byte(body), &hb); err != nil {
+		t.Fatal(err)
+	}
+	if hb.SingboxConfig == "" {
+		t.Fatal("the node was sent no sing-box config for its hysteria2 inbound")
+	}
+	if !strings.Contains(hb.SingboxConfig, "/certs/self.crt") {
+		t.Errorf("the sing-box config names no certificate, so the node will refuse it:\n%s",
+			hb.SingboxConfig)
+	}
+}
