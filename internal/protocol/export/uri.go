@@ -340,6 +340,21 @@ func ssURI(n *model.Node) string {
 			plugin += ";" + n.SSPlugin.Opts
 		}
 		q.Set("plugin", plugin)
+	} else if n.Transport.Network != "" && n.Transport.Network != model.NetTCP {
+		// Shadowsocks carried over one of the v2ray transports, which the
+		// cores serve natively rather than through a plugin. The link has to
+		// SAY so: without these the URI describes a plain TCP Shadowsocks
+		// server on the same host and port, a client dials exactly that, and
+		// the connection fails with nothing to point at — while the panel
+		// shows the inbound serving, because it is.
+		//
+		// Found on a Railway deployment, where Shadowsocks over WebSocket ran
+		// correctly and its exported link could not connect to it.
+		//
+		// The plugin form wins when one is configured: that is a different
+		// deployment (an external plugin process) and its own parameters
+		// already describe the transport.
+		transportSecurityParams(n, q)
 	}
 	if s := encodeQuery(q); s != "" {
 		uri += "?" + s

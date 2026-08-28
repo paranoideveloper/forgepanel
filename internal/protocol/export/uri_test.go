@@ -63,3 +63,70 @@ func TestRealityLinkKeepsAnAcceptedServerName(t *testing.T) {
 		t.Errorf("the operator's own server name was replaced:\n%s", uri)
 	}
 }
+
+// Shadowsocks over a v2ray transport must say so in its link.
+//
+// The exporter used to emit transport parameters only for the external-plugin
+// form, so a Shadowsocks inbound served over WebSocket exported a URI
+// describing a plain TCP Shadowsocks server on the same host and port. A client
+// dialled exactly that and failed, while the panel showed the inbound serving —
+// because it was. Found on a Railway deployment, where every inbound shares one
+// port and the transport is the only thing that distinguishes them, so a link
+// missing the path could not possibly connect.
+func TestShadowsocksOverAWebTransportCarriesItInTheLink(t *testing.T) {
+	for _, net := range []model.Network{model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP} {
+		n := &model.Node{
+			Protocol: model.ProtoShadowsocks, Address: "edge.example.com", Port: 443,
+			Method: "2022-blake3-aes-128-gcm", Password: "hzQTq6OOqLCwxtin5RJ6jg==",
+			Transport: model.Transport{Network: net, Path: "/tunnel", Host: "edge.example.com"},
+			Security:  model.Security{Type: model.SecTLS, ServerName: "edge.example.com"},
+		}
+		uri, err := URI(n)
+		if err != nil {
+			t.Fatalf("%s: %v", net, err)
+		}
+		for _, want := range []string{"type=" + string(net), "path=%2Ftunnel", "security=tls"} {
+			if !strings.Contains(uri, want) {
+				t.Errorf("%s link is missing %q, so a client cannot reach the inbound: %s", net, want, uri)
+			}
+		}
+	}
+}
+
+// A plain TCP Shadowsocks link must stay the bare SIP002 form. Adding query
+// parameters to it would be noise at best, and some clients are strict.
+func TestPlainShadowsocksKeepsItsBareLink(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoShadowsocks, Address: "1.2.3.4", Port: 8388,
+		Method: "aes-256-gcm", Password: "pw",
+		Transport: model.Transport{Network: model.NetTCP},
+		Security:  model.Security{Type: model.SecNone},
+	}
+	uri, err := URI(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(uri, "?") {
+		t.Errorf("a plain shadowsocks link grew a query string: %s", uri)
+	}
+}
+
+// The external-plugin form describes its own transport and must win.
+func TestAShadowsocksPluginLinkIsNotOverwrittenByTransportParams(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoShadowsocks, Address: "1.2.3.4", Port: 8388,
+		Method: "aes-256-gcm", Password: "pw",
+		Transport: model.Transport{Network: model.NetWS, Path: "/x"},
+		SSPlugin:  &model.SSPluginOptions{Name: "v2ray-plugin", Opts: "tls;host=example.com"},
+	}
+	uri, err := URI(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(uri, "plugin=v2ray-plugin") {
+		t.Fatalf("plugin lost: %s", uri)
+	}
+	if strings.Contains(uri, "type=ws") {
+		t.Errorf("native transport params were added alongside a plugin: %s", uri)
+	}
+}
