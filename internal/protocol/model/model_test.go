@@ -1057,3 +1057,42 @@ func TestContainsStr(t *testing.T) {
 		t.Error("containsStr on nil must be false")
 	}
 }
+
+// REALITY decides on the SERVER's terms: the inbound accepts a ClientHello only
+// if its SNI is one of reality.serverNames. A share link built from
+// Security.ServerName when that name is not in the list advertises an SNI the
+// server refuses, and the client reports "reality verification failed" while the
+// inbound is perfectly healthy.
+//
+// Measured on a live panel: an imported inbound carried
+// server_name=slashdot.org with serverNames=[www.cloudflare.com]. The link the
+// panel handed out could not connect; the same client with www.cloudflare.com
+// connected immediately.
+func TestRealitySNIComesFromWhatTheServerWillAccept(t *testing.T) {
+	n := &Node{
+		Protocol: ProtoVLESS, Address: "203.0.113.5", Port: 443,
+		Security: Security{
+			Type: SecReality, ServerName: "slashdot.org",
+			Reality: &Reality{ServerNames: []string{"www.cloudflare.com"}, PublicKey: "pk"},
+		},
+	}
+	if got := n.SNI(); got != "www.cloudflare.com" {
+		t.Errorf("SNI() = %q; the server only accepts %v, so that link cannot connect",
+			got, n.Security.Reality.ServerNames)
+	}
+
+	// An SNI that IS in the list is the operator's choice and must be kept —
+	// several borrowed names is the normal REALITY setup.
+	n.Security.ServerName = "www.microsoft.com"
+	n.Security.Reality.ServerNames = []string{"www.cloudflare.com", "www.microsoft.com"}
+	if got := n.SNI(); got != "www.microsoft.com" {
+		t.Errorf("SNI() = %q, want the operator's own choice when the server accepts it", got)
+	}
+
+	// Non-REALITY is untouched: TLS has no serverNames list to disagree with.
+	tls := &Node{Protocol: ProtoVLESS, Address: "203.0.113.5", Port: 443,
+		Security: Security{Type: SecTLS, ServerName: "panel.example.com"}}
+	if got := tls.SNI(); got != "panel.example.com" {
+		t.Errorf("a TLS node's SNI became %q", got)
+	}
+}

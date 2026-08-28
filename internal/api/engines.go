@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -211,47 +212,85 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 }
 
 // enabledInboundSpecsForNodeAddress returns inbound specs filtered for a specific node address.
-// localInboundSpecs is the panel's OWN share: everything except the inbounds
-// that belong to an enrolled node.
+// localInboundSpecs is the panel's OWN share: the inbounds this machine can
+// actually bind.
 //
-// The node side has always had enabledInboundSpecsForNodeAddress; the panel side
-// had no filter at all and served the whole list, including inbounds bound to a
-// node's address. A core cannot bind another machine's IP, so xray died on
-// startup —
+// A core cannot bind an address that does not exist on the host, and it refuses
+// a config as a WHOLE — so ONE unbindable inbound stops the panel's core from
+// starting and takes every other inbound with it:
 //
-//	failed to listen TCP on 25443 > listen tcp 94.183.174.37:25443:
-//	bind: cannot assign requested address
+//	Failed to start: app/proxyman/inbound: failed to listen TCP on 25443 >
+//	listen tcp 94.183.174.37:25443: bind: cannot assign requested address
 //
-// — and because a core refuses a config as a WHOLE, one node-bound inbound took
-// down every inbound the panel served itself. Measured on a live panel: 270
-// restart attempts, xray never up, and every locally-created inbound dead while
-// the UI showed them all enabled.
+// Two ways that happens, and the first fix only covered one of them. An inbound
+// bound to an ENROLLED NODE's address belongs to that node. But an operator who
+// pastes a subscription into the importer gets a hundred inbounds addressed to
+// other people's servers — 13.113.18.50, usejh2.neobo-tooth.ru — which are not
+// nodes and are not here either. Measured on a live panel: 110 imported configs,
+// xray crashed, 41 restarts, every locally-created inbound dead.
 //
-// An inbound with no address, 0.0.0.0 or :: is served here: that is the default
-// a locally-created inbound gets, and it means "this machine".
+// So the test is bindability, not node membership: an inbound is served here if
+// its address is empty, a wildcard, a loopback, or an address this host actually
+// holds. That covers node addresses and imported foreign ones with one rule, and
+// it is the same question the core is about to ask the kernel.
 func (s *Server) localInboundSpecs() []engine.InboundSpec {
 	all := s.enabledInboundSpecs()
-	if s.db == nil {
+	local := localAddresses()
+	if len(local) == 0 {
+		// The interface list could not be read. Filtering on a set we do not
+		// have would silently stop serving everything; leave the list alone and
+		// let the core report what it cannot bind.
 		return all
-	}
-	nodes, err := s.db.ListNodes()
-	if err != nil || len(nodes) == 0 {
-		return all
-	}
-	remote := make(map[string]bool, len(nodes))
-	for _, n := range nodes {
-		if a := strings.TrimSpace(n.Address); a != "" {
-			remote[a] = true
-		}
 	}
 	out := make([]engine.InboundSpec, 0, len(all))
 	for _, sp := range all {
 		if sp.Node == nil {
 			continue
 		}
-		a := strings.TrimSpace(sp.Node.Address)
-		if a == "" || a == "0.0.0.0" || a == "::" || !remote[a] {
+		if boundHere(sp.Node.Address, local) {
 			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+// boundHere reports whether this host can bind addr.
+//
+// A name is resolved, because an operator may legitimately address an inbound by
+// the panel's own hostname. Resolution failure means NOT here: an address we
+// cannot even look up is one the core certainly cannot bind, and excluding it
+// costs one inbound while including it costs all of them.
+func boundHere(addr string, local map[string]bool) bool {
+	a := strings.TrimSpace(addr)
+	switch a {
+	case "", "0.0.0.0", "::", "*", "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := net.ParseIP(a); ip != nil {
+		return local[ip.String()]
+	}
+	ips, err := net.LookupIP(a)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if local[ip.String()] {
+			return true
+		}
+	}
+	return false
+}
+
+// localAddresses is every IP this host holds, as a set.
+func localAddresses() map[string]bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(addrs))
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP != nil {
+			out[ipnet.IP.String()] = true
 		}
 	}
 	return out

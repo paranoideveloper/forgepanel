@@ -24,7 +24,13 @@ func fakeBrook(t *testing.T, body string) string {
 
 func waitForBrook(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	// Ten seconds, not three. The assertion is unchanged; only the patience is.
+	// Three was enough alone and not enough inside the full suite, where
+	// TestFullMatrixConnectivity has dozens of cores starting at once and a
+	// subprocess exiting plus two pump goroutines flushing can take noticeably
+	// longer. A test that passes alone and fails in the suite teaches people to
+	// re-run rather than to read.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

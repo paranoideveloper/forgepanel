@@ -1286,6 +1286,27 @@ func (s Security) clone() Security {
 // SNI returns the effective server name for TLS: the explicit SNI, else the
 // transport Host, else the address.
 func (n *Node) SNI() string {
+	// REALITY decides on the SERVER's terms. The inbound accepts a ClientHello
+	// only if its SNI is one of reality.serverNames, so a share link built from
+	// Security.ServerName when that name is not in the list advertises an SNI
+	// the server will refuse — the client reports "reality verification failed"
+	// and the inbound looks broken while being perfectly healthy.
+	//
+	// Measured on a live panel: an imported inbound carried
+	// server_name=slashdot.org with serverNames=[www.cloudflare.com]. The link
+	// the panel handed out could not connect; the same client with
+	// www.cloudflare.com connected immediately.
+	//
+	// Normalize adopts the single serverName as the SNI when none is set, which
+	// covers inbounds the panel creates. It cannot do so when an SNI IS set —
+	// that would silently discard an operator's choice — so the export path has
+	// to prefer a name the server actually accepts.
+	if n.Security.Type == SecReality && n.Security.Reality != nil {
+		names := n.Security.Reality.ServerNames
+		if len(names) > 0 && !containsStr(names, n.Security.ServerName) {
+			return names[0]
+		}
+	}
 	if n.Security.ServerName != "" {
 		return n.Security.ServerName
 	}

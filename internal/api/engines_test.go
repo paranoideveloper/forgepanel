@@ -117,3 +117,80 @@ func TestTheReloadPathUsesTheFilteredSpecList(t *testing.T) {
 			strings.TrimSpace(line))
 	}
 }
+
+// The case the node-address filter missed, and that took the panel down a second
+// time: an operator pastes a subscription into the importer and gets a hundred
+// inbounds addressed to OTHER PEOPLE'S servers. Those are not nodes and are not
+// here, so a filter that only knows about enrolled nodes lets every one of them
+// through — and the core dies on the first address it cannot bind, taking every
+// locally-created inbound with it.
+//
+// Measured on a live panel: 110 imported configs, xray crashed, 41 restarts,
+// nothing the operator had created working. Their report was, for the second
+// time, "why does nothing I create on the panel work".
+func TestImportedForeignConfigsAreNotServedLocally(t *testing.T) {
+	s, token := adminAPI(t)
+
+	for _, in := range []map[string]any{
+		// What the importer produces from a scraped subscription.
+		{"protocol": "vless", "address": "13.113.18.50", "port": 36582, "remark": "collector-300",
+			"transport": map[string]any{"network": "tcp"}, "security": map[string]any{"type": "none"}, "enabled": true},
+		{"protocol": "vless", "address": "usejh2.neobo-tooth.ru", "port": 2083, "remark": "collector-043",
+			"transport": map[string]any{"network": "tcp"}, "security": map[string]any{"type": "none"}, "enabled": true},
+		// The operator's own, on this machine.
+		{"protocol": "vless", "address": "0.0.0.0", "port": 28000, "remark": "mine",
+			"transport": map[string]any{"network": "tcp"}, "security": map[string]any{"type": "reality"}, "enabled": true},
+	} {
+		if code, b := realPost(t, s, "/api/admin/inbounds", token, in); code != 201 && code != 200 {
+			t.Fatalf("create %v: %d %s", in["remark"], code, b)
+		}
+	}
+
+	var served []string
+	for _, sp := range s.localInboundSpecs() {
+		if sp.Node != nil {
+			served = append(served, sp.Node.Remark)
+		}
+	}
+	for _, foreign := range []string{"collector-300", "collector-043"} {
+		for _, got := range served {
+			if got == foreign {
+				t.Errorf("the panel is trying to serve %q, which lives on someone else's machine — "+
+					"the core cannot bind it and refuses the whole config", foreign)
+			}
+		}
+	}
+	found := false
+	for _, got := range served {
+		if got == "mine" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the operator's own inbound was filtered out; the panel serves %v", served)
+	}
+}
+
+// The bindability rule itself. Getting this wrong in the permissive direction
+// kills the core; in the strict direction it silently stops serving.
+func TestBoundHereAcceptsOnlyWhatThisHostCanBind(t *testing.T) {
+	local := map[string]bool{"203.0.113.5": true}
+	for _, c := range []struct {
+		addr string
+		want bool
+		why  string
+	}{
+		{"", true, "no address is the default and means this machine"},
+		{"0.0.0.0", true, "wildcard"},
+		{"::", true, "v6 wildcard"},
+		{"127.0.0.1", true, "loopback"},
+		{"203.0.113.5", true, "an address this host holds"},
+		{"198.51.100.9", false, "someone else's machine"},
+		{"13.113.18.50", false, "an imported foreign config"},
+		{"no-such-host.invalid", false, "a name that cannot resolve is one the core cannot bind"},
+	} {
+		if got := boundHere(c.addr, local); got != c.want {
+			t.Errorf("boundHere(%q) = %v, want %v — %s", c.addr, got, c.want, c.why)
+		}
+	}
+}
