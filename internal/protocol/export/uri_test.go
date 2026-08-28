@@ -1,6 +1,8 @@
 package export
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -128,5 +130,39 @@ func TestAShadowsocksPluginLinkIsNotOverwrittenByTransportParams(t *testing.T) {
 	}
 	if strings.Contains(uri, "type=ws") {
 		t.Errorf("native transport params were added alongside a plugin: %s", uri)
+	}
+}
+
+// A VMess link over XHTTP must carry the path and Host, like every other
+// path-carrying transport. Omitting them yields a well-formed link to a server
+// that never answers — and behind a shared port, where the path is the only
+// thing identifying the inbound, it cannot possibly connect.
+func TestVMessOverXHTTPCarriesItsPathAndHost(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoVMess, Address: "edge.example.com", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetXHTTP, Path: "/tunnel", Host: "edge.example.com"},
+		Security:  model.Security{Type: model.SecTLS, ServerName: "edge.example.com"},
+	}
+	uri, err := URI(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(uri, "vmess://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["net"] != "xhttp" {
+		t.Fatalf("net=%v", m["net"])
+	}
+	if m["path"] != "/tunnel" {
+		t.Errorf("path=%q — a client cannot reach the inbound without it", m["path"])
+	}
+	if m["host"] != "edge.example.com" {
+		t.Errorf("host=%q", m["host"])
 	}
 }

@@ -267,7 +267,14 @@ func vmessURI(n *model.Node) (string, error) {
 		"fp":   "",
 	}
 	switch n.Transport.Network {
-	case model.NetWS, model.NetHTTPUpgrade:
+	// XHTTP belongs here with ws/httpupgrade: it carries a Host header and a
+	// path exactly the same way. Leaving it out of this switch did not produce
+	// an error — it produced a link with "path":"" and "host":"", which is a
+	// perfectly well-formed VMess link to a server that will never answer,
+	// because the path is the only thing identifying the inbound behind a
+	// shared port. Found on a Railway deployment, where the inbound itself was
+	// serving correctly the whole time.
+	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
 		m["host"] = n.Transport.Host
 		m["path"] = n.Transport.Path
 	case model.NetGRPC:
