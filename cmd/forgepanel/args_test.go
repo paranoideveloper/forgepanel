@@ -1,8 +1,11 @@
 package main
 
 import (
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -40,7 +43,7 @@ func TestHelpPrintsUsageAndExits(t *testing.T) {
 		}
 		// The one thing a reader most needs to know, since there are almost no
 		// flags: configuration is not done here.
-		if !strings.Contains(string(out), "FORGEPANEL_DATA_DIR") {
+		if !strings.Contains(string(out), "FORGEPANEL_DATA") {
 			t.Errorf("%s does not say where configuration comes from: %s", flag, out)
 		}
 	}
@@ -78,3 +81,49 @@ func TestVersionStillShortCircuits(t *testing.T) {
 		}
 	}
 }
+
+// The usage text must name only variables the panel actually reads.
+//
+// The first version of it listed FORGEPANEL_DATA_DIR and FORGEPANEL_PORT.
+// Neither exists — the real names are FORGEPANEL_DATA and
+// FORGEPANEL_PANEL_PORT — and I found that out by putting the wrong one in a
+// systemd unit and watching the panel write its database into the service's
+// working directory instead. A help text that names variables that do nothing
+// is worse than no help text, because it is believed.
+func TestUsageNamesOnlyRealEnvironmentVariables(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var read []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		for _, m := range envCall.FindAllStringSubmatch(string(b), -1) {
+			read = append(read, m[2])
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read) < 5 {
+		t.Fatalf("only found %d env reads — the scan is broken, not the usage text", len(read))
+	}
+	known := map[string]bool{}
+	for _, v := range read {
+		known[v] = true
+	}
+	for _, m := range envMention.FindAllString(usageText, -1) {
+		if !known[m] {
+			t.Errorf("the usage text names %s, which nothing in the tree reads", m)
+		}
+	}
+}
+
+var (
+	envCall    = regexp.MustCompile(`env(Str|Int|Bool)\("([A-Z_]+)"`)
+	envMention = regexp.MustCompile(`FORGEPANEL_[A-Z_]+`)
+)

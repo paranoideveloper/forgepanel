@@ -24,7 +24,16 @@ import (
 	"github.com/forgepanel/forgepanel/internal/version"
 )
 
-// usageText is the whole command-line surface. The panel takes its
+// usageText is the whole command-line surface.
+//
+// The variable list is checked against the tree by
+// TestUsageNamesOnlyRealEnvironmentVariables, because the first version of it
+// named FORGEPANEL_DATA_DIR and FORGEPANEL_PORT and neither exists — the real
+// names are FORGEPANEL_DATA and FORGEPANEL_PANEL_PORT. That was found by
+// putting the wrong one in a systemd unit and watching the panel write its
+// database into the service's working directory instead. A help text that names
+// variables which do nothing is worse than none, because it is believed.
+// The panel takes its
 // configuration from the data directory and the environment, not from flags, so
 // this is short by design — but it has to SAY that, or the absence of options
 // reads as a missing help text rather than as the design.
@@ -36,14 +45,22 @@ Usage:
   forgepanel --help       print this message and exit
 
 Configuration comes from the data directory and the environment, not from
-flags. The main ones:
+flags. Every variable the panel reads:
 
-  FORGEPANEL_DATA_DIR     where the database, secrets and certificates live
-                          (default /var/lib/forgepanel)
-  FORGEPANEL_PORT         port to listen on (default 2053; also settable in the
-                          panel itself, which persists it to panel.json)
+  FORGEPANEL_DATA          data directory: database, secrets, certificates
+  FORGEPANEL_PANEL_PORT    panel listen port
+  FORGEPANEL_API_PORT      internal API port
+  FORGEPANEL_SUB_PORT      subscription listen port
+  FORGEPANEL_DNS_PORT      ForgeDNS listen port
+  FORGEPANEL_DOMAIN        panel domain (implies HTTPS/ACME)
+  FORGEPANEL_HTTPS         serve HTTPS
+  FORGEPANEL_ACME_EMAIL    contact address for certificate expiry notices
+  FORGEPANEL_ADMIN_USER    first administrator's username
   FORGEPANEL_TELEGRAM_TOKEN, FORGEPANEL_TELEGRAM_ADMINS
-                          bot credentials; both are also settable in the panel
+                           bot credentials; both are also settable in the panel
+
+The ports and the domain are settable in the panel too, which persists them to
+panel.json; the environment is read on start and the stored value wins after.
 
 Administration is forgectl, not this binary: forgectl --help
 `
