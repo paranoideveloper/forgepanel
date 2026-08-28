@@ -593,12 +593,18 @@ func TestOnAPlatformManyInboundsShareTheOnePublicPort(t *testing.T) {
 		Remark: "second", Protocol: model.ProtoVMess,
 		Address: "forge-test.up.railway.app", Port: 443,
 		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
-		Transport: model.Transport{Network: model.NetWS, Path: "/two"},
+		// NO PATH — exactly as the create form submits it. The path is minted
+		// later in the handler, so a guard that requires one to grant the
+		// exemption never grants it, which is how this stayed broken after the
+		// exemption was first added and the first version of this test passed
+		// anyway by supplying a path the real request does not have.
+		Transport: model.Transport{Network: model.NetWS},
 		Security:  model.Security{Type: model.SecTLS, ServerName: "forge-test.up.railway.app"},
 	}
 	if cf := s.portConflictFor(second, 0); cf != nil {
 		t.Fatalf("a second inbound on the shared public port was refused: %s", cf.Message)
 	}
+	s.applyPaaSAddressing(second) // the handler does this next; it mints the path
 	if _, err := s.db.CreateInbound(second); err != nil {
 		t.Fatal(err)
 	}
@@ -612,9 +618,12 @@ func TestOnAPlatformManyInboundsShareTheOnePublicPort(t *testing.T) {
 	if specs[0].Node.Port == specs[1].Node.Port {
 		t.Errorf("both inbounds were given the same loopback port %d", specs[0].Node.Port)
 	}
+	if routes[0].Prefix == routes[1].Prefix {
+		t.Errorf("both inbounds were routed on the same path %q", routes[0].Prefix)
+	}
 	paths := map[string]bool{routes[0].Prefix: true, routes[1].Prefix: true}
-	if !paths["/one"] || !paths["/two"] {
-		t.Errorf("routes do not cover both paths: %+v", routes)
+	if !paths["/one"] {
+		t.Errorf("the explicitly-set path was lost: %+v", routes)
 	}
 }
 

@@ -326,6 +326,29 @@ func (s *Server) applyPaaSAddressing(n *model.Node) {
 	}
 }
 
+// paasSharesPublicPort reports whether n will end up sharing the platform's one
+// public port, judged on TRANSPORT ALONE.
+//
+// paasRoutable is the wrong question in the request pipeline, and getting that
+// wrong is what made the collision guard keep refusing inbounds after the
+// exemption was added: paasRoutable also requires a path, and the path is minted
+// later, by applyPaaSAddressing in the handler. The guard runs first, saw a
+// path-less node, judged it unroutable, and fell through to the ordinary
+// one-port-one-listener rule it was meant to skip.
+//
+// What the guard actually needs to know is "will this inbound be served by path
+// on the shared port", and the transport settles that on its own.
+func paasSharesPublicPort(n *model.Node) bool {
+	if n == nil {
+		return false
+	}
+	switch n.Transport.Network {
+	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
+		return true
+	}
+	return false
+}
+
 // paasNeedsPath reports whether n uses a path-carrying transport but has no
 // path set — the one repairable reason paasRoutable rejects an inbound.
 func paasNeedsPath(n *model.Node) bool {
