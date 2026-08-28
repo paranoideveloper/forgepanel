@@ -174,8 +174,11 @@ func transportSecurityParams(n *model.Node, v url.Values) {
 		}
 	case model.SecReality:
 		v.Set("security", "reality")
-		if s.ServerName != "" {
-			v.Set("sni", s.ServerName)
+		// ExportSNI, not ServerName: REALITY refuses a ClientHello whose SNI is
+		// not in reality.serverNames, so the raw field can name something the
+		// server will reject.
+		if sni := s.ExportSNI(); sni != "" {
+			v.Set("sni", sni)
 		}
 		if s.Fingerprint != "" {
 			v.Set("fp", s.Fingerprint)
@@ -291,14 +294,14 @@ func vmessURI(n *model.Node) (string, error) {
 	}
 	if n.Security.Type == model.SecTLS {
 		m["tls"] = "tls"
-		m["sni"] = n.Security.ServerName
+		m["sni"] = n.Security.ExportSNI()
 		m["fp"] = n.Security.Fingerprint
 		if len(n.Security.ALPN) > 0 {
 			m["alpn"] = strings.Join(n.Security.ALPN, ",")
 		}
 	} else if n.Security.Type == model.SecReality {
 		m["tls"] = "reality"
-		m["sni"] = n.Security.ServerName
+		m["sni"] = n.Security.ExportSNI()
 		m["fp"] = n.Security.Fingerprint
 		if r := n.Security.Reality; r != nil {
 			m["pbk"] = r.PublicKey

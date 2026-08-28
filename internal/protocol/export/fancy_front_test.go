@@ -20,7 +20,18 @@ func TestFancyFront_XHTTPRealityURI(t *testing.T) {
 		Transport: model.Transport{Network: model.NetXHTTP, Path: "/aux"},
 		Security: model.Security{
 			Type: model.SecReality, ServerName: "www.datadoghq.com", Fingerprint: "chrome",
-			Reality: &model.Reality{Dest: "www.datadoghq.com:443", ServerNames: []string{"www.datadoghq.com"}},
+			// The fronting domain is in serverNames, because it has to be.
+			// ApplyFront changes the SNI on the EXPORT copy only — the stored
+			// inbound, and therefore the running server, keeps whatever
+			// serverNames the operator configured. REALITY accepts a ClientHello
+			// only if its SNI is in that list, so fronting a REALITY inbound
+			// behind a domain the server does not accept produces a link that
+			// cannot connect. This test used to omit it and assert the link
+			// carried an SNI the server would refuse.
+			Reality: &model.Reality{
+				Dest:        "www.datadoghq.com:443",
+				ServerNames: []string{"www.datadoghq.com", "nobat.com"},
+			},
 		},
 	}
 	th, ok := model.FancyThemeByID("nobat-xhttp")

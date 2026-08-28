@@ -1285,6 +1285,33 @@ func (s Security) clone() Security {
 
 // SNI returns the effective server name for TLS: the explicit SNI, else the
 // transport Host, else the address.
+// ExportSNI is the server name a CLIENT should present.
+//
+// REALITY accepts a ClientHello only if its SNI is one of reality.serverNames,
+// so a link built from ServerName when that name is not in the list advertises
+// an SNI the server refuses: the client reports "reality verification failed"
+// and the inbound looks broken while being perfectly healthy. Measured on a live
+// panel — an inbound with server_name=slashdot.org and
+// serverNames=[www.cloudflare.com] produced a link that could not connect, and
+// the identical client with www.cloudflare.com connected immediately.
+//
+// An SNI that IS in the list is the operator's own choice and is kept: several
+// borrowed names is the normal REALITY setup.
+//
+// It lives on Security rather than on Node because the URI exporter reaches the
+// security block directly and never goes through Node.SNI() — which is exactly
+// how the first version of this fix ended up in a function the broken path does
+// not call.
+func (s Security) ExportSNI() string {
+	if s.Type == SecReality && s.Reality != nil {
+		names := s.Reality.ServerNames
+		if len(names) > 0 && !containsStr(names, s.ServerName) {
+			return names[0]
+		}
+	}
+	return s.ServerName
+}
+
 func (n *Node) SNI() string {
 	// REALITY decides on the SERVER's terms. The inbound accepts a ClientHello
 	// only if its SNI is one of reality.serverNames, so a share link built from
@@ -1301,14 +1328,8 @@ func (n *Node) SNI() string {
 	// covers inbounds the panel creates. It cannot do so when an SNI IS set —
 	// that would silently discard an operator's choice — so the export path has
 	// to prefer a name the server actually accepts.
-	if n.Security.Type == SecReality && n.Security.Reality != nil {
-		names := n.Security.Reality.ServerNames
-		if len(names) > 0 && !containsStr(names, n.Security.ServerName) {
-			return names[0]
-		}
-	}
-	if n.Security.ServerName != "" {
-		return n.Security.ServerName
+	if sni := n.Security.ExportSNI(); sni != "" {
+		return sni
 	}
 	if n.Transport.Host != "" {
 		return n.Transport.Host
