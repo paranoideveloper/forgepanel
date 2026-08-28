@@ -2,6 +2,8 @@ package api
 
 import (
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
@@ -103,7 +105,15 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 	// An empty fingerprint is not an error: it means the panel presents a
 	// CA-issued certificate, and the node should use the system trust store.
 	fp := s.panelCertFingerprint()
-	enroll := "curl -fsSL " + panelURL + "/node-install.sh | PANEL=" + panelURL +
+	// The fetch of the install script has to survive the same self-signed
+	// certificate the script itself is being told to pin. -k alone would fetch
+	// the pinning logic over an unverified connection, so the peer is pinned by
+	// public key here too.
+	fetch := "curl -fsSL"
+	if pin := s.panelCertPubkeyPin(); pin != "" {
+		fetch += " -k --pinnedpubkey sha256//" + pin
+	}
+	enroll := fetch + " " + panelURL + "/node-install.sh | PANEL=" + panelURL +
 		" BOOTSTRAP=" + bootstrap + " TOKEN=" + tok
 	if fp != "" {
 		enroll += " PANEL_FINGERPRINT=" + fp
@@ -489,6 +499,46 @@ func (s *Server) panelCertFingerprint() string {
 	}
 	sum := sha256.Sum256(block.Bytes)
 	return hex.EncodeToString(sum[:])
+}
+
+// panelCertPubkeyPin returns the base64 SHA-256 of the panel certificate's
+// SubjectPublicKeyInfo, in the form curl's --pinnedpubkey takes.
+//
+// This exists because the enrolment command the panel PRINTS did not work on a
+// self-signed panel, which is the only case where the panel bothers to compute a
+// fingerprint at all. The command is:
+//
+//	curl -fsSL https://<panel>/node-install.sh | PANEL=... PANEL_FINGERPRINT=... bash
+//
+// The SCRIPT knows to pass -k once it has a fingerprint. The curl that FETCHES
+// the script does not, so on a self-signed panel it dies with "SSL certificate
+// problem: self-signed certificate" before any of the pinning logic exists on
+// the node. Measured on a real host, not reasoned about: the enrol command as
+// generated could never complete on a panel without a domain.
+//
+// Adding a bare -k there would fetch the pinning script over an unverified
+// connection — an attacker who can MITM that fetch simply serves a script
+// without the pin, and the fingerprint becomes decoration. --pinnedpubkey is
+// the fix that keeps it a one-liner AND verifies the peer: -k stops curl
+// consulting the CA store, and the pin then decides.
+func (s *Server) panelCertPubkeyPin() string {
+	if s.cfg == nil || s.cfg.Panel() == nil || strings.TrimSpace(s.cfg.Panel().Domain) != "" {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "certs", "self.crt"))
+	if err != nil {
+		return ""
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return ""
+	}
+	crt, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(crt.RawSubjectPublicKeyInfo)
+	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
 // accountNodeTraffic records a node's reported per-user usage and enforces the

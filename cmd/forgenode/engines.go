@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"strconv"
@@ -97,7 +98,7 @@ func (e *engineProc) apply(dataDir, cfg string) {
 		return
 	}
 
-	tmp := configPath + ".tmp"
+	tmp := tempConfigPath(configPath)
 	if err := os.WriteFile(tmp, []byte(cfg), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "forgenode: %s: write temp config: %v\n", e.spec.name, err)
 		return
@@ -173,3 +174,34 @@ func (e *engineProc) stop() {
 
 // running reports whether the core is currently supervised.
 func (e *engineProc) running() bool { return e.cmd != nil && e.cmd.Process != nil }
+
+// tempConfigPath returns a sibling temp path that KEEPS the config's extension.
+//
+// It used to be configPath + ".tmp", giving node-xray.json.tmp — and Xray infers
+// a config's format from its file EXTENSION, so it refused the temp file
+// outright:
+//
+//	Failed to start: main: failed to load config files:
+//	[/var/lib/forgepanel/node-xray.json.tmp] >
+//	core: Failed to get format of /var/lib/forgepanel/node-xray.json.tmp
+//
+// Validation happens against the temp path, so EVERY config a node was sent was
+// rejected before it could be committed, whatever it contained. A node enrolled,
+// heartbeated, reported healthy, received its config, refused it, and retried
+// every ten seconds forever: the remote-node feature did not work at all.
+//
+// The panel's own supervised adapter carries a comment about exactly this
+// ("Xray infers the config format from the file EXTENSION, which is why every
+// path this adapter writes keeps a .json suffix"). The agent was written without
+// it. Nothing caught the difference because the agent's tests drive it against
+// an httptest server and never run a real core.
+//
+// The temp file stays a sibling so the commit is still an atomic same-directory
+// rename.
+func tempConfigPath(configPath string) string {
+	ext := filepath.Ext(configPath)
+	if ext == "" {
+		return configPath + ".tmp"
+	}
+	return strings.TrimSuffix(configPath, ext) + ".tmp" + ext
+}

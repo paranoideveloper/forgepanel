@@ -1,7 +1,16 @@
 package api
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -311,5 +320,115 @@ func TestANodeWithNoApplicableRulesGetsNoOperatorOutbounds(t *testing.T) {
 	outs, rules := s.nodeRoutingSpecs(nil)
 	if len(outs) != 0 || len(rules) != 0 {
 		t.Fatalf("a node with no rules received %d outbound(s) and %d rule(s)", len(outs), len(rules))
+	}
+}
+
+// The enrolment command the panel PRINTS has to work on the panel it was
+// printed by. On a self-signed panel — the only case where the panel bothers to
+// compute a fingerprint at all — it did not:
+//
+//	curl -fsSL https://<panel>/node-install.sh | ... PANEL_FINGERPRINT=... bash
+//	curl: (60) SSL certificate problem: self-signed certificate
+//
+// The script knows to pass -k once it holds a fingerprint. The curl that FETCHES
+// the script did not, so it died before any pinning logic existed on the node.
+// Measured on a real host: enrolment could never complete on a panel without a
+// domain, which is every panel on first run.
+//
+// A bare -k would fetch the pinning script over an unverified connection, so an
+// attacker who can MITM that one request serves a script with no pin and the
+// fingerprint becomes decoration. The peer is pinned by public key instead.
+func TestTheEnrolCommandCanFetchItsOwnInstallScript(t *testing.T) {
+	s, token := adminAPI(t)
+	// A self-signed panel: a cert on disk and no domain, which is first-run
+	// state. Written explicitly, because without it panelCertFingerprint returns
+	// "" and this test SKIPS — reporting ok while asserting nothing, which is
+	// the failure mode this repo has been bitten by before.
+	writeSelfSignedPanelCert(t, s)
+
+	code, body := realPost(t, s, "/api/admin/nodes/enroll", token,
+		map[string]any{"name": "node-a", "address": "203.0.113.9"})
+	if code != 201 {
+		t.Fatalf("enrol returned %d: %s", code, body)
+	}
+	var out struct {
+		EnrollCommand string `json:"enroll_command"`
+		Fingerprint   string `json:"panel_fingerprint"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Fingerprint == "" {
+		t.Fatal("the panel computed no fingerprint for its own self-signed certificate")
+	}
+
+	// The script fetch must not be a plain `curl -fsSL https://...` — that is
+	// the exact command that fails.
+	if !strings.Contains(out.EnrollCommand, "--pinnedpubkey sha256//") {
+		t.Errorf("the script fetch is unpinned, so it cannot verify a self-signed panel:\n%s",
+			out.EnrollCommand)
+	}
+	if !strings.Contains(out.EnrollCommand, "-k ") {
+		t.Errorf("the script fetch will refuse the panel's own certificate:\n%s", out.EnrollCommand)
+	}
+	// -k without a pin is the wrong fix and must never be what ships.
+	if strings.Contains(out.EnrollCommand, "-k ") && !strings.Contains(out.EnrollCommand, "--pinnedpubkey") {
+		t.Error("the script fetch skips verification with nothing pinning the peer")
+	}
+	// And the pin has to be the panel's actual key, not any old base64.
+	want := s.panelCertPubkeyPin()
+	if want == "" || !strings.Contains(out.EnrollCommand, "sha256//"+want) {
+		t.Errorf("the pin is not this panel's public key (want sha256//%s):\n%s", want, out.EnrollCommand)
+	}
+}
+
+// A panel with a real certificate must NOT ship -k: skipping verification when
+// the system trust store would do the job is a downgrade nobody asked for.
+func TestAPanelWithADomainShipsNoPinAndNoInsecureFlag(t *testing.T) {
+	s, token := adminAPI(t)
+	p := s.cfg.Panel()
+	p.Domain = "panel.example.com"
+
+	code, body := realPost(t, s, "/api/admin/nodes/enroll", token,
+		map[string]any{"name": "node-b", "address": "203.0.113.10"})
+	if code != 201 {
+		t.Fatalf("enrol returned %d: %s", code, body)
+	}
+	var out struct {
+		EnrollCommand string `json:"enroll_command"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.EnrollCommand, "-k ") || strings.Contains(out.EnrollCommand, "--pinnedpubkey") {
+		t.Errorf("a CA-certificate panel still ships verification-skipping flags:\n%s", out.EnrollCommand)
+	}
+}
+
+// writeSelfSignedPanelCert puts a real certificate where panelCertFingerprint
+// and panelCertPubkeyPin look for one.
+func writeSelfSignedPanelCert(t *testing.T, s *Server) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "forgepanel"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(s.cfg.DataDir, "certs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "self.crt"),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
