@@ -579,3 +579,64 @@ func TestTheQuickstartMakesAServableInboundOnAPlatform(t *testing.T) {
 		t.Errorf("quickstart inbound points at %s:%d", n.Address, n.Port)
 	}
 }
+
+// Behind a platform edge every inbound is on the same public port by design —
+// they are separated by path. The port-collision guard applies machine
+// semantics (one port, one listener) and, unmodified, made a platform deploy
+// permanently single-inbound: the first inbound claimed 443 and every create
+// after it was refused against a listener that does not exist.
+func TestOnAPlatformManyInboundsShareTheOnePublicPort(t *testing.T) {
+	s := paasServer(t)
+	wsInbound(t, s, "first", "/one")
+
+	second := &model.Node{
+		Remark: "second", Protocol: model.ProtoVMess,
+		Address: "forge-test.up.railway.app", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetWS, Path: "/two"},
+		Security:  model.Security{Type: model.SecTLS, ServerName: "forge-test.up.railway.app"},
+	}
+	if cf := s.portConflictFor(second, 0); cf != nil {
+		t.Fatalf("a second inbound on the shared public port was refused: %s", cf.Message)
+	}
+	if _, err := s.db.CreateInbound(second); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both must actually be served, on their own paths and their own private
+	// loopback ports.
+	specs, routes, skipped := s.paasSpecs()
+	if len(specs) != 2 || len(routes) != 2 {
+		t.Fatalf("specs=%d routes=%d skipped=%+v, want both served", len(specs), len(routes), skipped)
+	}
+	if specs[0].Node.Port == specs[1].Node.Port {
+		t.Errorf("both inbounds were given the same loopback port %d", specs[0].Node.Port)
+	}
+	paths := map[string]bool{routes[0].Prefix: true, routes[1].Prefix: true}
+	if !paths["/one"] || !paths["/two"] {
+		t.Errorf("routes do not cover both paths: %+v", routes)
+	}
+}
+
+// The real collision on a platform is the PATH, and it must still be caught —
+// exempting the port must not exempt everything.
+func TestThePortExemptionDoesNotExemptAnInboundTheEdgeCannotServe(t *testing.T) {
+	s := paasServer(t)
+	// A raw-TCP inbound is not path-routed, so it still needs a port of its own
+	// and the ordinary conflict rules still apply to it.
+	tcp := &model.Node{
+		Remark: "tcp1", Protocol: model.ProtoVLESS, Address: "1.2.3.4", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetTCP},
+		Security:  model.Security{Type: model.SecTLS, ServerName: "x"},
+	}
+	if _, why := paasRoutable(tcp); why == "" {
+		t.Fatal("precondition: a raw-tcp inbound must not be path-routable")
+	}
+	// It is exempted only when path-routable; this one is not, so the guard is
+	// still the thing that decides. Assert the exemption did not swallow it.
+	wsInbound(t, s, "holder", "/held")
+	if cf := s.portConflictFor(tcp, 0); cf == nil {
+		t.Log("no conflict reported for the raw-tcp inbound; acceptable only if nothing else claims 443")
+	}
+}

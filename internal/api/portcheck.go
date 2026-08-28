@@ -205,6 +205,25 @@ func (s *Server) portConflictFor(n *model.Node, excludeID uint) *PortConflict {
 	n = n.Clone()
 	n.Normalize()
 
+	// Behind a platform edge the public port is SHARED on purpose.
+	//
+	// Every inbound there is reached on the platform's single port — 443 at the
+	// edge — and they are told apart by their transport path, not by port. The
+	// port each one names is a public label, not a listener: the cores are given
+	// private loopback ports the operator never sees or chooses (see paas.go).
+	// So two inbounds "on 443" are not in conflict, they are the normal case.
+	//
+	// Left in place, this guard made a platform deploy permanently
+	// single-inbound: the first one took 443, and the create form refused every
+	// one after it with a conflict against a listener that does not exist. The
+	// collision that IS real there is two inbounds on one PATH, and paasSpecs
+	// refuses that with its own reason.
+	if s.cfg != nil && s.cfg.PaaS().Enabled {
+		if _, why := paasRoutable(n); why == "" {
+			return nil
+		}
+	}
+
 	want := inboundClaims(n, "", 0)
 	if len(want) == 0 {
 		return nil
