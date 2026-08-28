@@ -649,3 +649,59 @@ func TestThePortExemptionDoesNotExemptAnInboundTheEdgeCannotServe(t *testing.T) 
 		t.Log("no conflict reported for the raw-tcp inbound; acceptable only if nothing else claims 443")
 	}
 }
+
+// Losing the data directory on a platform is total and silent: the panel comes
+// back as a clean first-run install, so the operator's own reading is that
+// nothing is wrong. It has to be visible in the panel, not only in a boot log
+// that has already scrolled away by the time anything is missing.
+func TestAPlatformWithNoVolumeIsReportedAsCritical(t *testing.T) {
+	s := paasServer(t)
+	// t.TempDir() is ordinary disk inside the container's filesystem, which is
+	// exactly the un-mounted case a volume-less deploy has.
+	var storage *Subsystem
+	for _, sub := range s.healthReport().Subsystems {
+		if sub.Key == "storage" {
+			c := sub
+			storage = &c
+		}
+	}
+	if storage == nil {
+		t.Fatal("no storage row in the health report; a volume-less deploy would say nothing")
+	}
+	if storage.State != HealthCritical {
+		t.Fatalf("state is %q, want critical — a warning invites putting it off, and the cost of "+
+			"putting it off is everything in the panel", storage.State)
+	}
+	for _, want := range []string{"NOT PERSISTENT", "Attach a volume"} {
+		if !strings.Contains(storage.Summary, want) {
+			t.Errorf("summary does not say %q: %s", want, storage.Summary)
+		}
+	}
+}
+
+// On a machine the panel owns the data directory is ordinary disk, and a row
+// about volumes would be noise on every install that is not on a platform.
+func TestAnOrdinaryInstallHasNoVolumeWarning(t *testing.T) {
+	s := dbServerT(t)
+	for _, sub := range s.healthReport().Subsystems {
+		if sub.Key == "storage" && sub.State == HealthCritical {
+			t.Fatalf("an ordinary install was told its disk is not persistent: %s", sub.Summary)
+		}
+	}
+}
+
+// The mount test must read mountinfo, not df: BusyBox df reports the first
+// mount of the underlying device, so a correctly mounted volume reads as
+// unmounted and the warning fires when the operator did the right thing.
+func TestMountDetectionRecognisesARealMountPoint(t *testing.T) {
+	if _, known := dirIsMounted("/definitely-not-a-mount-point-xyz"); !known {
+		t.Skip("no /proc/self/mountinfo on this platform")
+	}
+	if mounted, _ := dirIsMounted("/definitely-not-a-mount-point-xyz"); mounted {
+		t.Error("a non-existent directory was reported as a mount point")
+	}
+	// "/" is a mount point on every Linux system.
+	if mounted, known := dirIsMounted("/"); known && !mounted {
+		t.Error("/ was not recognised as a mount point")
+	}
+}

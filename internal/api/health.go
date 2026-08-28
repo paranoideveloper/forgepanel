@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -106,6 +107,7 @@ func (s *Server) healthReport() HealthReport {
 	subs := []Subsystem{
 		s.healthAPI(),
 		s.healthDatabase(),
+		s.healthStorage(),
 		s.healthEngine(),
 		s.healthNodes(),
 		s.healthCerts(),
@@ -130,6 +132,71 @@ func (s *Server) healthReport() HealthReport {
 		State: worst, Label: stateLabel(worst), Summary: summary,
 		Subsystems: subs, CheckedAt: time.Now(),
 	}
+}
+
+// healthStorage reports whether the data directory survives a redeploy.
+//
+// On a platform the container's filesystem is thrown away on every deploy and
+// every restart unless a volume is mounted, and losing it is total: the admin
+// account, every inbound, every user, and all traffic history. What makes it
+// dangerous rather than merely bad is that the panel comes back looking
+// perfectly healthy — a clean first-run install — so the operator's own reading
+// of the evidence is that nothing is wrong.
+//
+// The container already warns at boot, in the platform log. That is the wrong
+// surface: the panel is what an operator looks at, and by the time anything is
+// missing the boot log has scrolled away. Verified the hard way, by watching a
+// Railway deployment lose twelve working inbounds on a redeploy with nothing
+// anywhere to say why.
+func (s *Server) healthStorage() Subsystem {
+	sub := Subsystem{Key: "storage", Label: "Data directory"}
+	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+		// On a machine the panel owns, the data directory is ordinary disk.
+		// There is no question to answer and a row here would be noise.
+		sub.State, sub.Summary = HealthNotConfigured, "Ordinary disk; not a platform deployment."
+		return sub
+	}
+	dir := s.cfg.DataDir
+	mounted, known := dirIsMounted(dir)
+	switch {
+	case !known:
+		sub.State = HealthUnknown
+		sub.Summary = "Could not determine whether " + dir + " is a mounted volume."
+	case mounted:
+		sub.State = HealthOK
+		sub.Summary = "Persisted on a mounted volume at " + dir + "."
+	default:
+		// Critical, not a warning. A warning invites "I will get to it", and
+		// the cost of getting to it late is everything in the panel.
+		sub.State = HealthCritical
+		sub.Summary = "NOT PERSISTENT — " + dir + " is not a mounted volume, so the next deploy or " +
+			"restart erases the admin account, every inbound, every user and all traffic history. " +
+			"Attach a volume mounted at " + dir + "."
+	}
+	return sub
+}
+
+// dirIsMounted reports whether dir is itself a mount point, and whether the
+// question could be answered at all.
+//
+// It reads /proc/self/mountinfo rather than calling df: BusyBox df reports the
+// first mount found for the underlying DEVICE, which inside a container is
+// whatever bind-mount came first — /etc/resolv.conf, in practice — so a
+// correctly mounted volume reads as unmounted. Field 5 of a mountinfo line is
+// the mount point itself.
+func dirIsMounted(dir string) (mounted, known bool) {
+	raw, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return false, false
+	}
+	dir = strings.TrimRight(dir, "/")
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 5 && strings.TrimRight(f[4], "/") == dir {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func (s *Server) healthAPI() Subsystem {
