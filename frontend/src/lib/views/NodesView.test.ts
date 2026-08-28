@@ -28,7 +28,12 @@ describe('NodesView Component', () => {
       return {
         ok: true,
         json: async () => [
-          { id: 1, name: 'EU-Node', address: '1.2.3.4', cpu: 10, mem_mb: 512, healthy: true },
+          // last_seen is what the badge is derived from, and the real API always
+          // sends it; a fixture without it is a node that has never reported.
+          {
+            id: 1, name: 'EU-Node', address: '1.2.3.4', cpu: 10, mem_mb: 512, healthy: true,
+            last_seen: new Date(Date.now() - 20_000).toISOString()
+          },
           { id: 2, name: 'Stale-Node', address: '2.2.2.2', cpu: 0, mem_mb: 0, healthy: false }
         ]
       } as Response;
@@ -38,7 +43,8 @@ describe('NodesView Component', () => {
 
     expect(await screen.findByText('EU-Node')).toBeTruthy();
     expect(screen.getByText('Stale-Node')).toBeTruthy();
-    expect(screen.getByText('Stale')).toBeTruthy();
+    expect(screen.getByTestId('node-status-1').textContent?.trim()).toBe('Online');
+    expect(screen.getByTestId('node-status-2').textContent?.trim()).toBe('Stale');
 
     const nameInput = screen.getByPlaceholderText('Node Name (e.g. EU-West-1)');
     const addrInput = screen.getByPlaceholderText('Public IP or Domain (optional)');
@@ -259,5 +265,30 @@ describe('NodesView Component', () => {
     render(NodesView);
     expect(await screen.findByText('Not enrolled')).toBeTruthy();
     expect(screen.getByText('never')).toBeTruthy();
+  });
+
+  // The badge used to read the `healthy` field straight off the payload, and
+  // that field is only ever written true on the server — nothing anywhere sets
+  // it false. So a node that stopped reporting an hour ago rendered "Online"
+  // beside a last-seen cell reading "1h ago", and the badge was decorative.
+  it('calls a node that stopped reporting Stale even when the payload claims healthy', async () => {
+    (globalThis as any).fetch = async () =>
+      ({
+        ok: true,
+        json: async () => [
+          {
+            id: 7, name: 'Zombie', address: '1.2.3.4', healthy: true, enrolled: true,
+            cpu: 0, mem_mb: 0, last_seen: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+          }
+        ]
+      }) as Response;
+
+    render(NodesView);
+
+    expect(await screen.findByText('Zombie')).toBeTruthy();
+    // Assert the badge itself, not merely that the word appears somewhere: the
+    // table has a Status column header and other badges in the same cell.
+    expect(screen.getByTestId('node-status-7').textContent?.trim()).toBe('Stale');
+    expect(screen.getByText('1h ago')).toBeTruthy();
   });
 });

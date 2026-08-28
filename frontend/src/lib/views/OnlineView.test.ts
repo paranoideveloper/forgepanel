@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import OnlineView from './OnlineView.svelte';
+import {
+  DEFAULT_PRESENCE_TTL_SECONDS,
+  isPresent,
+  presenceTtlSeconds,
+  setPresenceTtlSeconds
+} from '$lib/presence';
 
 const now = new Date().toISOString();
 
@@ -34,6 +40,7 @@ describe('OnlineView', () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
+  afterEach(() => setPresenceTtlSeconds(DEFAULT_PRESENCE_TTL_SECONDS));
 
   it('lists connected users with their address counts', async () => {
     (globalThis as any).fetch = async () => ({ ok: true, json: async () => payload }) as Response;
@@ -111,5 +118,22 @@ describe('OnlineView', () => {
     // An interval that outlives its component keeps requesting for the life of
     // the page.
     expect(calls).toBe(after);
+  });
+
+  it('publishes the server window so every screen agrees on it', async () => {
+    // ttl_seconds exists so readers do not have to guess the window. This view
+    // is the only one that fetches it, so it has to hand it to the shared
+    // presence module — otherwise the Users table's presence dot keeps its own
+    // idea of "online" and the two screens disagree about the same person, as
+    // they did when that dot carried a hardcoded three minutes.
+    (globalThis as any).fetch = async () =>
+      ({ ok: true, json: async () => ({ users: [], ttl_seconds: 300 }) }) as Response;
+    render(OnlineView);
+
+    await vi.waitFor(() => expect(presenceTtlSeconds()).toBe(300));
+
+    const now = Date.now();
+    expect(isPresent(new Date(now - 150_000).toISOString(), now)).toBe(true);
+    expect(isPresent(new Date(now - 400_000).toISOString(), now)).toBe(false);
   });
 });

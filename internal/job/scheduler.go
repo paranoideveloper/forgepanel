@@ -5,7 +5,10 @@
 package job
 
 import (
+	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"strings"
 
 	"context"
@@ -51,8 +54,8 @@ type Scheduler struct {
 	// deliverBackup ships a freshly-written backup off the box. Nil means the
 	// backup stays local, which is the default.
 	deliverBackup func(path string)
-	reloadHook  func()                                                  // called after a mutation to reapply engine configs
-	pollTraffic func(reset bool) (map[string]store.TrafficSplit, error) // email -> uplink/downlink
+	reloadHook    func()                                                  // called after a mutation to reapply engine configs
+	pollTraffic   func(reset bool) (map[string]store.TrafficSplit, error) // email -> uplink/downlink
 	// activeAddresses reports how many distinct source addresses a user is
 	// currently connecting from. Nil disables IP-limit enforcement entirely,
 	// which is the honest behaviour when there is no presence source: acting on
@@ -67,6 +70,18 @@ type Scheduler struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	now    func() time.Time // injectable clock (tests use a controllable one)
+
+	// Job self-health. A scheduler that wedged or panicked used to be entirely
+	// invisible: loop()'s panic recovery had an empty body and every job
+	// returned bare on error, so traffic accounting, expiry and the data-limit
+	// reset could stop dead while the panel kept serving and looking normal.
+	// These fields are the only place that failure becomes observable, so they
+	// are maintained by the runner rather than by each job.
+	healthMu  sync.Mutex
+	jobs      map[string]*jobHealth
+	jobOrder  []string // registration order, so Status is stable across calls
+	startedAt time.Time
+	running   bool
 }
 
 // Config configures a Scheduler.
@@ -153,33 +168,51 @@ func New(cfg Config) *Scheduler {
 func (s *Scheduler) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	s.wg.Add(3)
+
+	// Register every job BEFORE its goroutine runs. A job that has never ticked
+	// at all is precisely the failure worth seeing, and a status list built only
+	// from jobs that have already reported could never contain one.
+	s.healthMu.Lock()
+	s.startedAt = s.now()
+	s.running = true
+	s.healthMu.Unlock()
+	s.registerJob(JobAccounting, s.pollEvery)
+	s.registerJob(JobSweep, s.sweepEvery)
+	s.registerJob(JobRetention, time.Hour)
+	s.registerJob(JobMaintenance, s.sweepEvery)
+	if s.notify != nil {
+		// Notification is event-driven, not periodic, so it registers with no
+		// interval: its failures must be visible without it ever being called
+		// overdue for not having fired.
+		s.registerJob(JobNotify, 0)
+	}
+
+	s.wg.Add(4)
 	go func() {
 		defer s.wg.Done()
-		s.loop(ctx, s.pollEvery, s.pollAndAccount)
+		s.loop(ctx, JobAccounting, s.pollEvery, s.pollAndAccount)
 	}()
 	go func() {
 		defer s.wg.Done()
-		s.loop(ctx, s.sweepEvery, s.sweep)
+		s.loop(ctx, JobSweep, s.sweepEvery, s.sweep)
 	}()
 	go func() {
 		defer s.wg.Done()
 		// Hourly is often enough: retention is measured in days, and a tighter
 		// cadence would delete a handful of rows over and over for no benefit.
-		s.loop(ctx, time.Hour, func() {
-			s.pruneAudit()
-			s.pruneRollups()
-			s.runScheduledBackup()
+		s.loop(ctx, JobRetention, time.Hour, func() error {
+			// Joined rather than short-circuited: a failing prune must not stop
+			// the scheduled backup, and the operator needs to see all of them.
+			return errors.Join(s.pruneAudit(), s.pruneRollups(), s.runScheduledBackup())
 		})
 	}()
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		// Housekeeping, on its own loop rather than folded into the hourly one:
 		// idle sessions have to be evicted on a much tighter cadence than
 		// retention pruning, and an hour of leaked sessions on a busy tunnel is
 		// real memory.
-		s.loop(ctx, s.sweepEvery, s.runMaintenance)
+		s.loop(ctx, JobMaintenance, s.sweepEvery, s.runMaintenance)
 	}()
 }
 
@@ -192,8 +225,21 @@ func (s *Scheduler) alert(event, subject, message string) {
 	if s.notify == nil {
 		return
 	}
-	defer func() { _ = recover() }()
-	s.notify(event, subject, message)
+	// The recovery stays here rather than being left to runJob: alert is called
+	// from the middle of a sweep, and a notifier that panics must not abandon
+	// the users that have not been looked at yet. It is now counted and named,
+	// so a bot that panics on every send stops being a silent no-op.
+	start := s.now()
+	panicked := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = recoveredMessage(JobNotify, r)
+			}
+		}()
+		s.notify(event, subject, message)
+	}()
+	s.recordRun(JobNotify, start, nil, panicked)
 }
 
 // runMaintenance calls the maintenance hook, containing any panic.
@@ -201,12 +247,15 @@ func (s *Scheduler) alert(event, subject, message string) {
 // It runs on a long-lived goroutine that also has no other job. A panic here
 // would silently stop every future maintenance run, and the resulting leak would
 // show up hours later as memory growth with nothing pointing at the cause.
-func (s *Scheduler) runMaintenance() {
+func (s *Scheduler) runMaintenance() error {
 	if s.maintenance == nil {
-		return
+		return nil
 	}
-	defer func() { _ = recover() }()
+	// The panic guard moved to runJob, which counts, logs and reports it.
+	// Recovering here as well would swallow the panic again before anything
+	// could see it, which is how a dead maintenance loop stayed invisible.
 	s.maintenance()
+	return nil
 }
 
 // runScheduledBackup takes a backup when one is due.
@@ -215,17 +264,17 @@ func (s *Scheduler) runMaintenance() {
 // held in memory, so a panel that restarts every hour still produces daily
 // backups instead of one per restart — and a panel that was down for a week
 // takes one immediately when it returns.
-func (s *Scheduler) runScheduledBackup() {
+func (s *Scheduler) runScheduledBackup() error {
 	if s.backupEvery == nil {
-		return
+		return nil
 	}
 	dataDir, master, every, keep := s.backupEvery()
 	if every <= 0 || strings.TrimSpace(master) == "" || dataDir == "" {
-		return
+		return nil
 	}
 	last, _, err := backup.LatestLocal(dataDir)
 	if err == nil && !last.IsZero() && s.now().Sub(last) < every {
-		return
+		return nil
 	}
 	// The manifest lets a restore refuse a database this build cannot migrate.
 	// Best-effort: a backup must never be skipped because its schema version
@@ -238,16 +287,21 @@ func (s *Scheduler) runScheduledBackup() {
 	}
 	path, err := backup.WriteLocal(master, dataDir, s.now(), m)
 	if err != nil {
-		// Nothing to escalate to from here; the next hour retries, and the
-		// backup status endpoint shows the age of the newest one.
-		return
+		// The next hour retries and the backup status endpoint shows the age of
+		// the newest one, but the job's own health now carries the reason: a
+		// panel whose backups have been failing for a week should not have to be
+		// diagnosed from the absence of files.
+		return fmt.Errorf("write scheduled backup: %w", err)
 	}
 	// Off-box delivery, if the operator asked for one. A backup that only exists
 	// on the machine it backs up is not a backup of that machine.
 	if s.deliverBackup != nil {
 		s.deliverBackup(path)
 	}
-	_, _ = backup.PruneLocal(dataDir, keep)
+	if _, err := backup.PruneLocal(dataDir, keep); err != nil {
+		return fmt.Errorf("prune old backups: %w", err)
+	}
+	return nil
 }
 
 // pruneRollups enforces the usage-history retention windows.
@@ -255,9 +309,9 @@ func (s *Scheduler) runScheduledBackup() {
 // Zero for a resolution keeps it forever, and is treated as "keep" rather than
 // as a cutoff of now — read the other way it would erase the history it exists
 // to preserve.
-func (s *Scheduler) pruneRollups() {
+func (s *Scheduler) pruneRollups() error {
 	if s.db == nil {
-		return
+		return nil
 	}
 	now := s.now()
 	var hourly, daily time.Time
@@ -268,10 +322,15 @@ func (s *Scheduler) pruneRollups() {
 		daily = now.Add(-s.rollupDailyRetention)
 	}
 	if hourly.IsZero() && daily.IsZero() {
-		return
+		return nil
 	}
-	// Losing a prune costs disk, not correctness, and the next hour retries.
-	_, _ = s.db.PruneRollups(hourly, daily)
+	// Losing a prune costs disk, not correctness, and the next hour retries —
+	// but it is reported rather than dropped, so "the database keeps growing"
+	// has an answer somewhere other than the filesystem.
+	if _, err := s.db.PruneRollups(hourly, daily); err != nil {
+		return fmt.Errorf("prune rollups: %w", err)
+	}
+	return nil
 }
 
 // pruneAudit enforces the audit retention window.
@@ -280,16 +339,17 @@ func (s *Scheduler) pruneRollups() {
 // largest thing in the database and the only sign is disk usage. Pruning is a
 // deletion, so a zero or negative window is treated as "keep everything" rather
 // than as a cutoff of now — the reading that would erase the entire trail.
-func (s *Scheduler) pruneAudit() {
+func (s *Scheduler) pruneAudit() error {
 	if s.db == nil || s.auditRetention <= 0 {
-		return
+		return nil
 	}
 	cutoff := s.now().Add(-s.auditRetention)
 	if _, err := s.db.PruneAuditLogs(cutoff); err != nil {
-		// Nothing to escalate to: failing to prune costs disk, not correctness,
-		// and the next hour tries again.
-		return
+		// Failing to prune costs disk, not correctness, and the next hour tries
+		// again; it is surfaced on the job's health so the growth has a cause.
+		return fmt.Errorf("prune audit log: %w", err)
 	}
+	return nil
 }
 
 // Stop halts the scheduler.
@@ -298,9 +358,207 @@ func (s *Scheduler) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	s.healthMu.Lock()
+	s.running = false
+	s.healthMu.Unlock()
 }
 
-func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {
+// Job names as reported by Status. They are stable strings because the health
+// endpoint, and an operator reading the report, both key off them.
+const (
+	JobAccounting  = "accounting"  // traffic poll, quota enforcement
+	JobSweep       = "sweep"       // expiry, on-hold activation, periodic reset
+	JobRetention   = "retention"   // audit/rollup pruning and scheduled backups
+	JobMaintenance = "maintenance" // idle-session eviction, pool re-verification
+	JobNotify      = "notify"      // operator notifications (event-driven)
+)
+
+// overdueFloor is the smallest window in which a job may be called overdue.
+//
+// The accounting poll runs every 10s, so a bare "twice the interval" rule would
+// declare the scheduler wedged after 20s — well inside the jitter of a loaded
+// box or a slow database. An alert that fires under normal load is one that
+// operators learn to ignore, which costs more than the check is worth.
+const overdueFloor = 30 * time.Second
+
+// jobHealth is the mutable record kept for one scheduled job. All access is
+// under Scheduler.healthMu; JobStatus is the immutable copy handed out.
+type jobHealth struct {
+	interval     time.Duration
+	lastStart    time.Time
+	lastRun      time.Time // completion, successful or not
+	lastSuccess  time.Time
+	lastErr      string
+	lastDuration time.Duration
+	runs         int64
+	failures     int64
+	panics       int64
+	running      bool
+}
+
+// JobStatus is one background worker's externally visible health.
+type JobStatus struct {
+	Name string `json:"name"`
+	// IntervalSeconds is the job's cadence. Zero means event-driven (the
+	// notifier), which is never treated as overdue for not having fired.
+	IntervalSeconds float64 `json:"interval_seconds"`
+	// Running reports that the job is inside its function right now. It is what
+	// separates "has not been called" from "was called and never returned".
+	Running bool `json:"running"`
+	// LastStart / LastRun are the start and the COMPLETION of the last run.
+	// Both are needed: measured only by completion, a job that has legitimately
+	// just begun a long run looks as dead as one whose loop is gone, and
+	// measured only by start, a loop that stopped ticking says nothing at all.
+	LastStart   time.Time `json:"last_start,omitempty"`
+	LastRun     time.Time `json:"last_run,omitempty"`
+	LastSuccess time.Time `json:"last_success,omitempty"`
+	// LastError is the reason the last run failed, cleared by the next success
+	// so the report describes the current state rather than an old scar.
+	LastError string `json:"last_error,omitempty"`
+	// LastDurationMS is the round-trip time of the last completed run — the
+	// probe response time for this worker.
+	LastDurationMS float64 `json:"last_duration_ms"`
+	Runs           int64   `json:"runs"`
+	Failures       int64   `json:"failures"`
+	Panics         int64   `json:"panics"`
+}
+
+// Status is the scheduler's whole self-report, for the panel health indicator.
+type Status struct {
+	Running   bool        `json:"running"`
+	StartedAt time.Time   `json:"started_at,omitempty"`
+	Jobs      []JobStatus `json:"jobs"`
+}
+
+// OverdueJobs returns the jobs that have missed their cadence badly enough to
+// be treated as wedged, in registration order.
+//
+// Two different failures have to be caught, because they look nothing alike
+// from outside:
+//
+//   - the loop is not ticking at all — the last completion (or, for a job that
+//     has never completed, the scheduler's start) is older than the grace;
+//   - the job is stuck inside its own function — still marked running, having
+//     started longer than the grace ago.
+//
+// Jobs with no interval are event-driven and are skipped: "has not fired" is
+// the normal state for a notifier on a quiet panel.
+func (st Status) OverdueJobs(now time.Time) []JobStatus {
+	var out []JobStatus
+	for _, j := range st.Jobs {
+		if j.IntervalSeconds <= 0 {
+			continue
+		}
+		grace := 2 * time.Duration(j.IntervalSeconds*float64(time.Second))
+		if grace < overdueFloor {
+			grace = overdueFloor
+		}
+		ref := j.LastRun
+		switch {
+		case j.Running:
+			ref = j.LastStart
+		case ref.IsZero():
+			// Never completed a cycle: measured from when the scheduler started,
+			// so a job that never ran once is reported instead of looking new
+			// forever.
+			ref = st.StartedAt
+		}
+		if ref.IsZero() || now.Sub(ref) > grace {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// Status reports the scheduler's own liveness and every job's last run, error
+// and round-trip time. It is safe to call before Start and after Stop.
+func (s *Scheduler) Status() Status {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	st := Status{Running: s.running, StartedAt: s.startedAt}
+	for _, name := range s.jobOrder {
+		j := s.jobs[name]
+		st.Jobs = append(st.Jobs, JobStatus{
+			Name:            name,
+			IntervalSeconds: j.interval.Seconds(),
+			Running:         j.running,
+			LastStart:       j.lastStart,
+			LastRun:         j.lastRun,
+			LastSuccess:     j.lastSuccess,
+			LastError:       j.lastErr,
+			LastDurationMS:  float64(j.lastDuration) / float64(time.Millisecond),
+			Runs:            j.runs,
+			Failures:        j.failures,
+			Panics:          j.panics,
+		})
+	}
+	return st
+}
+
+// registerJob makes a job visible in Status before it has ever run.
+func (s *Scheduler) registerJob(name string, every time.Duration) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	s.jobLocked(name).interval = every
+}
+
+// jobLocked returns a job's health record, creating it on first use. The caller
+// must hold healthMu.
+func (s *Scheduler) jobLocked(name string) *jobHealth {
+	if s.jobs == nil {
+		s.jobs = make(map[string]*jobHealth)
+	}
+	j, ok := s.jobs[name]
+	if !ok {
+		j = &jobHealth{}
+		s.jobs[name] = j
+		s.jobOrder = append(s.jobOrder, name)
+	}
+	return j
+}
+
+// markRunning stamps the start of a run. Without it a job stuck inside its own
+// function keeps reporting the completion time of the last good run and looks
+// perfectly healthy while enforcing nothing.
+func (s *Scheduler) markRunning(name string, start time.Time) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	j := s.jobLocked(name)
+	j.lastStart = start
+	j.running = true
+}
+
+// recordRun stores the outcome of one run. A panic is recorded as a failure
+// with its message, because to an operator "it crashed" and "it errored" need
+// the same response and the distinction is kept in the panic counter.
+func (s *Scheduler) recordRun(name string, start time.Time, err error, panicked string) {
+	end := s.now()
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	j := s.jobLocked(name)
+	j.running = false
+	j.runs++
+	j.lastRun = end
+	j.lastDuration = end.Sub(start)
+	switch {
+	case panicked != "":
+		j.panics++
+		j.failures++
+		j.lastErr = "panic: " + panicked
+	case err != nil:
+		j.failures++
+		j.lastErr = err.Error()
+	default:
+		// Cleared on success so the report reflects the CURRENT state: a job
+		// that failed once an hour ago and has worked every cycle since is not
+		// broken, and a sticky message would make every transient error look
+		// permanent.
+		j.lastErr = ""
+		j.lastSuccess = end
+	}
+}
+
+func (s *Scheduler) loop(ctx context.Context, name string, every time.Duration, fn func() error) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -308,16 +566,40 @@ func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						// recover gracefully from scheduler job panic
-					}
-				}()
-				fn()
-			}()
+			s.runJob(name, fn)
 		}
 	}
+}
+
+// runJob executes one scheduled job, contains any panic, and records what
+// happened so a wedged or failing job is visible in Status().
+func (s *Scheduler) runJob(name string, fn func() error) {
+	start := s.now()
+	s.markRunning(name, start)
+	var err error
+	panicked := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = recoveredMessage(name, r)
+			}
+		}()
+		err = fn()
+	}()
+	s.recordRun(name, start, err, panicked)
+}
+
+// recoveredMessage formats and logs a recovered scheduler panic.
+//
+// What was here before was `if r := recover(); r != nil { }` with a comment and
+// no body, so a job that panicked on every single tick was indistinguishable
+// from one that was working perfectly. The stack only exists inside the
+// deferred call, so it is written to stderr immediately; the message is
+// returned as well so the job's own status carries it.
+func recoveredMessage(name string, r any) string {
+	msg := fmt.Sprint(r)
+	log.Printf("forgepanel: scheduler job %q panicked: %s\n%s", name, msg, debug.Stack())
+	return msg
 }
 
 // pollAndAccount reads the engine's cumulative counters, converts them to
@@ -335,13 +617,20 @@ func (s *Scheduler) loop(ctx context.Context, every time.Duration, fn func()) {
 // returns the same number and the delta is recomputed rather than lost. The
 // snapshot advances in the SAME transaction as the usage it accounts for, so a
 // crash between the two cannot double-count either.
-func (s *Scheduler) pollAndAccount() {
+func (s *Scheduler) pollAndAccount() error {
 	if s.db == nil || s.pollTraffic == nil {
-		return
+		// Nothing wired up is not a fault: the light constructor has no engine.
+		return nil
 	}
 	totals, err := s.pollTraffic(false) // cumulative, non-destructive
-	if err != nil || len(totals) == 0 {
-		return
+	if err != nil {
+		// An engine whose stats API has stopped answering means quotas are no
+		// longer being enforced. This used to return bare, which made a poll
+		// that failed every cycle look exactly like an idle panel.
+		return fmt.Errorf("poll engine stats: %w", err)
+	}
+	if len(totals) == 0 {
+		return nil
 	}
 	prevUp, upErr := s.db.TrafficSnapshots(store.UpScope(store.ScopeLocalEngine))
 	prevDown, downErr := s.db.TrafficSnapshots(store.DownScope(store.ScopeLocalEngine))
@@ -353,10 +642,12 @@ func (s *Scheduler) pollAndAccount() {
 		// delta and usage would be inflated by the engine's whole lifetime.
 		// Skipping the cycle keeps the numbers correct; the next one recovers,
 		// because nothing was reset.
-		return
+		return fmt.Errorf("read traffic snapshot: %w", err)
 	}
 
 	changed := false
+	applyFailures := 0
+	var applyErr error
 	now := s.now()
 	for email, obs := range totals {
 		// The billed quantity is unchanged: the combined counter against the
@@ -417,7 +708,11 @@ func (s *Scheduler) pollAndAccount() {
 			})
 		if err != nil {
 			// The snapshot did not move either, so this delta is recomputed next
-			// cycle rather than silently dropped.
+			// cycle rather than silently dropped. Counted so that a store that
+			// rejects every write shows up as a failing job instead of as usage
+			// that simply stops climbing.
+			applyFailures++
+			applyErr = err
 			continue
 		}
 		if tripped {
@@ -432,11 +727,15 @@ func (s *Scheduler) pollAndAccount() {
 	if changed && s.reloadHook != nil {
 		s.reloadHook()
 	}
+	if applyFailures > 0 {
+		return fmt.Errorf("could not account traffic for %d user(s): %w", applyFailures, applyErr)
+	}
+	return nil
 }
 
 // sweep expires users past their expiry, activates on-hold users on first use,
 // and resets traffic per strategy.
-func (s *Scheduler) sweep() { s.sweepAt(s.now()) }
+func (s *Scheduler) sweep() error { return s.sweepAt(s.now()) }
 
 // sweepAt runs the full scheduled user-lifecycle pass at a given instant (split
 // out so tests drive it with a controllable clock). For each user it, in order:
@@ -447,15 +746,20 @@ func (s *Scheduler) sweep() { s.sweepAt(s.now()) }
 //  3. applies the periodic data-limit reset (day/week/month/year) exactly once
 //     per period via a compare-and-set, catching up after downtime, never
 //     double-resetting, and safe across concurrent panel instances.
-func (s *Scheduler) sweepAt(now time.Time) {
+func (s *Scheduler) sweepAt(now time.Time) error {
 	if s.db == nil {
-		return
+		return nil
 	}
 	users, err := s.db.ListUsers(0)
 	if err != nil {
-		return
+		// A sweep that cannot read the user list enforces nothing at all: no
+		// expiry, no on-hold activation, no periodic reset. It returned bare,
+		// so the panel looked healthy while doing none of it.
+		return fmt.Errorf("list users: %w", err)
 	}
 	changed := false
+	saveFailures := 0
+	var saveErr error
 	for i := range users {
 		u := &users[i]
 
@@ -466,14 +770,23 @@ func (s *Scheduler) sweepAt(now time.Time) {
 				u.ExpireAt = &exp
 			}
 			u.Status = store.StatusActive
-			_ = s.db.SaveUser(u)
+			if err := s.db.SaveUser(u); err != nil {
+				saveFailures++
+				saveErr = err
+			}
 			changed = true
 		}
 
 		// 2. Expiry (an expired user must never be revived by a reset below).
 		if u.Status == store.StatusActive && u.ExpireAt != nil && now.After(*u.ExpireAt) {
 			u.Status = store.StatusExpired
-			_ = s.db.SaveUser(u)
+			if err := s.db.SaveUser(u); err != nil {
+				// A user the panel believes is expired but could not persist is
+				// still being served, which is the one direction this failure
+				// always goes. Reported rather than dropped.
+				saveFailures++
+				saveErr = err
+			}
 			changed = true
 			s.alert("expiry", u.Username,
 				fmt.Sprintf("*%s* has expired and is no longer being served.", u.Username))
@@ -506,6 +819,10 @@ func (s *Scheduler) sweepAt(now time.Time) {
 	if changed && s.reloadHook != nil {
 		s.reloadHook()
 	}
+	if saveFailures > 0 {
+		return fmt.Errorf("could not persist %d user lifecycle change(s): %w", saveFailures, saveErr)
+	}
+	return nil
 }
 
 // resetPeriodStart returns the compare-and-set marker for a user's reset
@@ -573,7 +890,7 @@ func (s *Scheduler) userForEmail(email string) *store.User {
 }
 
 // PollAndAccountForTest exposes pollAndAccount for internal package testing.
-func (s *Scheduler) PollAndAccountForTest() { s.pollAndAccount() }
+func (s *Scheduler) PollAndAccountForTest() { _ = s.pollAndAccount() }
 
 // SweepAtForTest exposes sweepAt for internal package testing.
-func (s *Scheduler) SweepAtForTest(now time.Time) { s.sweepAt(now) }
+func (s *Scheduler) SweepAtForTest(now time.Time) { _ = s.sweepAt(now) }

@@ -2,6 +2,7 @@
 	import { tr } from '$lib/i18n';
   import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { DEFAULT_PRESENCE_TTL_SECONDS, setPresenceTtlSeconds } from '$lib/presence';
 
   // Who is connected, right now.
   //
@@ -28,7 +29,7 @@
   }
 
   let users = $state<OnlineUser[]>([]);
-  let ttl = $state(120);
+  let ttl = $state(DEFAULT_PRESENCE_TTL_SECONDS);
   let loading = $state(true);
   let loadError = $state('');
   let expanded = $state<Record<string, boolean>>({});
@@ -44,7 +45,11 @@
     try {
       const res = await apiFetch<{ users: OnlineUser[]; ttl_seconds: number }>('/admin/online');
       users = res.users ?? [];
-      ttl = res.ttl_seconds || ttl;
+      // The server publishes its window so readers do not have to guess it.
+      // Handing it to the shared presence module rather than keeping it local
+      // is the point: the Users table's presence dot answers the same question
+      // and must not answer it with a different number.
+      ttl = setPresenceTtlSeconds(res.ttl_seconds);
       loadError = '';
     } catch (err: any) {
       // A failed poll must not blank the list: the last good picture is more

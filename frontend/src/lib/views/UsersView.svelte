@@ -2,6 +2,7 @@
 	import { tr } from '$lib/i18n';
   import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { isPresent } from '$lib/presence';
   import type { User, UserGroup } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
@@ -466,13 +467,15 @@
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(b / 1024 ** 2).toFixed(0)} MB`;
   }
 
-  // "Online" = the user moved traffic within the last few minutes (the poll
-  // cycle stamps last_seen_at whenever they transfer). Generous 3-minute window
-  // so a default ~60s poll comfortably marks an active user online.
-  const ONLINE_WINDOW_MS = 3 * 60 * 1000;
+  // "Online" = the user moved traffic within the presence window (the poll cycle
+  // stamps last_seen_at whenever they transfer).
+  //
+  // The window is the shared one in $lib/presence, not a constant of this view's
+  // own. This dot used to use a generous three minutes while the Online screen
+  // used the backend's two, so a user idle for 2m30s was green here and missing
+  // there — two screens disagreeing about the same person.
   function isOnline(u: any): boolean {
-    if (!u?.last_seen_at) return false;
-    return Date.now() - new Date(u.last_seen_at).getTime() < ONLINE_WINDOW_MS;
+    return isPresent(u?.last_seen_at);
   }
   function lastSeenLabel(u: any): string {
     if (!u?.last_seen_at) return 'never seen';
@@ -625,7 +628,7 @@
         {#each users as u (u.id)}
           <tr>
             <td>
-              <span class="presence {isOnline(u) ? 'online' : 'offline'}" title={lastSeenLabel(u)}></span>
+              <span class="presence {isOnline(u) ? 'online' : 'offline'}" data-testid="presence-{u.id}" title={lastSeenLabel(u)}></span>
               <strong>{u.username}</strong>
             </td>
             <td>{groups.find(g => g.id === u.group_id)?.name || '—'}</td>

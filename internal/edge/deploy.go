@@ -210,6 +210,24 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 			return res, err
 		}
 	}
+
+	// 10. Register the cron trigger the Worker's scheduled() handler runs on.
+	//
+	// Last, deliberately: verifyAndHeal can DELETE and re-upload the script, and
+	// a script delete takes its schedules with it. Registering before the probe
+	// would leave a healed Worker with no trigger at all — the same silent
+	// no-op, just harder to spot.
+	//
+	// A failure here is a warning, not an error: the Worker is deployed and
+	// serving at this point, and failing the whole request would send an
+	// operator hunting for something that is actually running. What they lose
+	// is the periodic refresh, which is what the warning says.
+	if err := c.PutSchedules(ctx, spec.Name, DefaultCrons); err != nil {
+		res.Warnings = append(res.Warnings,
+			"deployed, but the cron trigger could not be registered: "+err.Error()+
+				" — clean-IP refresh, external-sub merge and the update check will not run on their own; "+
+				"add the schedule ("+strings.Join(DefaultCrons, ", ")+") under the Worker's Settings → Triggers.")
+	}
 	return res, nil
 }
 

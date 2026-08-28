@@ -40,6 +40,19 @@ func StaticValidate(n *model.Node, usedPorts map[int]string) []Finding {
 		}
 	}
 
+	// REALITY dest sanity. Whether the dest actually speaks TLS 1.3 can only be
+	// learned by dialling it, which this offline layer never does — but a dest
+	// that is missing or is not host:port is the far more common mistake, and it
+	// is fully checkable here. Xray simply omits an empty dest from the inbound
+	// and then refuses to start, which surfaces as "the core keeps restarting".
+	if n.Security.Type == model.SecReality {
+		if dest := realityDest(n); dest == "" {
+			f = append(f, New("FP-REALITY-001", "no dest set"))
+		} else if !hostPortShaped(dest) {
+			f = append(f, New("FP-REALITY-001", "dest "+dest+" is not host:port"))
+		}
+	}
+
 	// REALITY shortId hex length (<=16, even).
 	if n.Security.Type == model.SecReality && n.Security.Reality != nil {
 		for _, sid := range n.Security.Reality.ShortIDs {
@@ -47,6 +60,31 @@ func StaticValidate(n *model.Node, usedPorts map[int]string) []Finding {
 				f = append(f, New("FP-REALITY-002", sid))
 				break
 			}
+		}
+	}
+
+	// Hysteria2 port hopping: the hop range is handed to the client, which will
+	// send traffic to every port in it. Any port another inbound is listening on
+	// is therefore stolen from that inbound, and both ends break intermittently
+	// — the worst kind of bug to chase, because it only bites after a hop.
+	if n.Hysteria2 != nil && n.Hysteria2.PortHopping != "" {
+		// Map iteration is unordered, so the lowest clashing port is picked
+		// deliberately: the detail line must not change between two runs on
+		// identical data, or operators cannot tell one report from another.
+		best, bestWho, bestRange := 0, "", hopRange{}
+		for _, r := range parseHopRanges(n.Hysteria2.PortHopping) {
+			for port, who := range usedPorts {
+				if who == "" || port < r.lo || port > r.hi {
+					continue
+				}
+				if best == 0 || port < best {
+					best, bestWho, bestRange = port, who, r
+				}
+			}
+		}
+		if best != 0 {
+			f = append(f, New("FP-PORT-HOP-001",
+				"hop range "+itoa(bestRange.lo)+"-"+itoa(bestRange.hi)+" covers port "+itoa(best)+" used by "+bestWho))
 		}
 	}
 
@@ -66,6 +104,85 @@ func StaticValidate(n *model.Node, usedPorts map[int]string) []Finding {
 	}
 
 	return f
+}
+
+// realityDest returns the REALITY handshake destination, or "" when none is set.
+func realityDest(n *model.Node) string {
+	if n.Security.Reality == nil {
+		return ""
+	}
+	return strings.TrimSpace(n.Security.Reality.Dest)
+}
+
+// hostPortShaped reports whether s looks like host:port — the only form the
+// cores accept for a REALITY dest. It deliberately does not resolve anything.
+func hostPortShaped(s string) bool {
+	i := strings.LastIndex(s, ":")
+	if i <= 0 || i == len(s)-1 {
+		return false
+	}
+	host, port := s[:i], s[i+1:]
+	// An IPv6 literal must be bracketed, otherwise its own colons read as the
+	// port separator.
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	p := 0
+	for _, c := range port {
+		p = p*10 + int(c-'0')
+	}
+	return p >= 1 && p <= 65535
+}
+
+// hopRange is one inclusive port range from a Hysteria2 port-hopping spec.
+type hopRange struct{ lo, hi int }
+
+// parseHopRanges reads a Hysteria2 port-hopping spec — comma-separated single
+// ports and "lo-hi" ranges, e.g. "20000-50000,60000" — and returns the ranges
+// it could make sense of. Unparseable pieces are skipped rather than guessed at:
+// this check exists to report a real overlap, not to re-validate the field.
+func parseHopRanges(spec string) []hopRange {
+	var out []hopRange
+	for _, part := range strings.FieldsFunc(spec, func(r rune) bool { return r == ',' || r == ' ' }) {
+		lo, hi, isRange := strings.Cut(part, "-")
+		a, okA := atoiPort(lo)
+		if !okA {
+			continue
+		}
+		if !isRange {
+			out = append(out, hopRange{a, a})
+			continue
+		}
+		b, okB := atoiPort(hi)
+		if !okB || b < a {
+			continue
+		}
+		out = append(out, hopRange{a, b})
+	}
+	return out
+}
+
+func atoiPort(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 5 {
+		return 0, false
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	if n < 1 || n > 65535 {
+		return 0, false
+	}
+	return n, true
 }
 
 func validShortID(s string) bool {

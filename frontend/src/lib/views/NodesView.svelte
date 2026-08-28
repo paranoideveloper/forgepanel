@@ -53,6 +53,24 @@
     return `${Math.round(s / 86400)}d`;
   }
 
+  // A node is up if it reported recently — not because a boolean says so.
+  //
+  // The panel now derives `healthy` from the heartbeat age server-side, but the
+  // stored column behind it is only ever written TRUE (on register and on every
+  // heartbeat) and never written false, so any older panel — and any payload
+  // this table is still holding from an earlier fetch — reports a node that died
+  // an hour ago as Online while the last_seen cell beside it says "1h ago".
+  // Deriving the badge from the same timestamp the cell renders means the two
+  // can never contradict each other. 3 minutes is the panel's own cutoff
+  // (nodeSilentAfter), shared with /metrics, the overview counter and the
+  // health page.
+  const NODE_SILENT_AFTER_MS = 3 * 60 * 1000;
+  function isOnline(n: Node): boolean {
+    if (!n.last_seen) return false;
+    const age = Date.now() - new Date(n.last_seen).getTime();
+    return Number.isFinite(age) && age < NODE_SILENT_AFTER_MS;
+  }
+
   function lastSeenLabel(n: Node): string {
     if (!n.last_seen) return 'never';
     const age = (Date.now() - new Date(n.last_seen).getTime()) / 1000;
@@ -199,8 +217,11 @@
             </td>
             <td title={n.last_seen || 'never'}>{lastSeenLabel(n)}</td>
             <td>
-              <span class="badge {n.healthy ? 'badge-ok' : 'badge-err'}">
-                {n.healthy ? tr('nodes.online') : tr('nodes.stale')}
+              <span
+                class="badge {isOnline(n) ? 'badge-ok' : 'badge-err'}"
+                data-testid="node-status-{n.id}"
+              >
+                {isOnline(n) ? tr('nodes.online') : tr('nodes.stale')}
               </span>
               {#if !n.enrolled}
                 <span class="badge badge-warn" title={tr('nodes.registered_but_the_agent_has_never')}>

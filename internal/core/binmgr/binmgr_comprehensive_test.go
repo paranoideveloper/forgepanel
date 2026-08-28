@@ -38,17 +38,18 @@ func TestBinmgr_ManagerAndPaths(t *testing.T) {
 }
 
 func TestBinmgr_ArchHelpers(t *testing.T) {
-	asset, err := xrayAsset()
-	if err != nil {
-		t.Fatalf("xrayAsset failed: %v", err)
-	}
-	if asset == "" {
-		t.Fatalf("empty xray asset")
-	}
-
-	sbArch := goarchToSB()
-	if sbArch == "" {
-		t.Fatalf("empty sb arch")
+	// Whatever machine the suite runs on, every managed core must resolve to a
+	// real asset for it. (The per-platform mapping itself is covered
+	// exhaustively in binmgr_platform_test.go.)
+	host := hostPlatform()
+	for _, e := range ManagedEngines() {
+		asset, err := assetFor(e, host)
+		if err != nil {
+			t.Fatalf("assetFor(%s, %s) failed: %v", e, host, err)
+		}
+		if asset == "" {
+			t.Fatalf("empty %s asset for %s", e, host)
+		}
 	}
 }
 
@@ -115,7 +116,11 @@ func TestBinmgr_FirstLineAndVerifyPinned(t *testing.T) {
 	fakeData := []byte("fake binary data")
 	sum := sha256.Sum256(fakeData)
 	hexsum := hex.EncodeToString(sum[:])
+	// Remove it again: pinnedSHA256 is package state, and a synthetic entry left
+	// behind is indistinguishable from a real pin to any test that audits the
+	// map (TestTablesAndPinsAgree flags pins no platform can reach).
 	pinnedSHA256["test_asset.zip"] = hexsum
+	defer delete(pinnedSHA256, "test_asset.zip")
 
 	if err := verifyPinned("test_asset.zip", fakeData); err != nil {
 		t.Fatalf("verifyPinned failed for valid checksum: %v", err)

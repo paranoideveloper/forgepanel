@@ -19,6 +19,14 @@ import (
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
+// nodeIsLive reports whether a node has reported recently enough to be called
+// up. A node that has never reported is not live whatever its stored Healthy
+// flag says, and the cutoff is deliberately the one nodeSilentAfter already
+// defines for the metrics and health endpoints.
+func nodeIsLive(n *store.Node) bool {
+	return n != nil && n.LastSeen != nil && time.Since(*n.LastSeen) < nodeSilentAfter
+}
+
 // handleListNodes lists remote nodes (spec §10).
 func (s *Server) handleListNodes(c *gin.Context) {
 	q := parseListQuery(c)
@@ -26,6 +34,17 @@ func (s *Server) handleListNodes(c *gin.Context) {
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+	// Node.Healthy is only ever WRITTEN true — on register and on every
+	// heartbeat — and nothing in this tree ever writes it false. Served as
+	// stored it means "this node checked in at least once", not "this node is
+	// up", which made the Online badge decorative: a node that died an hour ago
+	// still read Online while the last_seen column beside it said "1h ago".
+	// Derive it from the heartbeat age instead, using the same nodeSilentAfter
+	// cutoff /metrics, the overview counter and the health page already use, so
+	// every place the panel talks about a node agrees with the others.
+	for i := range ns {
+		ns[i].Healthy = nodeIsLive(&ns[i])
 	}
 	if !q.Paged() {
 		c.JSON(200, ns)
@@ -195,7 +214,26 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	}
 	var xrayCfg, singboxCfg string
 	specs := s.enabledInboundSpecsForNodeAddress(n.Address)
-	if b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", nil, nil); err == nil && b != nil {
+	// ROUTING GOES TO THE NODE TOO. This call passed nil, nil for the operator's
+	// outbounds and rules, so the panel's own box enforced the routing table and
+	// every remote node enforced none of it: a saved "block private networks"
+	// preset protected the panel host's metadata endpoint and left the whole
+	// fleet's wide open, with nothing in the UI to say the rules stopped at the
+	// panel. The rules are scoped to the inbounds this node actually serves —
+	// see nodeRoutingSpecs.
+	outs, rules := s.nodeRoutingSpecs(specs)
+	b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", outs, rules)
+	if err != nil {
+		// A routing table that renders for the panel can still be refused for a
+		// node: RenderRules rejects a rule whose outbound tag the node's own
+		// config does not define, and a relay-chain egress tag exists only
+		// where its inbound does. Retry unrouted rather than let the build
+		// fail — a node with no operator rules still serves its own inbounds,
+		// while the LastBundle fallback below would hand it the PANEL's config,
+		// whose inbounds belong to a different machine.
+		b, err = engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, "", "", nil, nil)
+	}
+	if err == nil && b != nil {
 		xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
 	} else if s.engine != nil {
 		if b := s.engine.LastBundle(); b != nil {
@@ -203,6 +241,97 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		}
 	}
 	c.JSON(200, gin.H{"xray_config": xrayCfg, "singbox_config": singboxCfg})
+}
+
+// nodeRoutingSpecs is routingSpecs narrowed to what can apply on one node.
+//
+// Outbounds are passed through whole: a rule may name any of them, and an
+// outbound the config defines but no rule uses costs nothing. Rules are
+// filtered, because a rule scoped to inbound tags names inbounds by the tag the
+// panel stamps into the config, and a node only receives the inbounds bound to
+// its address. Shipping a rule whose inbounds all live elsewhere puts a
+// condition in the node's config that can never match and hands the operator a
+// node config that does not resemble the routing table they wrote.
+//
+// A rule with no inbound scope is fleet-wide by definition and always goes.
+func (s *Server) nodeRoutingSpecs(specs []engine.InboundSpec) ([]engine.OutboundSpec, []engine.RuleSpec) {
+	outs, rules := s.routingSpecs()
+	if len(rules) == 0 {
+		// No rules can apply here, so no outbound is needed here either. See
+		// keepReferencedOutbounds for why that matters.
+		return nil, nil
+	}
+	// Mirror the tag BuildMultiFor will assign, or a rule written against an
+	// inbound the operator never named would be dropped for the wrong reason.
+	onNode := map[string]bool{}
+	for _, sp := range specs {
+		if sp.Node == nil {
+			continue
+		}
+		if sp.Node.Tag != "" {
+			onNode[sp.Node.Tag] = true
+			continue
+		}
+		onNode[fmt.Sprintf("in-%d", sp.Node.Port)] = true
+	}
+	kept := make([]engine.RuleSpec, 0, len(rules))
+	for _, r := range rules {
+		if len(r.InboundTags) == 0 {
+			kept = append(kept, r)
+			continue
+		}
+		scoped := make([]string, 0, len(r.InboundTags))
+		for _, t := range r.InboundTags {
+			if onNode[t] {
+				scoped = append(scoped, t)
+			}
+		}
+		if len(scoped) == 0 {
+			continue
+		}
+		// Narrow the rule to the tags that exist here rather than passing the
+		// operator's full list: the surplus tags are inert but they are also a
+		// list of inbound names from other nodes, sitting in a config file on a
+		// machine that has no business knowing them.
+		r.InboundTags = scoped
+		kept = append(kept, r)
+	}
+	if len(kept) == 0 {
+		return nil, nil
+	}
+	return keepReferencedOutbounds(outs, kept), kept
+}
+
+// keepReferencedOutbounds returns only the outbounds the kept rules name.
+//
+// An operator outbound is a full proxy definition: a Trojan relay carries its
+// password, a SOCKS hop its username and password. Shipping the whole set to
+// every node meant a node with one inbound and no applicable rules received the
+// credentials for every relay the operator had ever configured — on a machine
+// that has no use for them, in a config file on disk, for the lifetime of the
+// enrolment. Nodes previously received NO outbounds at all, so sending them
+// all was a strictly new exposure introduced by making routing reach nodes.
+//
+// The filter is by rule reference rather than by "is it valid here", because
+// that is the property that makes an outbound necessary: an outbound no
+// surviving rule can select cannot change what the node does.
+func keepReferencedOutbounds(outs []engine.OutboundSpec, rules []engine.RuleSpec) []engine.OutboundSpec {
+	need := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		if r.OutboundTag != "" {
+			need[r.OutboundTag] = true
+		}
+	}
+	if len(need) == 0 {
+		return nil
+	}
+	kept := make([]engine.OutboundSpec, 0, len(need))
+	for _, o := range outs {
+		if need[o.Tag] {
+			kept = append(kept, o)
+		}
+	}
+	return kept
 }
 
 // handleDeleteNode removes a node.

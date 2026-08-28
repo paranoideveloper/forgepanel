@@ -2,10 +2,12 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
 
@@ -109,6 +111,7 @@ func (s *Server) healthReport() HealthReport {
 		s.healthCerts(),
 		s.healthDNS(),
 		s.healthMetering(),
+		s.healthScheduler(),
 	}
 
 	worst := HealthOK
@@ -370,4 +373,94 @@ func (s *Server) healthDNS() Subsystem {
 	sub.State = HealthOK
 	sub.Summary = fmt.Sprintf("%d zone(s) served.", len(zones))
 	return sub
+}
+
+// healthScheduler reports the panel's own background workers.
+//
+// The scheduler drives traffic accounting, expiry, on-hold activation and the
+// periodic data-limit reset. When it wedges nothing outwardly breaks: the panel
+// keeps serving, the UI looks normal, and quotas simply stop being enforced —
+// always in the customer's favour, so no one reports it. It used to expose no
+// status whatsoever (the job loop's panic recovery had an empty body and every
+// job returned bare on error), which made this the one failure the health
+// indicator could not see.
+func (s *Server) healthScheduler() Subsystem {
+	sub := Subsystem{Key: "scheduler", Label: "Background jobs", Link: "/api/admin/health/detail"}
+	if s.sched == nil {
+		// The light constructor runs without a scheduler. That is a supported
+		// deployment, not a fault, so it must not light up red.
+		sub.State = HealthNotConfigured
+		sub.Summary = "This panel runs no background scheduler."
+		sub.Detail = "Traffic accounting and expiry are driven elsewhere."
+		return sub
+	}
+	st := s.sched.Status()
+	if !st.Running {
+		sub.State = HealthCritical
+		sub.Summary = "The background scheduler is not running."
+		sub.Detail = "Traffic accounting, expiry and data-limit resets are all stopped, " +
+			"so quotas are not being enforced."
+		return sub
+	}
+	now := time.Now()
+	if late := st.OverdueJobs(now); len(late) > 0 {
+		parts := make([]string, 0, len(late))
+		for _, j := range late {
+			parts = append(parts, schedulerJobPhrase(j, now))
+		}
+		sub.State = HealthCritical
+		sub.Summary = fmt.Sprintf("%d background job(s) have stopped running on schedule.", len(late))
+		sub.Detail = strings.Join(parts, "; ")
+		return sub
+	}
+	failing, firstErr := 0, ""
+	for _, j := range st.Jobs {
+		if j.LastError == "" {
+			continue
+		}
+		failing++
+		if firstErr == "" {
+			firstErr = j.Name + ": " + j.LastError
+		}
+	}
+	if failing > 0 {
+		// A warning, not critical: the loop is alive and the next tick retries,
+		// which is a different situation from a scheduler that has stopped.
+		sub.State = HealthWarning
+		sub.Summary = fmt.Sprintf("%d background job(s) failed their last run.", failing)
+		sub.Detail = firstErr
+		return sub
+	}
+	sub.State = HealthOK
+	sub.Summary = fmt.Sprintf("%d background job(s) running on schedule.", len(st.Jobs))
+	// Per-worker round-trip time, which is what turns "it is alive" into
+	// something an operator can watch degrade before it breaks.
+	timings := make([]string, 0, len(st.Jobs))
+	for _, j := range st.Jobs {
+		if j.Runs == 0 {
+			continue
+		}
+		timings = append(timings, fmt.Sprintf("%s %.0fms", j.Name, j.LastDurationMS))
+	}
+	if len(timings) == 0 {
+		sub.Detail = "No job has completed a cycle yet."
+	} else {
+		sub.Detail = "Last run time: " + strings.Join(timings, ", ") + "."
+	}
+	return sub
+}
+
+// schedulerJobPhrase describes one overdue job in operator-facing terms. A job
+// that never returned and a job that never started need different wording:
+// the first is a wedge to investigate, the second means the loop itself is gone.
+func schedulerJobPhrase(j job.JobStatus, now time.Time) string {
+	switch {
+	case j.Running:
+		return fmt.Sprintf("%s started %s ago and has not returned",
+			j.Name, now.Sub(j.LastStart).Truncate(time.Second))
+	case j.LastRun.IsZero():
+		return j.Name + " has not run once since the panel started"
+	default:
+		return fmt.Sprintf("%s last ran %s ago", j.Name, now.Sub(j.LastRun).Truncate(time.Second))
+	}
 }

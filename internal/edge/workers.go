@@ -226,6 +226,73 @@ func buildUpload(meta uploadMetadata, script []byte) ([]byte, string, error) {
 	return buf.Bytes(), w.FormDataContentType(), nil
 }
 
+// --- cron triggers ----------------------------------------------------------
+
+// DefaultCrons is the schedule the Worker's scheduled() handler runs on: the
+// clean-IP refresh, the external-subscription merge, the feed pull and the
+// update check (deploy/cloudflare/forgeedge/src/worker.ts). It mirrors the
+// "triggers" block in wrangler.jsonc.
+//
+// That wrangler block was the ONLY place the cron was ever declared, and the
+// panel never runs wrangler — it PUTs the prebuilt bundle at the API directly.
+// So every Worker the panel deployed had a scheduled() handler that nothing
+// ever invoked: clean IPs went stale, external subs were never merged, and the
+// update check never ran, all silently.
+var DefaultCrons = []string{"17 */6 * * *"}
+
+// PutSchedules registers the Worker's cron triggers, replacing whatever it had.
+//
+// Registered with its own call rather than a "triggers" field in the upload
+// metadata: the multipart metadata form of triggers is undocumented and has
+// been dropped by the API without an error, which would leave exactly the
+// silent no-op this exists to fix. PUT .../schedules answers with the schedule
+// list it stored, so a failure is a failure.
+func (c *Client) PutSchedules(ctx context.Context, name string, crons []string) error {
+	if err := c.requireAccount("put-schedules"); err != nil {
+		return err
+	}
+	// The API takes a bare array of {cron} objects; an empty array clears the
+	// triggers, which is a legitimate thing to ask for.
+	body := make([]map[string]string, 0, len(crons))
+	for _, cron := range crons {
+		cron = strings.TrimSpace(cron)
+		if cron == "" {
+			continue
+		}
+		body = append(body, map[string]string{"cron": cron})
+	}
+	_, err := c.do(ctx, http.MethodPut, c.acctPath("workers", "scripts", name, "schedules"), nil, body,
+		"put-schedules", ScopeWorkersScripts)
+	return err
+}
+
+// Schedules lists the cron triggers currently registered for a Worker.
+func (c *Client) Schedules(ctx context.Context, name string) ([]string, error) {
+	if err := c.requireAccount("list-schedules"); err != nil {
+		return nil, err
+	}
+	env, err := c.do(ctx, http.MethodGet, c.acctPath("workers", "scripts", name, "schedules"), nil, nil,
+		"list-schedules", ScopeWorkersScripts)
+	if err != nil {
+		return nil, err
+	}
+	// The result is {"schedules":[{"cron":"..."}]} on a GET, even though the PUT
+	// takes the bare array.
+	var res struct {
+		Schedules []struct {
+			Cron string `json:"cron"`
+		} `json:"schedules"`
+	}
+	if err := json.Unmarshal(env.Result, &res); err != nil {
+		return nil, decodeError("list-schedules", err)
+	}
+	out := make([]string, 0, len(res.Schedules))
+	for _, s := range res.Schedules {
+		out = append(out, s.Cron)
+	}
+	return out, nil
+}
+
 // DeleteScript removes a Worker. Every subscription URL it served dies with it.
 func (c *Client) DeleteScript(ctx context.Context, name string) error {
 	if err := c.requireAccount("delete-script"); err != nil {

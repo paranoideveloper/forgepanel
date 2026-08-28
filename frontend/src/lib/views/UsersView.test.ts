@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import UsersView from './UsersView.svelte';
+import { DEFAULT_PRESENCE_TTL_SECONDS, setPresenceTtlSeconds } from '$lib/presence';
 
 // Credential rotation. The API has always taken three independent flags and the
 // panel sent all three every time, so an operator who only wanted to hand out a
@@ -358,5 +359,62 @@ describe('UsersView subscription output settings', () => {
     await screen.findByText('alice');
     await screen.findByTestId('clean-ips');
     expect(screen.queryByTestId('clean-ip-empty')).toBeNull();
+  });
+});
+
+// The presence dot answers "is this user online" — the same question the Online
+// screen answers — and it used to answer it with its own three-minute window
+// while the backend expires presence after two. A user idle for 2m30s was green
+// here and already gone from Online.
+describe('UsersView presence dot', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setPresenceTtlSeconds(DEFAULT_PRESENCE_TTL_SECONDS);
+  });
+
+  function stubUsers(rows: any[]) {
+    (globalThis as any).fetch = async (url: string) => {
+      const table: Record<string, any> = {
+        '/api/admin/users': rows,
+        '/api/admin/groups': [],
+        '/api/admin/inbounds': [],
+        '/api/admin/settings/subscription': subSettings
+      };
+      return { ok: true, json: async () => table[String(url)] ?? {} } as Response;
+    };
+  }
+
+  it('uses the shared presence window, not a longer one of its own', async () => {
+    const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+    stubUsers([
+      { ...user, id: 7, username: 'alice', last_seen_at: ago(30) },
+      // 150s is inside the old local three-minute window and outside the shared
+      // two-minute one. This row is the whole disagreement.
+      { ...user, id: 8, username: 'bob', last_seen_at: ago(150) },
+      { ...user, id: 9, username: 'carol', last_seen_at: null }
+    ]);
+
+    render(UsersView);
+    await screen.findByText('alice');
+
+    expect(screen.getByTestId('presence-7').className).toContain('online');
+    expect(screen.getByTestId('presence-8').className).not.toContain('online');
+    expect(screen.getByTestId('presence-9').className).not.toContain('online');
+  });
+
+  it('widens with the window the server published', async () => {
+    // The Online screen hands the server's ttl_seconds to the shared module;
+    // this row must follow it rather than stay pinned to a compiled-in number.
+    // 400s is outside both the shared default AND the three-minute window this
+    // view used to carry, so only a dot that actually follows the server value
+    // shows bob as online.
+    setPresenceTtlSeconds(600);
+    const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+    stubUsers([{ ...user, id: 8, username: 'bob', last_seen_at: ago(400) }]);
+
+    render(UsersView);
+    await screen.findByText('bob');
+
+    expect(screen.getByTestId('presence-8').className).toContain('online');
   });
 });

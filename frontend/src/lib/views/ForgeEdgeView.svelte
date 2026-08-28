@@ -33,6 +33,16 @@
   let accountId = $state('');
   let workerName = $state('');
   let proxyIP = $state('');
+  // `force` is the one deploy field the API accepted that the form never sent.
+  // Without it a name collision came back 409 "a Worker named X already exists"
+  // and the operator had no way forward: no control set force, so redeploying
+  // over their OWN worker was impossible from the panel. It is deliberately not
+  // the default — silently overwriting somebody else's worker is worse than the
+  // 409.
+  let force = $state(false);
+  // The message from a 409, kept so the retry offer can be shown next to the
+  // form rather than living only in a toast that has already faded.
+  let conflict = $state('');
   let deploying = $state(false);
   let lastResult = $state<DeployResult['deployment'] | null>(null);
   let warpingId = $state<number | null>(null);
@@ -58,18 +68,24 @@
 
   function panelUrl(d: Deployment) { return `${d.origin}/${d.secure_path}/panel`; }
 
-  async function deploy() {
+  // `overwrite` defaults to the checkbox, and the retry offered after a 409
+  // passes true explicitly. It must be called as deploy(), never bound straight
+  // to onclick: a handler receives the MouseEvent as its first argument, and a
+  // truthy event would force every deploy.
+  async function deploy(overwrite: boolean = force) {
     if (!apiToken.trim() || !accountId.trim()) {
       showToast(tr('forgeedge.paste_a_cloudflare_api_token_and'), 'error');
       return;
     }
     deploying = true;
+    conflict = '';
     try {
       const res = await apiFetch<DeployResult>('/admin/edge/deploy', {
         method: 'POST',
         body: JSON.stringify({
           api_token: apiToken.trim(), account_id: accountId.trim(),
           name: workerName.trim() || undefined, proxy_ip: proxyIP.trim() || undefined,
+          force: overwrite,
         }),
       });
       lastResult = res.deployment;
@@ -80,6 +96,9 @@
       }
       await load();
     } catch (e: any) {
+      // 409 is the name collision, and the only failure the operator can clear
+      // from here. Offer the overwrite instead of leaving them at a dead end.
+      if (e?.status === 409) conflict = e?.message || tr('forgeedge.deploy_failed');
       showToast(e?.message || tr('forgeedge.deploy_failed'), 'error');
     } finally {
       deploying = false;
@@ -180,8 +199,16 @@
         <label>{tr('forgeedge.worker_name')} <span class="opt">{tr('forgeedge.optional')}</span><input type="text" bind:value={workerName} placeholder={tr('forgeedge.auto_generated')} /></label>
         <label>{tr('forgeedge.proxy_ip')} <span class="opt">{tr('forgeedge.optional_relay_for_cloudflare_hosted_sites')}</span><input type="text" bind:value={proxyIP} placeholder={tr('forgeedge.host_port')} /></label>
       </div>
-      <button class="btn primary" onclick={deploy} disabled={deploying}>{deploying ? tr('forgeedge.deploying') : tr('forgeedge.deploy_to_cloudflare')}</button>
+      <label class="check"><input type="checkbox" data-testid="edge-force" bind:checked={force} /> {tr('forgeedge.overwrite_an_existing_worker')} <span class="opt">{tr('forgeedge.only_needed_when_the_name_is')}</span></label>
+      <button class="btn primary" data-testid="edge-deploy" onclick={() => deploy()} disabled={deploying}>{deploying ? tr('forgeedge.deploying') : tr('forgeedge.deploy_to_cloudflare')}</button>
       <p class="note">{tr('forgeedge.the_token_is_used_only_for')}</p>
+
+      {#if conflict}
+        <div class="conflict">
+          <div>{conflict}</div>
+          <button class="btn sm" data-testid="edge-force-retry" onclick={() => deploy(true)} disabled={deploying}>{tr('forgeedge.overwrite_and_redeploy')}</button>
+        </div>
+      {/if}
 
       {#if lastResult}
         <div class="result">
@@ -262,6 +289,9 @@
   .btn.warp:hover { background: rgba(39,209,124,.15); }
   .btn.warp:disabled { opacity: .6; cursor: default; }
   .note { color: rgba(255,255,255,.35); font-size: 11px; margin: 8px 0 0; }
+  .check { flex-direction: row; align-items: center; gap: 7px; margin-bottom: 12px; font-size: 12px; }
+  .check input { width: auto; }
+  .conflict { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; font-size: 12px; color: #ffaa1a; background: rgba(255,170,26,.1); border: 1px solid rgba(255,170,26,.3); border-radius: 8px; }
   .result { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
   .ok-row { color: #27d17c; font-size: 13px; margin-bottom: 8px; }
   .urlrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }

@@ -28,6 +28,9 @@ type cfMock struct {
 	Domains    map[string][]string // worker name -> hostnames
 	Requests   []string
 	SubEnabled map[string]bool
+	// Schedules is the cron trigger list per worker, exactly as Cloudflare
+	// keeps it: attached to the script, and gone when the script is deleted.
+	Schedules map[string][]string
 
 	// LastUpload records the parsed metadata and script of the last PUT, which
 	// is how keep_bindings and the SECURE_PATH binding are asserted.
@@ -53,7 +56,7 @@ func newCFMock(t *testing.T) *cfMock {
 		Accounts: []Account{{ID: "acct-1", Name: "Acme"}},
 		Scripts:  map[string]ScriptInfo{}, KV: map[string]KVNamespace{},
 		D1: map[string]D1Database{}, Domains: map[string][]string{},
-		SubEnabled: map[string]bool{},
+		SubEnabled: map[string]bool{}, Schedules: map[string][]string{},
 		Deny:       map[string]apiMessage{}, DenyStatus: map[string]int{},
 		Subdomain: "acme",
 	}
@@ -203,6 +206,11 @@ func (m *cfMock) handleScripts(w http.ResponseWriter, r *http.Request, rest stri
 	rest = strings.TrimPrefix(rest, "/")
 	name, sub, _ := strings.Cut(rest, "/")
 
+	if sub == "schedules" {
+		m.handleSchedules(w, r, name)
+		return
+	}
+
 	if sub == "subdomain" && r.Method == http.MethodPost {
 		m.mu.Lock()
 		m.SubEnabled[name] = true
@@ -240,6 +248,10 @@ func (m *cfMock) handleScripts(w http.ResponseWriter, r *http.Request, rest stri
 		m.mu.Lock()
 		_, ok := m.Scripts[name]
 		delete(m.Scripts, name)
+		// Schedules live on the script, so deleting it drops them. Modelling
+		// that is the point: it is why the deploy registers the cron after the
+		// heal step rather than before it.
+		delete(m.Schedules, name)
 		if m.OnDeleteScript != nil {
 			m.OnDeleteScript(name)
 		}
@@ -250,6 +262,47 @@ func (m *cfMock) handleScripts(w http.ResponseWriter, r *http.Request, rest stri
 			return
 		}
 		m.writeEnvelope(w, http.StatusOK, map[string]any{"id": name})
+	}
+}
+
+// handleSchedules models PUT/GET .../scripts/{name}/schedules. The PUT body is
+// a bare array of {cron} objects; the GET result wraps it in {"schedules":[…]},
+// which is the asymmetry the client has to cope with.
+func (m *cfMock) handleSchedules(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodPut:
+		var body []struct {
+			Cron string `json:"cron"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			m.writeEnvelope(w, http.StatusBadRequest, nil,
+				apiMessage{Code: 1004, Message: "schedules body is not a JSON array: " + err.Error()})
+			return
+		}
+		crons := []string{}
+		for _, b := range body {
+			crons = append(crons, b.Cron)
+		}
+		m.mu.Lock()
+		_, known := m.Scripts[name]
+		if known {
+			m.Schedules[name] = crons
+		}
+		m.mu.Unlock()
+		if !known {
+			m.writeEnvelope(w, http.StatusNotFound, nil,
+				apiMessage{Code: 10007, Message: "workers.api.error.script_not_found"})
+			return
+		}
+		m.writeEnvelope(w, http.StatusOK, map[string]any{"schedules": body})
+	case http.MethodGet:
+		m.mu.Lock()
+		out := []map[string]string{}
+		for _, c := range m.Schedules[name] {
+			out = append(out, map[string]string{"cron": c})
+		}
+		m.mu.Unlock()
+		m.writeEnvelope(w, http.StatusOK, map[string]any{"schedules": out})
 	}
 }
 

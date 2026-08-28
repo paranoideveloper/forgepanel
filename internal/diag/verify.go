@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -25,7 +27,17 @@ type Result struct {
 	Pass       bool      `json:"pass"`
 	LatencyMs  int64     `json:"latency_ms"`
 	Finding    Finding   `json:"finding"`
-	ClientLog  string    `json:"client_log,omitempty"`
+	ClientLog string `json:"client_log,omitempty"`
+	// ServerLog is the INBOUND core's own output.
+	//
+	// It was thrown away, and it is the only witness for a whole class of
+	// failure: when the server accepts a connection and then tears it down —
+	// because its ShadowTLS camouflage target is dead, because a detour points
+	// nowhere — the client sees nothing but "connection reset by peer". That is
+	// indistinguishable from a firewall, so the verdict said "confirm the core is
+	// listening and the firewall permits it" about a core that was listening and
+	// a firewall that was not involved, which is worse than saying nothing.
+	ServerLog string `json:"server_log,omitempty"`
 	VerifiedAt time.Time `json:"verified_at"`
 	// Unprovable marks a config that cannot be proven by this loopback harness —
 	// REALITY (needs a live TLS-1.3 dest) and the UDP/QUIC protocols (TUIC,
@@ -90,7 +102,7 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 		bin = FindSingbox()
 	}
 	if bin == "" {
-		return Result{Pass: false, VerifiedAt: now, Finding: New("FP-VERIFY-FAIL", "sing-box binary not available to run the verification")}
+		return fail(now, "FP-VERIFY-CORE-DOWN", "sing-box binary not available to run the verification")
 	}
 
 	// A known local origin the tunnelled request must reach intact.
@@ -109,7 +121,7 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	srv.Port = srvPort
 	srvIn, err := render.SingboxInbound(srv)
 	if err != nil {
-		return fail(now, "cannot render server inbound: "+err.Error())
+		return fail(now, "FP-VERIFY-CONFIG", "cannot render server inbound: "+err.Error())
 	}
 	serverCfg := map[string]any{
 		"log":       map[string]any{"level": "error"},
@@ -129,7 +141,7 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	// hands to clients carries no traffic.
 	rendered, err := render.SingboxOutbounds(cli)
 	if err != nil {
-		return fail(now, "cannot render client outbound: "+err.Error())
+		return fail(now, "FP-VERIFY-CONFIG", "cannot render client outbound: "+err.Error())
 	}
 	render.RetagOutbounds(rendered, "proxy")
 	clientOuts := make([]any, 0, len(rendered)+1)
@@ -154,25 +166,27 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
+	var serverLog capture
 	serverProc := exec.CommandContext(sctx, bin, "run", "-c", filepath.Join(dir, "server.json"))
+	serverProc.Stderr = &serverLog
 	if err := serverProc.Start(); err != nil {
-		return fail(now, "server core failed to start: "+err.Error())
+		return fail(now, "FP-VERIFY-CORE-DOWN", "server core failed to start: "+err.Error())
 	}
 	defer kill(serverProc)
 	if !waitPort("127.0.0.1", srvPort, 5*time.Second) {
-		return fail(now, "server core did not open its port")
+		return fail(now, "FP-VERIFY-CORE-DOWN", "server core did not open its port")
 	}
 
 	var clientLog capture
 	clientProc := exec.CommandContext(sctx, bin, "run", "-c", filepath.Join(dir, "client.json"))
 	clientProc.Stderr = &clientLog
 	if err := clientProc.Start(); err != nil {
-		return fail(now, "client core failed to start: "+err.Error())
+		return fail(now, "FP-VERIFY-CORE-DOWN", "client core failed to start: "+err.Error())
 	}
 	defer kill(clientProc)
 	if !waitPort("127.0.0.1", socksPort, 5*time.Second) {
 		return Result{Pass: false, VerifiedAt: now, ClientLog: clientLog.String(),
-			Finding: New("FP-VERIFY-FAIL", "client core did not open its SOCKS port")}
+			Finding: New("FP-VERIFY-CORE-DOWN", "client core did not open its SOCKS port")}
 	}
 
 	// Real traffic: HTTP GET through the SOCKS tunnel.
@@ -180,10 +194,16 @@ func VerifySingbox(ctx context.Context, node *model.Node, cores Cores) Result {
 	got, err := fetchThroughSocks(socksPort, origin.URL)
 	lat := time.Since(start).Milliseconds()
 	if err != nil || got != body {
-		return Result{Pass: false, LatencyMs: lat, VerifiedAt: now, ClientLog: clientLog.String(),
-			Finding: New("FP-VERIFY-FAIL", fmt.Sprintf("traffic did not arrive intact: got %q err %v", got, err))}
+		// One "verification failed" for every runtime failure sent operators
+		// hunting through a client log for a cause the evidence already named,
+		// so the cause is classified here and carried in the code.
+		log := clientLog.waitForLog(500 * time.Millisecond)
+		slog := serverLog.waitForLog(500 * time.Millisecond)
+		code := classifyVerifyFailure(err, got, body, log, slog)
+		return Result{Pass: false, LatencyMs: lat, VerifiedAt: now, ClientLog: log, ServerLog: slog,
+			Finding: New(code, fmt.Sprintf("traffic did not arrive intact: got %q err %v", got, err))}
 	}
-	return Result{Pass: true, LatencyMs: lat, VerifiedAt: now, Finding: New("FP-VERIFY-OK", fmt.Sprintf("%dms", lat))}
+	return Result{Pass: true, LatencyMs: lat, VerifiedAt: now, Finding: New(verifySuccessCode(lat), fmt.Sprintf("%dms", lat))}
 }
 
 // --- helpers --------------------------------------------------------------
@@ -195,8 +215,124 @@ func clone(n *model.Node) *model.Node {
 	return &c
 }
 
-func fail(now time.Time, msg string) Result {
-	return Result{Pass: false, VerifiedAt: now, Finding: New("FP-VERIFY-FAIL", msg)}
+// fail builds a failed Result under a taxonomy code. Every failure path names
+// the cause it actually observed rather than the generic FP-VERIFY-FAIL, which
+// is now reserved for evidence that points at nothing in particular.
+func fail(now time.Time, code, msg string) Result {
+	return Result{Pass: false, VerifiedAt: now, Finding: New(code, msg)}
+}
+
+// degradedLatencyMs is the loopback round trip above which a pass is reported
+// as degraded. Both cores run on this machine with no network in between, so a
+// healthy round trip is tens of milliseconds; seconds means the core is starved
+// or the transport is doing something expensive and wrong.
+const degradedLatencyMs = 2000
+
+// verifySuccessCode grades a pass. The tunnel carried traffic either way, so
+// Result.Pass stays true; the code is what tells the operator it is not healthy.
+func verifySuccessCode(latencyMs int64) string {
+	if latencyMs >= degradedLatencyMs {
+		return "FP-VERIFY-DEGRADED"
+	}
+	return "FP-VERIFY-OK"
+}
+
+// classifyVerifyFailure maps the transport error and the client core's log onto
+// the failure taxonomy: net_unreachable, handshake_failed, auth_rejected or
+// tunnel_no_data. It returns the generic FP-VERIFY-FAIL when nothing in the
+// evidence distinguishes a cause, because naming the wrong cause is worse than
+// admitting we do not know which one it was.
+func classifyVerifyFailure(err error, got, want, clientLog, serverLog string) string {
+	// The SERVER's own log is consulted first, because it is the only witness
+	// for a failure the server causes and then hides.
+	//
+	// When the inbound accepts a connection and tears it down — its ShadowTLS
+	// camouflage host is dead, a detour points nowhere — the client sees
+	// "connection reset by peer" and nothing else. That is byte-identical to
+	// what a firewall produces, so classifying from the client alone returned
+	// FP-VERIFY-NET-UNREACHABLE, whose remedy is "confirm the core is listening
+	// on that port and that the host firewall permits it" — advice about a core
+	// that WAS listening and a firewall that was not involved. Sending an
+	// operator to inspect the wrong subsystem is worse than the generic verdict
+	// this taxonomy replaced.
+	if c := classifyFromServerLog(serverLog); c != "" {
+		return c
+	}
+	if err == nil {
+		// The request completed, so the tunnel was up end to end — the payload
+		// itself is what did not survive.
+		if got != want {
+			return "FP-VERIFY-NO-DATA"
+		}
+		return "FP-VERIFY-FAIL"
+	}
+	// The client core's own log is the better witness: the SOCKS layer collapses
+	// every remote cause into "general SOCKS server failure".
+	hay := strings.ToLower(err.Error() + "\n" + clientLog)
+	// Auth is checked first: an authentication rejection usually also tears the
+	// connection down, so the log carries reset/EOF noise alongside the real
+	// cause and a network-first order would mislabel it.
+	for _, m := range []string{
+		"authentication failed", "auth failed", "authentication error",
+		"invalid user", "unknown user", "user not found", "unauthorized",
+		"wrong password", "invalid password", "bad password",
+		"invalid request from", "invalid uuid", "invalid key",
+	} {
+		if strings.Contains(hay, m) {
+			return "FP-VERIFY-AUTH"
+		}
+	}
+	for _, m := range []string{
+		"handshake", "tls:", "x509", "certificate", "bad record mac",
+		"unknown certificate", "protocol version", "reality",
+	} {
+		if strings.Contains(hay, m) {
+			return "FP-VERIFY-HANDSHAKE"
+		}
+	}
+	for _, m := range []string{
+		"connection refused", "connection reset", "no route to host",
+		"network is unreachable", "host is unreachable", "i/o timeout",
+		"broken pipe", "eof", "timeout",
+	} {
+		if strings.Contains(hay, m) {
+			return "FP-VERIFY-NET-UNREACHABLE"
+		}
+	}
+	return "FP-VERIFY-FAIL"
+}
+
+// classifyFromServerLog names a cause the inbound core reported about itself,
+// or "" when its log says nothing decisive.
+//
+// Only server-side causes belong here. A reset or a timeout in the server log
+// is as ambiguous as it is in the client's, so those are deliberately absent:
+// this returns a verdict only when the server has said something the client
+// could not possibly know.
+func classifyFromServerLog(serverLog string) string {
+	if strings.TrimSpace(serverLog) == "" {
+		return ""
+	}
+	hay := strings.ToLower(serverLog)
+	// The inbound could not reach something IT dials — the ShadowTLS handshake
+	// host being the case that motivated this. The connection dies at the
+	// server, and the client cannot tell that from a blocked port.
+	for _, m := range []string{
+		"handshake", "shadowtls", "tls:", "x509", "certificate", "reality",
+	} {
+		if strings.Contains(hay, m) {
+			return "FP-VERIFY-HANDSHAKE"
+		}
+	}
+	for _, m := range []string{
+		"authentication failed", "auth failed", "invalid user", "unknown user",
+		"wrong password", "invalid password", "invalid request from",
+	} {
+		if strings.Contains(hay, m) {
+			return "FP-VERIFY-AUTH"
+		}
+	}
+	return ""
 }
 
 func writeJSON(path string, v any) {
@@ -249,15 +385,47 @@ func fetchThroughSocks(socksPort int, url string) (string, error) {
 	return string(b), nil
 }
 
-type capture struct{ b []byte }
+// capture collects a bounded head of the client core's stderr. os/exec copies
+// stderr on its own goroutine, so String() is read while Write() may still be
+// running: the mutex is what makes that legal rather than a data race.
+type capture struct {
+	mu sync.Mutex
+	b  []byte
+}
 
 func (c *capture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if len(c.b) < 8192 {
 		c.b = append(c.b, p...)
 	}
 	return len(p), nil
 }
-func (c *capture) String() string { return string(c.b) }
+
+func (c *capture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.b)
+}
+
+// waitForLog gives the client core a moment to flush the line explaining a
+// failure. The core writes its log from another process, so reading it the
+// instant the request fails usually catches nothing — and an empty log is
+// exactly the evidence classifyVerifyFailure needs to name the cause, so
+// without this wait a resettable connection is regularly reported as the
+// generic "we do not know why" verdict.
+func (c *capture) waitForLog(d time.Duration) string {
+	deadline := time.Now().Add(d)
+	for {
+		if s := c.String(); s != "" {
+			return s
+		}
+		if time.Now().After(deadline) {
+			return ""
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // socksDialer returns a DialContext that routes through a SOCKS5 proxy.
 func socksDialer(addr string) (func(ctx context.Context, network, target string) (net.Conn, error), error) {

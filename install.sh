@@ -507,6 +507,69 @@ resolve_host() {
 }
 
 # ---------------------------------------------------------------------------
+# Host clock
+# ---------------------------------------------------------------------------
+# VMess AEAD stamps a timestamp into every request and REALITY/TLS reject a
+# handshake from a host whose clock has drifted, so an unsynchronised server
+# looks exactly like a credential bug: the panel is healthy, the links are
+# correct, and every client fails to connect. Check it at install time, and fix
+# it when we can, so nobody has to discover it the hard way.
+#
+# Sets TIME_SYNC_STATE to one of: synced | unsynced | unknown.
+TIME_SYNC_STATE="unknown"
+
+check_time_sync() {
+  TIME_SYNC_STATE="unknown"
+  if ! command -v timedatectl >/dev/null 2>&1; then
+    warn "timedatectl was not found — this host's clock cannot be checked."
+    info "Install systemd-timesyncd or chrony: a drifting clock breaks REALITY/TLS and VMess."
+    return 0
+  fi
+
+  local synced=""
+  synced=$(timedatectl show -p NTPSynchronized 2>/dev/null | sed -n 's/^NTPSynchronized=//p' | head -n1)
+  if [[ "$synced" == "yes" ]]; then
+    TIME_SYNC_STATE="synced"
+    ok "Clock: synchronised over NTP"
+    return 0
+  fi
+
+  # Not synced. If a time daemon is installed, turning it on is a one-liner, so
+  # do it rather than hand the operator a chore. A dry run changes nothing, so
+  # it only reports.
+  local want_fix=0
+  if [[ "$DRY_RUN" != "1" ]]; then
+    if [[ "$ASSUME_YES" == "1" || "$INTERACTIVE" != "1" ]]; then
+      want_fix=1
+    elif confirm "The clock is not synchronised. Enable NTP now?" "yes"; then
+      want_fix=1
+    fi
+  fi
+  # set-ntp fails when no time daemon is installed at all; only then is waiting
+  # for it to converge pointless, so the poll is gated on it succeeding.
+  if [[ "$want_fix" == "1" ]] && timedatectl set-ntp true >/dev/null 2>&1; then
+    local i
+    for i in 1 2 3 4 5; do
+      synced=$(timedatectl show -p NTPSynchronized 2>/dev/null | sed -n 's/^NTPSynchronized=//p' | head -n1)
+      [[ "$synced" == "yes" ]] && break
+      sleep 1
+    done
+  fi
+
+  if [[ "$synced" == "yes" ]]; then
+    TIME_SYNC_STATE="synced"
+    ok "Clock: synchronised over NTP"
+    return 0
+  fi
+
+  TIME_SYNC_STATE="unsynced"
+  warn "This host's clock is NOT synchronised."
+  info "Install a time daemon (apt install systemd-timesyncd, or chrony) and run: timedatectl set-ntp true"
+  info "Until then REALITY/TLS handshakes and VMess may fail even though the panel is configured correctly."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Uninstall
 # ---------------------------------------------------------------------------
 do_uninstall() {
@@ -562,6 +625,7 @@ step_system() {
   if [[ "$REPAIR" == "1" ]]; then
     info "Repair mode will verify and replace the managed binaries, unit, and manifest."
   fi
+  check_time_sync
 }
 
 step_network() {

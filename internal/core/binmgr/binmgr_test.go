@@ -74,12 +74,13 @@ func TestVersionForAndAssetName(t *testing.T) {
 		t.Fatal("versionFor(EngineSingbox) mismatch")
 	}
 
-	aName, err := xrayAsset()
+	aName, err := assetFor(EngineXray, hostPlatform())
 	if err != nil || len(aName) == 0 {
-		t.Fatalf("xrayAsset() failed: %v", err)
+		t.Fatalf("assetFor(xray, host) failed: %v", err)
 	}
 
-	if len(goarchToSB()) == 0 {
-		t.Fatal("goarchToSB() returned empty")
+	sbName, err := assetFor(EngineSingbox, hostPlatform())
+	if err != nil || len(sbName) == 0 {
+		t.Fatalf("assetFor(sing-box, host) failed: %v", err)
 	}
 }
