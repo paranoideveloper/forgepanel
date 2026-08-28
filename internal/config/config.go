@@ -72,6 +72,7 @@ type Config struct {
 	TelegramAdmins string `json:"-"`
 
 	panel     *PanelSettings
+	paas      PaaS
 	firstBoot bool
 }
 
@@ -209,13 +210,40 @@ func load(dataDir string, bootstrapFromEnv bool) (*Config, error) {
 		panel.ACME.Challenge = "http-01"
 	}
 
+	// panel.json is written BEFORE the platform overrides are applied, so what
+	// is persisted stays the operator's own configuration. The overrides are a
+	// view of this deploy — a port assigned for this container, a hostname the
+	// platform owns — and writing them back would bake one deploy's accident
+	// into the saved settings and leave a wrong port behind on any move off the
+	// platform.
 	cfg.panel = panel
 	cfg.AdminPath = panel.AdminPath
 	cfg.PanelPort = panel.Port
 	if err := savePanel(panelPath, panel); err != nil {
 		return nil, err
 	}
+
+	// bootstrapFromEnv is false for the local administration tools, which must
+	// keep reporting panel.json as written rather than a view coloured by
+	// whatever environment they happen to be run from.
+	if bootstrapFromEnv {
+		cfg.paas = DetectPaaS()
+		cfg.applyPaaSOverrides()
+	}
 	return cfg, nil
+}
+
+// applyPaaSOverrides re-imposes the platform's address on the in-memory
+// settings. It runs after every load of panel.json — including the reload that
+// follows a settings change in the UI — because a saved port that the platform
+// does not route to takes the panel off the air on the next restart, and the
+// operator who saved it has no way back in to undo it.
+func (c *Config) applyPaaSOverrides() {
+	if !c.paas.Enabled || c.panel == nil {
+		return
+	}
+	c.paas.applyPaaS(c.panel)
+	c.PanelPort = c.panel.Port
 }
 
 // Panel returns the mutable panel settings (address, ACME, setup state).
@@ -235,6 +263,7 @@ func (c *Config) ReloadPanel() error {
 	c.panel = p
 	c.AdminPath = p.AdminPath
 	c.PanelPort = p.Port
+	c.applyPaaSOverrides()
 	return nil
 }
 

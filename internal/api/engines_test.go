@@ -101,20 +101,39 @@ func TestTheReloadPathUsesTheFilteredSpecList(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	i := strings.Index(body, "bundle, _ := s.engine.ReloadSpecs(specs)")
+	i := strings.Index(body, "s.engine.ReloadSpecs(specs)")
 	if i < 0 {
 		t.Fatal("could not find the reload call — this guard needs updating, not deleting")
 	}
 	// The assignment to specs immediately above the reload.
-	start := strings.LastIndex(body[:i], "specs := ")
+	start := strings.LastIndex(body[:i], "specs")
+	start = strings.LastIndex(body[:start], "\n")
 	if start < 0 {
 		t.Fatal("could not find where specs is built")
 	}
-	line := body[start:i]
-	if !strings.Contains(line, "s.localInboundSpecs()") {
+	line := strings.TrimSpace(body[start:i])
+	if !strings.Contains(line, "s.reloadSpecs()") {
 		t.Errorf("the panel's reload builds specs with %q — if that is the unfiltered list, one "+
-			"inbound bound to a node's address stops the panel's own core from starting at all",
-			strings.TrimSpace(line))
+			"inbound bound to a node's address stops the panel's own core from starting at all", line)
+	}
+
+	// reloadSpecs is an indirection, so following it is part of the guard: it
+	// must still end at the FILTERED list, and must never hand the cores the raw
+	// enabled list. Checking only the call site above would let the filter be
+	// removed one function further down with this test still green.
+	j := strings.Index(body, "func (s *Server) reloadSpecs()")
+	if j < 0 {
+		t.Fatal("reloadSpecs is gone; this guard needs updating")
+	}
+	fn := body[j:]
+	if k := strings.Index(fn[1:], "\nfunc "); k > 0 {
+		fn = fn[:k]
+	}
+	if !strings.Contains(fn, "s.localInboundSpecs()") {
+		t.Error("reloadSpecs no longer returns the filtered list for a normal install")
+	}
+	if strings.Contains(fn, "s.enabledInboundSpecs()") {
+		t.Error("reloadSpecs hands the cores the unfiltered list")
 	}
 }
 

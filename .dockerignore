@@ -29,6 +29,12 @@ docker-compose.*.yml
 Makefile
 packaging/
 deploy/
+# …except the PaaS entrypoint, which the PaaS image copies in. Excluding the
+# whole deploy tree used to be right when nothing in it was ever built into an
+# image; deploy/railway/Dockerfile needs its sibling script, and a COPY that
+# names an ignored path fails with "not found" rather than saying it was
+# filtered out of the context.
+!deploy/railway/entrypoint.sh
 
 # Docs — README is kept out of the image; docs/ is published with releases.
 docs/

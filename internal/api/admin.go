@@ -214,8 +214,9 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		})
 		return
 	}
-	applyCreateDefaults(&n) // panel fills in keys/dest/flow/creds so it "just works"
-	s.applyDomain(&n)       // inherit default domain + cascade to SNI/Host/etc.
+	applyCreateDefaults(&n)   // panel fills in keys/dest/flow/creds so it "just works"
+	s.applyDomain(&n)         // inherit default domain + cascade to SNI/Host/etc.
+	s.applyPaaSAddressing(&n) // behind a platform edge the address is not ours to choose
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -250,7 +251,8 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 		return
 	}
 	applyCreateDefaults(&n)
-	s.applyDomain(&n) // inherit default domain + cascade
+	s.applyDomain(&n)         // inherit default domain + cascade
+	s.applyPaaSAddressing(&n) // an edit must not reintroduce an address the platform will not serve
 	if err := n.Validate(); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

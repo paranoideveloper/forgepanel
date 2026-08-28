@@ -120,6 +120,23 @@ func main() {
 	}
 	go func() {
 		var serveErr error
+		// Behind a platform edge, serve PLAIN HTTP.
+		//
+		// The edge already terminated TLS for the client and forwards the
+		// decrypted request inward over http. Answering that with a TLS
+		// handshake fails every request — and it fails in the least helpful
+		// way, because the platform reports it as the app being unhealthy
+		// rather than as a protocol mismatch. There is nothing to secure on
+		// this hop: it is a loopback-equivalent link inside the platform, and
+		// the certificate the client verified is the edge's.
+		if cfg.PaaS().Enabled {
+			serveErr = httpSrv.Serve(ln)
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				fmt.Fprintln(os.Stderr, "forgepanel: serve:", serveErr)
+				os.Exit(1)
+			}
+			return
+		}
 		// HTTPS by default: the panel always serves TLS. With a domain it uses the
 		// ACME/imported certificate; with no domain it falls back to a self-signed
 		// cert (browser warning, but the admin session and every config secret are
@@ -206,6 +223,10 @@ func start() (*config.Config, *api.Server, net.Listener, error) {
 func banner(cfg *config.Config, srv *api.Server) {
 	p := cfg.Panel()
 	scheme := "https" // the panel always serves TLS (self-signed without a domain)
+	pa := cfg.PaaS()
+	if pa.Enabled {
+		scheme = "http"
+	}
 	fmt.Println("┌─────────────────────────────────────────────┐")
 	fmt.Println("│  ⚡ ForgePanel                               │")
 	fmt.Println("└─────────────────────────────────────────────┘")
@@ -216,6 +237,15 @@ func banner(cfg *config.Config, srv *api.Server) {
 		fmt.Printf("  Panel:  %s\n", srv.PublicURL())
 	}
 	fmt.Printf("  Listen: %s://%s:%d  (data: %s)\n", scheme, orAll(p.BindAddress), p.Port, cfg.DataDir)
+	if pa.Enabled {
+		// Say plainly what was detected and what it changed. A platform's log is
+		// often the only diagnostic surface an operator has there — no shell, no
+		// journal — so the mode being on has to be visible in it, or an inbound
+		// that quietly went loopback-only looks like a bug in the panel.
+		fmt.Printf("  PaaS:   %s — the edge terminates TLS on %s:443 and forwards plain HTTP here;\n",
+			pa.Platform, pa.Domain)
+		fmt.Println("          inbounds share this one port and are told apart by their transport path.")
+	}
 	if srv.SetupToken != "" {
 		fmt.Println("  ── FIRST RUN — create your administrator account ──")
 		fmt.Println("  Open the panel URL above and complete setup with this one-time token:")

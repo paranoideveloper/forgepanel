@@ -145,6 +145,22 @@ func (s *Server) engineUnavailable(c *gin.Context) {
 // inbounds + their users. Called after any inbound/user mutation and at boot.
 // Errors are non-fatal (surfaced via /api/admin/engines): a panel must not crash
 // because a core failed to download or a saved config is rejected.
+// reloadSpecs picks the inbound list this deployment can actually serve.
+//
+// A normal install serves what it can bind on its own interfaces. Behind a
+// platform edge there is one port and no interface of our own, so the specs are
+// rewritten for loopback and the routing table that fronts them is republished
+// here — in the same step, because a table that disagrees with what the cores
+// were just told routes traffic to a port nothing is listening on.
+func (s *Server) reloadSpecs() ([]engine.InboundSpec, []engine.SkippedInbound) {
+	if s.cfg != nil && s.cfg.PaaS().Enabled {
+		specs, routes, skipped := s.paasSpecs()
+		s.setPaaSRoutes(routes)
+		return specs, skipped
+	}
+	return s.localInboundSpecs(), nil
+}
+
 func (s *Server) reloadEngines() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -154,8 +170,18 @@ func (s *Server) reloadEngines() {
 	if s.isClosed() || s.engine == nil {
 		return
 	}
-	specs := s.localInboundSpecs()
+	specs, paasSkipped := s.reloadSpecs()
 	bundle, _ := s.engine.ReloadSpecs(specs)
+	// Inbounds this deployment cannot serve at all were dropped before the
+	// cores ever saw them, so the bundle has no idea they exist. Merging them
+	// in is what makes the not-serving column tell the whole truth instead of
+	// only the part the engine layer happened to witness.
+	if len(paasSkipped) > 0 {
+		if bundle == nil {
+			bundle = &engine.Bundle{}
+		}
+		bundle.Skipped = append(bundle.Skipped, paasSkipped...)
+	}
 	// The bundle used to be discarded. It carries the list of inbounds no core
 	// could serve, so throwing it away meant an operator created an inbound, the
 	// panel accepted it, it never carried a byte, and NOTHING anywhere said why.
@@ -164,13 +190,19 @@ func (s *Server) reloadEngines() {
 	// is actually reachable from the internet — otherwise it listens, passes the
 	// loopback Verify, and ufw silently drops every external client (a phone).
 	// Best-effort and backgrounded; never blocks or fails the reload.
-	ports := make([]int, 0, len(specs))
-	for _, sp := range specs {
-		if sp.Node != nil && sp.Node.Port > 0 {
-			ports = append(ports, sp.Node.Port)
+	// Not behind a platform edge: there the inbound ports are loopback-only by
+	// construction, the one public port is the platform's to manage, and
+	// opening a hole for 127.0.0.1:39000 would be a firewall rule for traffic
+	// that can never arrive.
+	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+		ports := make([]int, 0, len(specs))
+		for _, sp := range specs {
+			if sp.Node != nil && sp.Node.Port > 0 {
+				ports = append(ports, sp.Node.Port)
+			}
 		}
+		go firewall.EnsureOpen(ports)
 	}
-	go firewall.EnsureOpen(ports)
 }
 
 // handleEngines returns the supervised cores' live status (spec §6).

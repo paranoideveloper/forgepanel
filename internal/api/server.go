@@ -90,7 +90,7 @@ type Server struct {
 	// what a test must not do. It lives on the Server rather than in a package
 	// variable so two panels in one process cannot share one.
 	poolProber dns.Prober
-	stop     context.CancelFunc
+	stop       context.CancelFunc
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -107,6 +107,13 @@ type Server struct {
 	// edgePush debounces canonical-feed pushes to registered ForgeEdge
 	// deployments (§6); see EdgePushSoon in edge.go.
 	edgePush edgePushState
+
+	// paasRoutes maps a URL path to the loopback port a core bound for it, when
+	// the panel runs behind a platform edge that gives out one port. Rebuilt on
+	// every engine reload and read by the front proxy on every request, so it is
+	// guarded rather than passed. See paas.go.
+	paasMu     sync.RWMutex
+	paasRoutes []paasRoute
 
 	// FirstAdminPassword is retained for API compatibility but is no longer used:
 	// fresh installs create the owner via the token-protected first-run setup flow
@@ -410,6 +417,13 @@ func (s *Server) writePublicURLFile() {
 // panel settings, falling back to the detected server IP when no domain is set.
 func (s *Server) PublicURL() string {
 	p := s.cfg.Panel()
+	// Behind a platform edge the port this process bound is an internal detail
+	// the outside world never dials: the edge listens on 443 of the platform's
+	// hostname and forwards inward. Printing the bound port here would hand the
+	// operator a URL to their own container's private port.
+	if pa := s.cfg.PaaS(); pa.Enabled && pa.Domain != "" {
+		return "https://" + pa.Domain + pa.PublicPortString() + p.AdminPath
+	}
 	// The panel always serves TLS (self-signed with no domain, ACME with one).
 	scheme, defPort := "https", 443
 	host := p.Domain
@@ -424,7 +438,12 @@ func (s *Server) PublicURL() string {
 }
 
 // Handler exposes the underlying http.Handler (for tests and embedding).
-func (s *Server) Handler() http.Handler { return s.router }
+//
+// Behind a platform edge the same handler also fronts the inbounds: they share
+// the one port the platform routes to, so the panel's handler is what decides
+// whether a request is for the panel or for a tunnel. paasFront is the identity
+// wrapper on a normal install.
+func (s *Server) Handler() http.Handler { return s.paasFront(s.router) }
 
 // CertTLSConfig returns the panel's TLS config (imported certs + ACME fallback),
 // used by main to serve the panel over HTTPS.
