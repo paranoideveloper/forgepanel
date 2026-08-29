@@ -33,6 +33,15 @@ const (
 	// TierModern needs a recent client. HTTPUpgrade is in sing-box from 1.8 and
 	// in current Xray, so it covers most of the field but not old installs.
 	TierModern ClientTier = "modern"
+	// TierPlugin needs a client that ships the v2ray-plugin binary — Shadowsocks
+	// for Android, or a desktop client with it installed. iOS cannot: the
+	// platform forbids spawning a subprocess, and a SIP003 plugin is one.
+	TierPlugin ClientTier = "plugin-required"
+	// TierSubscriptionOnly has no share link at all. The inbound works and is
+	// reachable; the ss:// URI scheme simply cannot describe its transport, so
+	// it is delivered through the Xray or JSON subscription instead — those
+	// carry a full client config rather than a link.
+	TierSubscriptionOnly ClientTier = "subscription-only"
 	// TierXrayOnly is Xray-core clients only. sing-box has no XHTTP
 	// implementation at all — a sing-box client cannot even parse the config,
 	// let alone connect — and sing-box is what most iOS and desktop apps embed.
@@ -49,11 +58,17 @@ type paasQuickstartEntry struct {
 
 // paasQuickstartSet is what a platform deployment gets.
 //
-// Shadowsocks is deliberately absent even though the panel serves it over these
-// transports perfectly well. Its URI format has no portable way to carry one,
-// so the link works only in Xray-core clients that accept the non-standard
-// query parameters and silently misleads every other client into dialling plain
-// TCP. A config that cannot be handed to somebody is not worth generating.
+// Shadowsocks appears on all three transports, and its three entries carry
+// three different answers to "how do I hand this to somebody".
+//
+// It was excluded outright at first, on the grounds that an ss:// URI cannot
+// carry a transport. That was too quick twice over. SIP002 has the plugin
+// field, and v2ray-plugin's websocket mode is wire-compatible with what the
+// core serves natively — proven against a live deployment, once mux is
+// disabled. And for the other two, the missing piece is only the LINK: the
+// inbound runs and is reachable, and the Xray and JSON subscriptions carry a
+// full client config with the transport in it, so they are deliverable without
+// any URI at all.
 var paasQuickstartSet = []paasQuickstartEntry{
 	{model.ProtoVLESS, model.NetWS, TierUniversal, "Works in every client. Start here."},
 	{model.ProtoVMess, model.NetWS, TierUniversal, "Works in every client."},
@@ -66,6 +81,13 @@ var paasQuickstartSet = []paasQuickstartEntry{
 	{model.ProtoVLESS, model.NetXHTTP, TierXrayOnly, "Xray-core clients only; sing-box cannot dial XHTTP."},
 	{model.ProtoVMess, model.NetXHTTP, TierXrayOnly, "Xray-core clients only; sing-box cannot dial XHTTP."},
 	{model.ProtoTrojan, model.NetXHTTP, TierXrayOnly, "Xray-core clients only; sing-box cannot dial XHTTP."},
+
+	{model.ProtoShadowsocks, model.NetWS, TierPlugin,
+		"Needs a client carrying v2ray-plugin (Shadowsocks-Android, desktop). Not possible on iOS."},
+	{model.ProtoShadowsocks, model.NetHTTPUpgrade, TierSubscriptionOnly,
+		"No ss:// link exists for this transport — deliver it with the Xray or JSON subscription."},
+	{model.ProtoShadowsocks, model.NetXHTTP, TierSubscriptionOnly,
+		"No ss:// link exists for this transport — deliver it with the Xray or JSON subscription."},
 }
 
 // handlePaaSQuickstart creates every config this platform can serve, in one

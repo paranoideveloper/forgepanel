@@ -560,22 +560,17 @@ func (s *Server) paasProtocolSupport(p model.Protocol) (bool, string) {
 	if isUDPProtocol(p) {
 		return false, "needs UDP, which the platform does not route"
 	}
-	if p == model.ProtoShadowsocks {
-		// The one that runs perfectly and cannot be handed to anybody: the
-		// ss:// URI has nowhere standard to put a transport, so a client reads
-		// the link as plain TCP Shadowsocks and times out. Offering it produces
-		// a config that works in testing and fails for every recipient.
-		return false, "its link cannot carry a transport, so most clients would dial plain TCP and time out"
-	}
+
 	return false, "needs a TCP port of its own, which the platform does not give out"
 }
 
 // paasNarrowTransports keeps only the transports a shared HTTP port can route.
-func (s *Server) paasNarrowTransports(all []string) []string {
+func (s *Server) paasNarrowTransports(p model.Protocol, all []string) []string {
 	if s.cfg == nil || !s.cfg.PaaS().Enabled {
 		return all
 	}
 	ok := map[string]bool{string(model.NetWS): true, string(model.NetHTTPUpgrade): true, string(model.NetXHTTP): true}
+
 	out := make([]string, 0, 3)
 	for _, t := range all {
 		if ok[t] {

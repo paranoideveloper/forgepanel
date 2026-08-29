@@ -1003,7 +1003,7 @@ func (s *Server) handleProtocols(c *gin.Context) {
 		// straight into an inbound that cannot work.
 		m.ServesHere, m.HereNote = s.paasProtocolSupport(p)
 		if m.ServesHere && len(m.Transports) > 0 {
-			m.Transports = s.paasNarrowTransports(m.Transports)
+			m.Transports = s.paasNarrowTransports(p, m.Transports)
 			m.Securities = s.paasNarrowSecurities(m.Securities)
 		}
 		out = append(out, m)

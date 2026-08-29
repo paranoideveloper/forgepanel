@@ -77,15 +77,32 @@ func TestTheQuickstartIsIdempotent(t *testing.T) {
 	}
 }
 
-// Shadowsocks over a web transport runs perfectly on the server and cannot be
-// expressed in a portable ss:// link, so most clients read it as plain TCP and
-// time out. Generating one hands the operator a config that looks fine and
-// fails in somebody else's hands.
-func TestTheQuickstartDoesNotGenerateAConfigMostClientsCannotDial(t *testing.T) {
+// Shadowsocks belongs in the set on all three transports, and the three differ
+// only in HOW you hand one to somebody.
+//
+// The platform routes all three, and the core serves all three. Over WebSocket
+// there is a share link, through SIP003's plugin field. Over httpupgrade and
+// xhttp there is no link — no SIP003 plugin implements those modes — but the
+// Xray and JSON subscriptions carry a full client config and deliver them fine.
+// "No share link" is not "does not work", and the set says which is which.
+func TestShadowsocksIsOfferedOnEveryTransportWithItsDeliveryNamed(t *testing.T) {
+	tiers := map[model.Network]ClientTier{}
 	for _, e := range paasQuickstartSet {
 		if e.Protocol == model.ProtoShadowsocks {
-			t.Errorf("shadowsocks over %s is in the set; its link cannot carry a transport, so "+
-				"most clients dial plain TCP and time out", e.Network)
+			tiers[e.Network] = e.Tier
+		}
+	}
+	for _, want := range []model.Network{model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP} {
+		if _, ok := tiers[want]; !ok {
+			t.Errorf("shadowsocks over %s is missing; the platform routes it and the core serves it", want)
+		}
+	}
+	if tiers[model.NetWS] != TierPlugin {
+		t.Errorf("ss+ws is %q; it needs a client carrying v2ray-plugin", tiers[model.NetWS])
+	}
+	for _, n := range []model.Network{model.NetHTTPUpgrade, model.NetXHTTP} {
+		if tiers[n] != TierSubscriptionOnly {
+			t.Errorf("ss+%s is %q; it has no share link and is delivered by subscription", n, tiers[n])
 		}
 	}
 }
@@ -95,7 +112,7 @@ func TestTheQuickstartDoesNotGenerateAConfigMostClientsCannotDial(t *testing.T) 
 func TestEveryGeneratedConfigSaysWhatCanDialIt(t *testing.T) {
 	s := paasServer(t)
 	body := quickstartAll(t, s).Body.String()
-	for _, want := range []string{"client_support", "universal", "xray-only", "sing-box"} {
+	for _, want := range []string{"client_support", "universal", "xray-only", "sing-box", "subscription"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the response never mentions %q", want)
 		}
@@ -103,10 +120,19 @@ func TestEveryGeneratedConfigSaysWhatCanDialIt(t *testing.T) {
 	// XHTTP is the trap: it is the newest and most attractive transport and the
 	// one sing-box cannot dial at all.
 	for _, e := range paasQuickstartSet {
-		if e.Network == model.NetXHTTP && e.Tier != TierXrayOnly {
+		// XHTTP is Xray-core only for the protocols with a share link.
+		// Shadowsocks over it has no link at all, which is a stricter statement,
+		// so subscription-only is the accurate label rather than a wrong one.
+		if e.Network == model.NetXHTTP && e.Protocol != model.ProtoShadowsocks && e.Tier != TierXrayOnly {
 			t.Errorf("%s over xhttp is labelled %q; sing-box cannot dial XHTTP", e.Protocol, e.Tier)
 		}
-		if e.Network == model.NetWS && e.Tier != TierUniversal {
+		if e.Network == model.NetXHTTP && e.Protocol == model.ProtoShadowsocks && e.Tier != TierSubscriptionOnly {
+			t.Errorf("ss over xhttp is labelled %q; it has no share link at all", e.Tier)
+		}
+		// WebSocket is universal for the protocols a client dials natively.
+		// Shadowsocks is the exception and not because of the transport: it
+		// needs an external v2ray-plugin binary whatever it rides on.
+		if e.Network == model.NetWS && e.Protocol != model.ProtoShadowsocks && e.Tier != TierUniversal {
 			t.Errorf("%s over ws is labelled %q; WebSocket works everywhere", e.Protocol, e.Tier)
 		}
 	}
@@ -242,22 +268,21 @@ func TestThePlatformCatalogueOffersOnlyWhatItCanServe(t *testing.T) {
 				want, m.Securities)
 		}
 	}
-	for _, gone := range []string{"hysteria2", "tuic", "wireguard", "shadowsocks", "brook"} {
+	for _, gone := range []string{"hysteria2", "tuic", "wireguard", "brook"} {
 		if m, ok := here[gone]; ok {
 			t.Errorf("%s is offered but cannot be served here (%s)", gone, m.HereNote)
 		}
 	}
-	// Shadowsocks is the one that needs its own reason. It is not blocked by
-	// the platform at all — it runs perfectly over these transports — and is
-	// excluded because its LINK cannot carry one, so a recipient's client dials
-	// plain TCP and times out. A generic "needs its own port" would be false and
-	// would send an operator looking for the wrong fix.
-	for _, m := range metas {
-		if m.Proto == "shadowsocks" {
-			if !strings.Contains(m.HereNote, "link") {
-				t.Errorf("shadowsocks is excluded for the wrong stated reason: %q", m.HereNote)
-			}
-		}
+	// Shadowsocks IS servable here, but only over WebSocket — the one transport
+	// an ss:// URI can describe. Offering it the full three would let an
+	// operator build an inbound that runs and that no client can be told about.
+	ss, ok := here["shadowsocks"]
+	if !ok {
+		t.Fatal("shadowsocks is not offered, but the platform routes it and the core serves it")
+	}
+	if len(ss.Transports) != 3 {
+		t.Errorf("shadowsocks offers %v; all three are routable here, they differ only in delivery",
+			ss.Transports)
 	}
 	// Every unavailable protocol has to say WHY, or the form is a list of
 	// things greyed out for no stated reason.
@@ -352,5 +377,35 @@ func TestValidationAndReloadBuildFromTheSameList(t *testing.T) {
 	}
 	if strings.Contains(string(src), "s.enabledInboundSpecs()") {
 		t.Error("routing validation went back to the raw inbound list")
+	}
+}
+
+// Shadowsocks on a transport no ss:// link can describe must still be CREATABLE.
+//
+// It was refused at first, on the reasoning that an inbound nobody can be told
+// about is worse than one that does not run. That confused the link with the
+// config: the inbound runs, the core serves it, and the Xray and JSON
+// subscriptions carry the transport in full. Refusing it removed a working
+// option to avoid a missing URI.
+func TestShadowsocksIsCreatableOnEveryRoutableTransport(t *testing.T) {
+	for _, net := range []string{"ws", "httpupgrade", "xhttp"} {
+		t.Run(net, func(t *testing.T) {
+			s := paasServer(t)
+			r := gin.New()
+			r.POST("/in", s.handleCreateInbound)
+			rec := httptest.NewRecorder()
+			body := `{"remark":"ss-` + net + `","protocol":"shadowsocks","port":443,"transport":{"network":"` + net + `"},"security":{"type":"none"}}`
+			req := httptest.NewRequest(http.MethodPost, "/in", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(rec, req)
+			if rec.Code != 201 {
+				t.Fatalf("shadowsocks over %s was refused: %d %s", net, rec.Code, rec.Body.String())
+			}
+			// And it must actually be served, not merely stored.
+			_, _, skipped := s.paasSpecs()
+			if len(skipped) != 0 {
+				t.Fatalf("created but not served: %+v", skipped)
+			}
+		})
 	}
 }

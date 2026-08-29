@@ -32,6 +32,18 @@ func URI(n *model.Node) (string, error) {
 	case model.ProtoTrojan:
 		return trojanURI(c), nil
 	case model.ProtoShadowsocks:
+		// A bare SIP002 link describes a plain TCP Shadowsocks server. Emitting
+		// one for an inbound that is actually behind httpupgrade or xhttp is
+		// worse than emitting nothing: the operator copies it, the recipient's
+		// client dials TCP, and it fails with the panel showing the inbound
+		// serving. Say so instead — the transport is real and reachable, just
+		// not through this URI scheme.
+		if c.Transport.Network == model.NetHTTPUpgrade || c.Transport.Network == model.NetXHTTP {
+			return "", fmt.Errorf("shadowsocks over %s has no share-link format: an ss:// URI can only "+
+				"carry a transport through SIP003's plugin field, and neither v2ray-plugin nor "+
+				"xray-plugin implements %s. Hand out the Xray or JSON subscription, which carries "+
+				"the transport in full", c.Transport.Network, c.Transport.Network)
+		}
 		return ssURI(c), nil
 	case model.ProtoSOCKS:
 		return socksURI(c), nil
@@ -56,6 +68,16 @@ func URI(n *model.Node) (string, error) {
 	default:
 		return "", fmt.Errorf("export: unsupported protocol %q", c.Protocol)
 	}
+}
+
+// firstNonEmpty returns the first non-empty string.
+func firstNonEmpty(v ...string) string {
+	for _, x := range v {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
 }
 
 // hostPort joins an address and port, bracketing IPv6 literals.
@@ -347,21 +369,35 @@ func ssURI(n *model.Node) string {
 			plugin += ";" + n.SSPlugin.Opts
 		}
 		q.Set("plugin", plugin)
-	} else if n.Transport.Network != "" && n.Transport.Network != model.NetTCP {
-		// Shadowsocks carried over one of the v2ray transports, which the
-		// cores serve natively rather than through a plugin. The link has to
-		// SAY so: without these the URI describes a plain TCP Shadowsocks
-		// server on the same host and port, a client dials exactly that, and
-		// the connection fails with nothing to point at — while the panel
-		// shows the inbound serving, because it is.
+	} else if n.Transport.Network == model.NetWS {
+		// Shadowsocks over WebSocket, expressed the only way a client can
+		// actually read it: SIP003's plugin field, naming v2ray-plugin.
 		//
-		// Found on a Railway deployment, where Shadowsocks over WebSocket ran
-		// correctly and its exported link could not connect to it.
+		// The cores serve this natively — xray takes a shadowsocks inbound with
+		// streamSettings — so the obvious move is to describe it with the same
+		// type/path/security parameters every other protocol's link carries. That
+		// was the first attempt and it is wrong: nothing standard reads those on
+		// an ss:// URI, so a client parses SIP002, finds no plugin, and dials
+		// plain TCP Shadowsocks. The panel shows the inbound serving, because it
+		// is, and the connection times out with nothing to point at.
 		//
-		// The plugin form wins when one is configured: that is a different
-		// deployment (an external plugin process) and its own parameters
-		// already describe the transport.
-		transportSecurityParams(n, q)
+		// mux=0 is not optional. v2ray-plugin defaults to mux=1 and wraps the
+		// stream in v2ray's mux protocol, which a plain Shadowsocks inbound does
+		// not speak: the WebSocket upgrade succeeds and the session then dies in
+		// "failed to read metadata". Verified against a live deployment — with
+		// mux=1 nothing passes; with mux=0 a sing-box client connects every time.
+		//
+		// WebSocket only. v2ray-plugin implements websocket, quic and grpc and has
+		// no httpupgrade or xhttp mode, so Shadowsocks on those transports has no
+		// link format at all and is refused rather than exported undialable.
+		opts := []string{"v2ray-plugin", "tls", "mux=0"}
+		if h := firstNonEmpty(n.Transport.Host, n.Security.ServerName, n.Address); h != "" {
+			opts = append(opts, "host="+h)
+		}
+		if pth := n.Transport.Path; pth != "" {
+			opts = append(opts, "path="+pth)
+		}
+		q.Set("plugin", strings.Join(opts, ";"))
 	}
 	if s := encodeQuery(q); s != "" {
 		uri += "?" + s

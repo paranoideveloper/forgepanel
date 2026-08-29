@@ -3,6 +3,7 @@ package export
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -66,32 +67,42 @@ func TestRealityLinkKeepsAnAcceptedServerName(t *testing.T) {
 	}
 }
 
-// Shadowsocks over a v2ray transport must say so in its link.
+// Shadowsocks over WebSocket must be described the way a client can read it:
+// SIP003's plugin field naming v2ray-plugin, with mux disabled.
 //
-// The exporter used to emit transport parameters only for the external-plugin
-// form, so a Shadowsocks inbound served over WebSocket exported a URI
-// describing a plain TCP Shadowsocks server on the same host and port. A client
-// dialled exactly that and failed, while the panel showed the inbound serving —
-// because it was. Found on a Railway deployment, where every inbound shares one
-// port and the transport is the only thing that distinguishes them, so a link
-// missing the path could not possibly connect.
-func TestShadowsocksOverAWebTransportCarriesItInTheLink(t *testing.T) {
-	for _, net := range []model.Network{model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP} {
-		n := &model.Node{
-			Protocol: model.ProtoShadowsocks, Address: "edge.example.com", Port: 443,
-			Method: "2022-blake3-aes-128-gcm", Password: "hzQTq6OOqLCwxtin5RJ6jg==",
-			Transport: model.Transport{Network: net, Path: "/tunnel", Host: "edge.example.com"},
-			Security:  model.Security{Type: model.SecTLS, ServerName: "edge.example.com"},
+// The first version of this emitted type/path/security query parameters, the
+// same ones every other protocol's link carries. Nothing standard reads those
+// on an ss:// URI, so a client parses SIP002, finds no plugin, and dials plain
+// TCP Shadowsocks — the panel showing the inbound serving the whole time.
+//
+// mux=0 is load-bearing. v2ray-plugin defaults to mux=1 and wraps the stream in
+// v2ray's mux protocol, which a plain Shadowsocks inbound does not speak: the
+// WebSocket upgrade succeeds and the session dies reading metadata. Verified
+// against a live deployment — mux=1 carried nothing, mux=0 connected every time.
+func TestShadowsocksOverWebSocketIsExportedAsAPluginLink(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoShadowsocks, Address: "edge.example.com", Port: 443,
+		Method: "2022-blake3-aes-128-gcm", Password: "hzQTq6OOqLCwxtin5RJ6jg==",
+		Transport: model.Transport{Network: model.NetWS, Path: "/tunnel", Host: "edge.example.com"},
+		Security:  model.Security{Type: model.SecTLS, ServerName: "edge.example.com"},
+	}
+	uri, err := URI(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := url.QueryUnescape(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"plugin=v2ray-plugin", "tls", "mux=0", "host=edge.example.com", "path=/tunnel"} {
+		if !strings.Contains(dec, want) {
+			t.Errorf("link is missing %q, so no client can dial it: %s", want, dec)
 		}
-		uri, err := URI(n)
-		if err != nil {
-			t.Fatalf("%s: %v", net, err)
-		}
-		for _, want := range []string{"type=" + string(net), "path=%2Ftunnel", "security=tls"} {
-			if !strings.Contains(uri, want) {
-				t.Errorf("%s link is missing %q, so a client cannot reach the inbound: %s", net, want, uri)
-			}
-		}
+	}
+	// The xray-style parameters must NOT be there: they are not read on an
+	// ss:// URI and their presence was the original defect.
+	if strings.Contains(dec, "type=ws") {
+		t.Errorf("link still carries the query parameters nothing reads: %s", dec)
 	}
 }
 
