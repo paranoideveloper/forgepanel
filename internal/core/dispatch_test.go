@@ -200,3 +200,58 @@ func waitFor(t *testing.T, d time.Duration, cond func() error) {
 	}
 	t.Fatalf("condition never held within %s: %v", d, last)
 }
+
+// An inbound the DISPATCHER serves must not be reported as not serving.
+//
+// BuildMulti knows Xray and sing-box and marks everything else "no supervised
+// engine" — which is every protocol with a dedicated engine. The dispatcher then
+// starts those from the adapter registry, and the stale mark was never removed,
+// so a Brook inbound ran, carried traffic, and told the operator it was dead. On
+// every install, not only behind a platform edge.
+func TestAnInboundTheDispatcherServesIsNotReportedAsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	ctrl := NewController(dir, 10093)
+	t.Cleanup(func() { ctrl.StopAll() })
+
+	brook := &model.Node{
+		Remark: "brook-ws", Protocol: model.ProtoBrook,
+		Address: "127.0.0.1", Port: 39901, Password: "pw",
+		Brook: &model.BrookOptions{Mode: "wsserver", Path: "/tunnel"},
+	}
+	bundle, _ := ctrl.ReloadSpecs([]engine.InboundSpec{{Node: brook}})
+	if bundle == nil {
+		t.Fatal("no bundle")
+	}
+	for _, sk := range bundle.Skipped {
+		if sk.Remark == "brook-ws" && sk.Reason == engine.ReasonNoSupervisedEngine {
+			t.Fatalf("a Brook inbound the dispatcher serves is reported as %q — a false "+
+				"not-serving entry is how the real ones stop being read", sk.Reason)
+		}
+	}
+}
+
+// A genuine skip must survive. Clearing the mark too eagerly would hide the
+// inbounds that really are unservable, which is the failure the column exists
+// to prevent.
+func TestAGenuinelyUnservableInboundKeepsItsSkip(t *testing.T) {
+	dir := t.TempDir()
+	ctrl := NewController(dir, 10092)
+	t.Cleanup(func() { ctrl.StopAll() })
+
+	// SSH has no server side in any core here.
+	ssh := &model.Node{Remark: "ssh1", Protocol: model.ProtoSSH,
+		Address: "127.0.0.1", Port: 39902, Password: "pw"}
+	bundle, _ := ctrl.ReloadSpecs([]engine.InboundSpec{{Node: ssh}})
+	if bundle == nil {
+		t.Fatal("no bundle")
+	}
+	var found bool
+	for _, sk := range bundle.Skipped {
+		if sk.Remark == "ssh1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an inbound no core can serve lost its skip entry")
+	}
+}

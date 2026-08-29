@@ -69,6 +69,14 @@ func paasRoutable(n *model.Node) (string, string) {
 	if n == nil {
 		return "", "no configuration"
 	}
+	// Brook does not use Transport at all — it is supervised as its own process
+	// and carries its mode and path in BrookOptions — so judging it by
+	// Transport.Network sends it to the raw-TCP branch and rejects a mode that
+	// is a WebSocket server with a path on it, which is exactly what a shared
+	// HTTP port can route.
+	if n.Protocol == model.ProtoBrook {
+		return brookRoutable(n)
+	}
 	switch n.Transport.Network {
 	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
 		p := strings.TrimSpace(n.Transport.Path)
@@ -126,6 +134,17 @@ func paasEngineNode(n *model.Node, port int) *model.Node {
 	c.Address = "127.0.0.1"
 	c.Port = port
 	c.Security = model.Security{Type: model.SecNone}
+	// Brook carries its own idea of TLS in the mode rather than in Security, so
+	// clearing Security is not enough. wssserver would try to serve TLS with a
+	// certificate for a hostname this container does not own, behind an edge
+	// that already completed the handshake; wsserver is the same protocol
+	// without that layer. The STORED node keeps wssserver, because that is what
+	// the client genuinely speaks — to the edge.
+	if c.Protocol == model.ProtoBrook && c.Brook != nil && c.Brook.Mode == "wssserver" {
+		b := *c.Brook
+		b.Mode = "wsserver"
+		c.Brook = &b
+	}
 	return c
 }
 
@@ -306,6 +325,29 @@ func (s *Server) applyPaaSAddressing(n *model.Node) {
 	if !pa.Enabled || pa.Domain == "" || n == nil {
 		return
 	}
+	if n.Protocol == model.ProtoBrook {
+		// Brook's public identity is the same rewrite, but its "transport" lives
+		// in BrookOptions: the client speaks WebSocket-over-TLS to the edge, so
+		// the stored mode is wssserver and it needs a path to be told apart on
+		// the shared port.
+		if n.Brook == nil {
+			n.Brook = &model.BrookOptions{}
+		}
+		switch n.Brook.Mode {
+		case "wsserver", "wssserver":
+			n.Brook.Mode = "wssserver"
+			if strings.TrimSpace(n.Brook.Path) == "" {
+				n.Brook.Path = "/" + randHex(8)
+			}
+		default:
+			return // a plain server or quicserver cannot be served here at all
+		}
+		n.Address = pa.Domain
+		n.Port = pa.PublicPort
+		n.Domain = pa.Domain
+		n.Security = model.Security{Type: model.SecTLS, ServerName: pa.Domain}
+		return
+	}
 	if _, why := paasRoutable(n); why != "" {
 		// One exception: a routable transport that simply has no path yet. That
 		// is a form the operator left blank, not an unservable protocol, and a
@@ -343,11 +385,46 @@ func paasSharesPublicPort(n *model.Node) bool {
 	if n == nil {
 		return false
 	}
+	if n.Protocol == model.ProtoBrook {
+		_, why := brookRoutable(n)
+		return why == ""
+	}
 	switch n.Transport.Network {
 	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
 		return true
 	}
 	return false
+}
+
+// brookRoutable reports the path a Brook inbound is reached on, or why it
+// cannot share the platform's port.
+//
+// Only the WebSocket modes qualify. A plain `brook server` is a raw TCP
+// protocol with no HTTP layer to route on, and quicserver is UDP. wssserver is
+// accepted and quietly served as wsserver: it means "WebSocket with TLS", the
+// edge already provides the TLS, and the difference is entirely in what the
+// client is told (see paasEngineNode).
+func brookRoutable(n *model.Node) (string, string) {
+	mode := "server"
+	if n.Brook != nil && n.Brook.Mode != "" {
+		mode = n.Brook.Mode
+	}
+	switch mode {
+	case "wsserver", "wssserver":
+		p := "/ws" // brookArgs' own default, so the route matches what is served
+		if n.Brook != nil && n.Brook.Path != "" {
+			p = n.Brook.Path
+		}
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		return p, ""
+	case "quicserver":
+		return "", "brook quicserver needs UDP, which the platform does not route"
+	default:
+		return "", "a plain brook server needs its own TCP port — use the wsserver mode, " +
+			"which the platform can route by path"
+	}
 }
 
 // paasNeedsPath reports whether n uses a path-carrying transport but has no

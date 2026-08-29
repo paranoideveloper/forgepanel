@@ -508,15 +508,30 @@ func TestWireGuardURI(t *testing.T) {
 }
 
 func TestBrookURIModes(t *testing.T) {
-	for _, mode := range []string{"server", "wsserver", "wssserver", "quicserver"} {
+	// The parameter naming the server is called after the MODE, and for every
+	// mode except a plain server its value is a URL with a scheme — and, for the
+	// WebSocket modes, the path. Taken from the pinned binary's own output:
+	//
+	//	brook link -s ws://1.2.3.4:9999/mypath -p pw
+	//	  -> brook://wsserver?password=pw&wsserver=ws%3A%2F%2F1.2.3.4%3A9999%2Fmypath
+	//
+	// Emitting server=host:port for all four, as this did, produced a link
+	// missing both the parameter the client reads and the path the server routes
+	// on — for three of the four modes.
+	for _, tc := range []struct{ mode, key, want string }{
+		{"server", "server", "1.2.3.4:9999"},
+		{"wsserver", "wsserver", "ws://1.2.3.4:9999/tunnel"},
+		{"wssserver", "wssserver", "wss://1.2.3.4:9999/tunnel"},
+		{"quicserver", "quicserver", "quic://1.2.3.4:9999"},
+	} {
 		n := &model.Node{Protocol: model.ProtoBrook, Address: "1.2.3.4", Port: 9999, Password: "pw", Remark: "B",
-			Brook: &model.BrookOptions{Mode: mode}}
+			Brook: &model.BrookOptions{Mode: tc.mode, Path: "/tunnel"}}
 		n.Normalize()
 		uri := mustExport(t, n)
-		if !strings.HasPrefix(uri, "brook://"+mode+"?") || !strings.HasSuffix(uri, "#B") {
+		if !strings.HasPrefix(uri, "brook://"+tc.mode+"?") || !strings.HasSuffix(uri, "#B") {
 			t.Fatalf("uri = %s", uri)
 		}
-		wantParams(t, uriQuery(t, uri), map[string]string{"password": "pw", "server": "1.2.3.4:9999"})
+		wantParams(t, uriQuery(t, uri), map[string]string{"password": "pw", tc.key: tc.want})
 	}
 	// A node with no Brook block defaults to the plain server mode.
 	n := &model.Node{Protocol: model.ProtoBrook, Address: "1.2.3.4", Port: 9999, Password: "pw"}

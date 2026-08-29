@@ -381,7 +381,6 @@ func TestEveryProtocolOptionIsReachableFromTheForm(t *testing.T) {
 	}
 }
 
-
 // The schema payload used to advertise field definitions for h2, kcp and quic
 // while handleSchema offered none of them, because the offered list and the
 // field map were written out separately. model.Validate rejects all three, so

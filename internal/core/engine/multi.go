@@ -212,7 +212,7 @@ func BuildMultiFor(specs []InboundSpec, xrayAPIPort, singboxAPIPort int, certPat
 			}
 			b.SingboxN++
 		default:
-			b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, "no supervised engine"})
+			b.Skipped = append(b.Skipped, SkippedInbound{n.Remark, ReasonNoSupervisedEngine})
 		}
 	}
 

@@ -22,6 +22,14 @@ type Bundle struct {
 	Skipped  []SkippedInbound
 }
 
+// ReasonNoSupervisedEngine is the skip this builder records for a protocol it
+// does not itself render — which is every protocol with a dedicated engine,
+// Brook and AmneziaWG and ForgeDNS among them. It is a statement about THIS
+// builder, not about the panel: the dispatcher serves those from the adapter
+// registry, and it clears this mark for the ones it started. It is a named
+// constant so the two sides cannot drift apart on a string literal.
+const ReasonNoSupervisedEngine = "no supervised engine"
+
 // SkippedInbound records an inbound that no engine here could serve.
 type SkippedInbound struct {
 	Remark string `json:"remark"`

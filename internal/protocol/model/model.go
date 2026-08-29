@@ -1151,6 +1151,26 @@ func (n *Node) clearIrrelevantProtocolBlocks() {
 	}
 	if !keep(ProtoBrook) {
 		n.Brook = nil
+	} else if n.Brook != nil {
+		// Brook's WebSocket modes have a default path, and it has to be written
+		// down in ONE place. brook's own server default is /ws, brookArgs
+		// substituted it, and the exported link substituted it too — so a node
+		// stored with an empty path was served on /ws and linked on /ws while
+		// the model said "". Round-tripping that link then produced a node that
+		// differed from the one exported, in a field nobody had set. Filling it
+		// here makes the model agree with what is actually served.
+		switch n.Brook.Mode {
+		case "wsserver", "wssserver":
+			if strings.TrimSpace(n.Brook.Path) == "" {
+				n.Brook.Path = "/ws"
+			} else if !strings.HasPrefix(n.Brook.Path, "/") {
+				n.Brook.Path = "/" + n.Brook.Path
+			}
+		case "quicserver":
+			// brook quicserver has no --path; carrying one would be a setting
+			// that reaches nothing.
+			n.Brook.Path = ""
+		}
 	}
 	if !keep(ProtoForgeDNS) {
 		n.ForgeDNS = nil

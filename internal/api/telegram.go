@@ -161,8 +161,6 @@ func (d tgPanelData) DeleteUser(name string) error {
 	return nil
 }
 
-
-
 // MakeBackup implements telegram.BackupProvider so the bot's /backup command has
 // something to send.
 //

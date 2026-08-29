@@ -268,7 +268,13 @@ func TestThePlatformCatalogueOffersOnlyWhatItCanServe(t *testing.T) {
 				want, m.Securities)
 		}
 	}
-	for _, gone := range []string{"hysteria2", "tuic", "wireguard", "brook"} {
+	// Brook is offered: it is its own engine, and its wsserver mode is a
+	// WebSocket server with a path on it, which a shared HTTP port routes like
+	// any other. Only its plain-server and quic modes cannot be served here.
+	if _, ok := here["brook"]; !ok {
+		t.Error("brook is not offered; its wsserver mode is routable on a shared port")
+	}
+	for _, gone := range []string{"hysteria2", "tuic", "wireguard"} {
 		if m, ok := here[gone]; ok {
 			t.Errorf("%s is offered but cannot be served here (%s)", gone, m.HereNote)
 		}

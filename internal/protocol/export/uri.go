@@ -510,21 +510,51 @@ func wireguardURI(n *model.Node) string {
 }
 
 func brookURI(n *model.Node) (string, error) {
-	// brook://server?password=&server=host%3Aport  (brook's own scheme)
+	// Brook's link format is mode-dependent in two ways, and the first version
+	// of this got both wrong by treating every mode like a plain server.
+	//
+	// The parameter that names the server is called after the MODE — server=,
+	// wsserver=, wssserver=, quicserver= — and for everything except a plain
+	// server its value is a full URL with a scheme and the path, not host:port.
+	// A wsserver link built as `server=host:port` is missing the parameter the
+	// client looks for AND the path the server routes on, so it cannot connect
+	// and cannot say why. Both formats were read off the pinned binary's own
+	// `brook link -s …` output rather than from documentation.
+	mode := "server"
+	if n.Brook != nil && n.Brook.Mode != "" {
+		mode = n.Brook.Mode
+	}
+	hp := net.JoinHostPort(n.Address, strconv.Itoa(n.Port))
+	path := "/ws"
+	if n.Brook != nil && n.Brook.Path != "" {
+		path = n.Brook.Path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
 	v := url.Values{}
 	v.Set("password", n.Password)
-	v.Set("server", net.JoinHostPort(n.Address, strconv.Itoa(n.Port)))
-	mode := "server"
-	if n.Brook != nil {
-		if n.Brook.Mode != "" {
-			mode = n.Brook.Mode
-		}
+	switch mode {
+	case "wsserver":
+		v.Set("wsserver", "ws://"+hp+path)
+	case "wssserver":
+		v.Set("wssserver", "wss://"+hp+path)
+	case "quicserver":
+		// quicserver carries no path: brook quicserver takes --domainaddress and
+		// has no --path, so the URL is scheme, host and port only.
+		v.Set("quicserver", "quic://"+hp)
+	default:
+		mode = "server"
+		v.Set("server", hp)
+	}
+	if n.Brook != nil && n.Brook.UDPOverTCP {
 		// UDP over TCP was stored and never emitted, so a client configured for
 		// it silently ran plain UDP — which is exactly the case where UDP does
 		// not survive the network in between, and the reason the setting exists.
-		// The parameter name and value were taken from the pinned brook binary's
-		// own output (`brook link --udpovertcp`), not from documentation.
-		if n.Brook.UDPOverTCP {
+		// It applies to a plain brook server only; the binary's own flag help
+		// says so, and it is meaningless on the ws/wss/quic modes.
+		if mode == "server" {
 			v.Set("udpovertcp", "true")
 		}
 	}

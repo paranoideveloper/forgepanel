@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,7 +300,15 @@ func brookMode(n *model.Node) string {
 // brookArgs builds the CLI args for a Brook inbound by mode (verified against
 // `brook <mode> --help` for the pinned version).
 func brookArgs(n *model.Node, certPath, keyPath string) []string {
+	// Bind the node's own address when it is one this host can bind, so a Brook
+	// inbound rewritten for a shared platform port listens on loopback rather
+	// than on every interface in the container. A hostname is left as ":port":
+	// brook cannot bind a name, and the wildcard is what every existing install
+	// has always used.
 	listen := ":" + strconv.Itoa(n.Port)
+	if ip := net.ParseIP(strings.TrimSpace(n.Address)); ip != nil && !ip.IsUnspecified() {
+		listen = net.JoinHostPort(n.Address, strconv.Itoa(n.Port))
+	}
 	pw := n.Password
 	path := "/ws"
 	if n.Brook != nil && n.Brook.Path != "" {

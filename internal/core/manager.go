@@ -250,11 +250,39 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 	// that silently vanishes from the generated config is the failure operators
 	// cannot debug, and the old hand-written dispatch simply skipped anything
 	// its switch did not recognise.
+	unroutableRemark := make(map[string]bool, len(unroutable))
 	for _, u := range unroutable {
+		unroutableRemark[u.Remark] = true
 		bundle.Skipped = append(bundle.Skipped, engine.SkippedInbound{
 			Remark: u.Remark,
 			Reason: u.Reason,
 		})
+	}
+
+	// Drop the build stage's "no supervised engine" mark from inbounds the
+	// DISPATCHER served.
+	//
+	// BuildMulti knows two cores, Xray and sing-box, and marks everything else
+	// unservable — which is every protocol with a dedicated engine: Brook,
+	// AmneziaWG, ForgeDNS. The dispatcher then starts them from the adapter
+	// registry and nothing removed the stale mark, so a Brook inbound ran,
+	// carried traffic, and reported itself as not serving. On every install, not
+	// only behind a platform edge.
+	//
+	// A false "not serving" is worse than none: the column exists so an operator
+	// can trust it, and one that cries wolf on a working inbound is how the real
+	// entries stop being read. Only that exact reason is cleared, and only for
+	// inbounds the dispatcher did not itself declare unroutable — a genuine skip
+	// keeps its own reason.
+	if len(bundle.Skipped) > 0 {
+		kept := bundle.Skipped[:0]
+		for _, sk := range bundle.Skipped {
+			if sk.Reason == engine.ReasonNoSupervisedEngine && !unroutableRemark[sk.Remark] {
+				continue
+			}
+			kept = append(kept, sk)
+		}
+		bundle.Skipped = kept
 	}
 	c.lastBundle = bundle
 	if dispatchErr != nil {

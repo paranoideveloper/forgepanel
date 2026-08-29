@@ -569,18 +569,53 @@ func parseBrook(raw string) (*model.Node, error) {
 	}
 	mode, qs, _ := strings.Cut(body, "?")
 	q, _ := url.ParseQuery(qs)
-	server := q.Get("server")
-	h, p, err := splitHostPort(server)
-	if err != nil {
-		return nil, fmt.Errorf("brook: %w", err)
+
+	// The parameter naming the server is called after the MODE, and only a plain
+	// server carries a bare host:port. wsserver, wssserver and quicserver carry a
+	// URL — scheme, host, port and, for the WebSocket modes, the path — and this
+	// read `server` for all of them, so importing a real brook ws link failed
+	// with "missing port in \"\"" while looking like a malformed link rather than
+	// a parser that was not looking at the right field.
+	host, port, path := "", 0, ""
+	switch mode {
+	case "wsserver", "wssserver", "quicserver":
+		v := q.Get(mode)
+		if v == "" {
+			// Tolerate a link that used `server=` anyway: older panels emitted
+			// that shape, and refusing it would lose configs on import for no
+			// gain.
+			v = q.Get("server")
+		}
+		if u, err := url.Parse(v); err == nil && u.Host != "" {
+			h, p, err := splitHostPort(u.Host)
+			if err != nil {
+				return nil, fmt.Errorf("brook: %w", err)
+			}
+			host, port, path = h, p, u.Path
+		} else {
+			h, p, err := splitHostPort(v)
+			if err != nil {
+				return nil, fmt.Errorf("brook: %w", err)
+			}
+			host, port = h, p
+		}
+	default:
+		mode = "server"
+		h, p, err := splitHostPort(q.Get("server"))
+		if err != nil {
+			return nil, fmt.Errorf("brook: %w", err)
+		}
+		host, port = h, p
 	}
+
 	return &model.Node{
-		Protocol: model.ProtoBrook, Address: h, Port: p,
+		Protocol: model.ProtoBrook, Address: host, Port: port,
 		Password: q.Get("password"), Remark: frag,
 		// udpovertcp round-trips, so importing a link the panel exported (or one
 		// brook itself generated) does not quietly drop the setting.
 		Brook: &model.BrookOptions{
 			Mode:       mode,
+			Path:       path,
 			UDPOverTCP: q.Get("udpovertcp") == "true",
 		},
 	}, nil

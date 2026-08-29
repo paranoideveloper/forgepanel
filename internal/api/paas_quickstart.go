@@ -42,6 +42,10 @@ const (
 	// it is delivered through the Xray or JSON subscription instead — those
 	// carry a full client config rather than a link.
 	TierSubscriptionOnly ClientTier = "subscription-only"
+	// TierBrookClient needs a Brook client. Brook speaks its own protocol and no
+	// v2ray/xray/sing-box client can dial it, but the clients that do exist take
+	// a brook:// link directly.
+	TierBrookClient ClientTier = "brook-client"
 	// TierXrayOnly is Xray-core clients only. sing-box has no XHTTP
 	// implementation at all — a sing-box client cannot even parse the config,
 	// let alone connect — and sing-box is what most iOS and desktop apps embed.
@@ -88,6 +92,13 @@ var paasQuickstartSet = []paasQuickstartEntry{
 		"No ss:// link exists for this transport — deliver it with the Xray or JSON subscription."},
 	{model.ProtoShadowsocks, model.NetXHTTP, TierSubscriptionOnly,
 		"No ss:// link exists for this transport — deliver it with the Xray or JSON subscription."},
+
+	// Brook is its own core and its own client. It is not a v2ray transport, so
+	// it carries the mode and path in BrookOptions rather than in Transport, and
+	// its wsserver mode is a WebSocket server with a path on it — routable on a
+	// shared HTTP port like any other.
+	{model.ProtoBrook, "", TierBrookClient,
+		"Needs a Brook client (brook CLI, Shadowrocket). Served as wsserver here; the link says wssserver, which is the TLS the edge provides."},
 }
 
 // handlePaaSQuickstart creates every config this platform can serve, in one
@@ -135,6 +146,9 @@ func (s *Server) handlePaaSQuickstart(c *gin.Context) {
 	created := 0
 	for _, e := range paasQuickstartSet {
 		remark := fmt.Sprintf("%s-%s", e.Protocol, e.Network)
+		if e.Network == "" {
+			remark = string(e.Protocol)
+		}
 		r := result{Remark: remark, Protocol: e.Protocol, Network: e.Network, Tier: e.Tier, Note: e.Note}
 		if existing[remark] {
 			// Idempotent: a second click must not pile up duplicates, each with
@@ -146,6 +160,19 @@ func (s *Server) handlePaaSQuickstart(c *gin.Context) {
 		n := model.Node{Remark: remark, Protocol: e.Protocol,
 			Transport: model.Transport{Network: e.Network},
 			Security:  model.Security{Type: model.SecNone},
+		}
+		// Brook's transport is not a Transport. Naming the mode here is what
+		// makes applyPaaSAddressing give it a path and the public identity;
+		// without it the node arrives with no mode and is left untouched as
+		// something the platform cannot serve.
+		if e.Protocol == model.ProtoBrook {
+			// A path is minted here rather than left to the default. Normalize
+			// fills an empty Brook path with brook's own /ws, which is fine on a
+			// machine where the inbound has a port to itself and wrong on a
+			// shared one: the path is the only thing telling inbounds apart, so
+			// a well-known default is both guessable from outside and a
+			// collision waiting for the second Brook inbound.
+			n.Brook = &model.BrookOptions{Mode: "wssserver", Path: "/" + randHex(8)}
 		}
 		applyCreateDefaults(&n)
 		s.applyPaaSAddressing(&n) // address, port, TLS and a minted path
