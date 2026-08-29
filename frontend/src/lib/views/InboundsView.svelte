@@ -124,6 +124,28 @@
     editRow = editRow?.id === r.id ? null : r;
   }
 
+  // On a platform edge REALITY cannot work at all, and the set of things that
+  // can is small and non-obvious. One call creates all of it.
+  let onPaaS = $state(false);
+  async function detectPaaS() {
+    try {
+      const o = await apiFetch<{ paas?: boolean }>('/admin/overview');
+      onPaaS = !!o.paas;
+    } catch { onPaaS = false; }
+  }
+  detectPaaS();
+
+  async function quickPaaS() {
+    try {
+      const res = await apiFetch<{ created: number; configs: any[] }>(
+        '/admin/inbounds/paas-quickstart', { method: 'POST', body: JSON.stringify({}) });
+      showToast(tr('inbounds.platform_configs_created').replace('{n}', String(res.created)), 'success');
+      load();
+    } catch (e: any) {
+      showToast(e.message || tr('inbounds.quickstart_failed'), 'error');
+    }
+  }
+
   async function quickReality() {
     try {
       await apiFetch('/admin/inbounds/reality-quickstart', { method: 'POST', body: JSON.stringify({}) });
@@ -195,7 +217,11 @@
   <h2>{tr('inbounds.inbounds')}</h2>
   <div class="actions">
     <button class="ghost" data-testid="import-toggle" onclick={() => importing = !importing}>{tr('inbounds.import')}</button>
-    <button class="ghost" data-testid="quick-reality" onclick={quickReality}>{tr('inbounds.one_click_reality')}</button>
+    {#if onPaaS}
+      <button class="ghost" data-testid="quick-paas" onclick={quickPaaS}>{tr('inbounds.one_click_platform')}</button>
+    {:else}
+      <button class="ghost" data-testid="quick-reality" onclick={quickReality}>{tr('inbounds.one_click_reality')}</button>
+    {/if}
     <button class="primary" data-testid="create-inbound" onclick={() => creating = !creating}>
       {creating ? tr('inbounds.close') : tr('inbounds.create_inbound_2')}
     </button>

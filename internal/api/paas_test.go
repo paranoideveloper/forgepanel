@@ -592,7 +592,7 @@ func TestOnAPlatformManyInboundsShareTheOnePublicPort(t *testing.T) {
 	second := &model.Node{
 		Remark: "second", Protocol: model.ProtoVMess,
 		Address: "forge-test.up.railway.app", Port: 443,
-		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
 		// NO PATH — exactly as the create form submits it. The path is minted
 		// later in the handler, so a guard that requires one to grant the
 		// exemption never grants it, which is how this stayed broken after the

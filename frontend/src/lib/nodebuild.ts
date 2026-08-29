@@ -29,6 +29,11 @@ export interface ProtoSchema {
   chainable?: boolean;
   /** False when no core can LISTEN on this protocol; the form must not offer it. */
   serves_inbound?: boolean;
+  // False when THIS deployment cannot serve it, as opposed to the panel not
+  // implementing it anywhere. Behind a platform edge that is most of the
+  // catalogue, and here_note says why.
+  serves_here?: boolean;
+  here_note?: string;
 }
 
 export interface Schema {

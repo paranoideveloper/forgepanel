@@ -414,8 +414,14 @@
             <!-- Only protocols the panel can actually LISTEN on. SSH is
                  dialable as an egress hop and has no server side here, and
                  offering it produced an inbound that failed to render on every
-                 reload while looking configured. -->
-            {#each schema.protocols.filter((p) => p.serves_inbound !== false) as p}
+                 reload while looking configured.
+
+                 serves_here narrows it further to what THIS deployment can
+                 serve. Behind a platform edge that is three protocols out of
+                 fifteen, and offering the rest walks the operator into an
+                 inbound that is accepted, looks configured, and carries
+                 nothing. -->
+            {#each schema.protocols.filter((p) => p.serves_inbound !== false && p.serves_here !== false) as p}
               <option value={p.proto}>{p.label} ({p.engine})</option>
             {/each}
           </select>

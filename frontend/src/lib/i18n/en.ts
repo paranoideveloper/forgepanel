@@ -521,6 +521,8 @@ export const en: Record<string, string> = {
 	'inbounds.not_serving': '⚠ not serving',
 	'inbounds.nothing_recognized_to_import': 'Nothing recognized to import',
 	'inbounds.one_click_reality': 'One-click REALITY',
+	'inbounds.one_click_platform': 'Create all platform configs',
+	'inbounds.platform_configs_created': 'Created {n} configs this platform can carry',
 	'inbounds.or': 'or',
 	'inbounds.parse_create_inbounds': 'Parse & create inbounds',
 	'inbounds.paste_anything_links_a_subscription_base64': 'Paste anything — links, a subscription, base64, or JSON',

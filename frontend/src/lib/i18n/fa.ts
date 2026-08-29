@@ -514,6 +514,8 @@ export const fa: Record<string, string> = {
 	'inbounds.not_serving': '⚠ سرویس نمی‌دهد',
 	'inbounds.nothing_recognized_to_import': 'چیزی برای درون‌ریزی شناسایی نشد',
 	'inbounds.one_click_reality': 'REALITY با یک کلیک',
+	'inbounds.one_click_platform': 'ساخت همه کانفیگ‌های این پلتفرم',
+	'inbounds.platform_configs_created': '{n} کانفیگ قابل‌اجرا روی این پلتفرم ساخته شد',
 	'inbounds.or': 'یا',
 	'inbounds.parse_create_inbounds': 'تجزیه و ساخت ورودی‌ها',
 	'inbounds.paste_anything_links_a_subscription_base64': 'هر چیزی را بچسبانید — لینک، اشتراک، base64 یا JSON',

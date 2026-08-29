@@ -145,20 +145,57 @@ func (s *Server) engineUnavailable(c *gin.Context) {
 // inbounds + their users. Called after any inbound/user mutation and at boot.
 // Errors are non-fatal (surfaced via /api/admin/engines): a panel must not crash
 // because a core failed to download or a saved config is rejected.
-// reloadSpecs picks the inbound list this deployment can actually serve.
+// specsForBuild is the inbound list ANY config generated for this machine is
+// built from — running it, validating it, or previewing it.
 //
 // A normal install serves what it can bind on its own interfaces. Behind a
 // platform edge there is one port and no interface of our own, so the specs are
-// rewritten for loopback and the routing table that fronts them is republished
-// here — in the same step, because a table that disagrees with what the cores
-// were just told routes traffic to a port nothing is listening on.
-func (s *Server) reloadSpecs() ([]engine.InboundSpec, []engine.SkippedInbound) {
+// rewritten for loopback.
+//
+// Every caller goes through here on purpose. When validation built from a
+// different list than the reload, the two disagreed in exactly the way that is
+// hardest to read: on a platform, saving any routing rule was refused with
+//
+//	failed to build inbound config with tag in-443 >
+//	unable to listen on domain address: app.up.railway.app
+//
+// — the panel asking the core to bind a hostname the container does not own,
+// while the running config was correct all along. Routing was simply
+// unusable there, and the error was about the inbounds rather than the rule
+// the operator was trying to save.
+func (s *Server) specsForBuild() ([]engine.InboundSpec, []paasRoute, []engine.SkippedInbound) {
 	if s.cfg != nil && s.cfg.PaaS().Enabled {
-		specs, routes, skipped := s.paasSpecs()
-		s.setPaaSRoutes(routes)
-		return specs, skipped
+		return s.paasSpecs()
 	}
-	return s.localInboundSpecs(), nil
+	return s.localInboundSpecs(), nil, nil
+}
+
+// candidateSpecs is specsForBuild without the reload's side effects, for the
+// paths that build a config to inspect rather than to run.
+func (s *Server) candidateSpecs() []engine.InboundSpec {
+	specs, _, _ := s.specsForBuild()
+	return specs
+}
+
+// candidateNodes is candidateSpecs as bare nodes, for validators that take them.
+func (s *Server) candidateNodes() []*model.Node {
+	specs := s.candidateSpecs()
+	out := make([]*model.Node, 0, len(specs))
+	for _, sp := range specs {
+		if sp.Node != nil {
+			out = append(out, sp.Node)
+		}
+	}
+	return out
+}
+
+// reloadSpecs picks the inbound list to serve and republishes the routing table
+// that fronts it — in the same step, because a table that disagrees with what
+// the cores were just told routes traffic to a port nothing is listening on.
+func (s *Server) reloadSpecs() ([]engine.InboundSpec, []engine.SkippedInbound) {
+	specs, routes, skipped := s.specsForBuild()
+	s.setPaaSRoutes(routes)
+	return specs, skipped
 }
 
 func (s *Server) reloadEngines() {
@@ -239,7 +276,7 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 		c.JSON(200, gin.H{})
 		return
 	}
-	_, results := s.engine.Validate(s.enabledInboundNodes())
+	_, results := s.engine.Validate(s.candidateNodes())
 	c.JSON(200, results)
 }
 

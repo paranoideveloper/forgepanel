@@ -214,6 +214,12 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		})
 		return
 	}
+	// Behind a platform edge, refuse what the platform can never carry rather
+	// than storing a row that looks configured and moves nothing.
+	if bad := s.paasCreateRefusal(&n); bad != nil {
+		c.JSON(400, bad)
+		return
+	}
 	applyCreateDefaults(&n)   // panel fills in keys/dest/flow/creds so it "just works"
 	s.applyDomain(&n)         // inherit default domain + cascade to SNI/Host/etc.
 	s.applyPaaSAddressing(&n) // behind a platform edge the address is not ours to choose
@@ -248,6 +254,10 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if bad := s.paasCreateRefusal(&n); bad != nil {
+		c.JSON(400, bad)
 		return
 	}
 	applyCreateDefaults(&n)
@@ -597,7 +607,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 	s.audit(c, "user.create", u.Username)
 	s.startBackground(s.reloadEngines)
 	c.JSON(201, gin.H{"id": u.ID, "username": u.Username, "sub_token": u.SubToken,
-		"sub_url": subURL(c, u.SubToken), "uuid": u.UUID})
+		"sub_url": s.subURL(c, u.SubToken), "uuid": u.UUID})
 }
 
 func (s *Server) handleDeleteUser(c *gin.Context) {
@@ -643,12 +653,20 @@ func (s *Server) handleOverview(c *gin.Context) {
 			}
 		}
 	}
+	// The UI has to know it is on a platform: the set of protocols that can be
+	// served there is a fraction of the whole, and offering the operator the
+	// same choices as on a real server is how they end up creating inbounds
+	// that cannot carry anything.
+	pa := s.cfg.PaaS()
 	c.JSON(200, gin.H{
 		"status":         "ok",
 		"version":        version.Get().Version,
 		"nodes_online":   online,
 		"nodes_total":    total,
 		"uptime_seconds": int64(time.Since(processStart).Seconds()),
+		"paas":           pa.Enabled,
+		"paas_platform":  pa.Platform,
+		"paas_domain":    pa.Domain,
 	})
 }
 
@@ -819,13 +837,26 @@ func parseID(c *gin.Context) uint {
 	return uint(id)
 }
 
-func subURL(c *gin.Context, token string) string {
-	scheme := "https"
-	if c.Request.TLS == nil {
-		scheme = "http"
-	}
-	return scheme + "://" + c.Request.Host + "/sub/" + token
+func (s *Server) subURL(c *gin.Context, token string) string {
+	return s.subScheme() + "://" + c.Request.Host + "/sub/" + token
 }
+
+// subScheme is the scheme a CLIENT uses to reach this panel, which is always
+// https and is not always what this process is listening with.
+//
+// It used to be read off c.Request.TLS, which is the wrong question. Off-platform
+// that happens to give the right answer, because the panel serves its own TLS —
+// ACME with a domain, self-signed without one. Behind a platform edge it gives
+// exactly the wrong one: the panel deliberately serves plain HTTP there and the
+// client's connection was TLS all the way to the edge, so every subscription URL
+// came out as "http://app.up.railway.app/sub/…". That is the link an operator
+// copies and sends to somebody, and announcing itself as cleartext is both
+// something some clients refuse and an invitation to read the token off the wire.
+//
+// X-Forwarded-Proto is deliberately not consulted. It is client-supplied, and on
+// an ordinary install trusting it would let anyone change what the panel says
+// about itself — while here it would only confirm what is already known.
+func (s *Server) subScheme() string { return "https" }
 
 // token26 returns a 26-hex-char subscription token.
 func token26() string {

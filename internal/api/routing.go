@@ -87,7 +87,7 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 		return true
 	}
 	outs, rules := s.routingSpecs()
-	bundle, err := engine.BuildMultiWithRouting(s.enabledInboundSpecs(), 0, "", "", outs, rules)
+	bundle, err := engine.BuildMultiWithRouting(s.candidateSpecs(), 0, "", "", outs, rules)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return false

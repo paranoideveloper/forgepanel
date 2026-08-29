@@ -16,6 +16,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/protocol/render"
 )
 
 // PaaS mode: every inbound behind ONE plain-HTTP port.
@@ -473,4 +474,127 @@ func (s *Server) setPanelDomain(host string) error {
 		return err
 	}
 	return s.cfg.ReloadPanel()
+}
+
+// paasCreateRefusal explains why an inbound cannot be created on this platform,
+// or returns nil when it can.
+//
+// The panel used to accept these and mark them not-serving afterwards. That is
+// the right behaviour on a server the operator owns, where an inbound might be
+// unservable for a reason they can go and fix — a port in use, a certificate
+// missing. Here nothing can be fixed: the platform routes one HTTP port, and a
+// protocol that needs UDP or a port of its own will never work no matter what
+// the operator does. Storing it produces a row that looks configured, mints a
+// credential, appears in the list forever, and carries nothing.
+//
+// Refusing at the door also means the reason arrives while the operator is
+// still looking at the form, instead of in a column they have to notice later.
+func (s *Server) paasCreateRefusal(n *model.Node) gin.H {
+	pa := s.cfg.PaaS()
+	if !pa.Enabled || n == nil {
+		return nil
+	}
+	if paasSharesPublicPort(n) {
+		return nil
+	}
+	_, why := paasRoutable(n)
+	if why == "" {
+		return nil
+	}
+	return gin.H{
+		"error": fmt.Sprintf("%s over %s cannot be served on %s: %s",
+			n.Protocol, transportLabel(n.Transport.Network), platformLabel(pa.Platform), why),
+		"code": "unsupported_on_platform",
+		"remediation": "This deployment reaches the internet through one shared HTTP port, so an inbound " +
+			"has to be one a URL path can route: VLESS, VMess or Trojan over ws, httpupgrade or xhttp. " +
+			"Use \"Create all platform configs\" to generate the whole set at once. " +
+			"For Hysteria2, TUIC, WireGuard, REALITY or any raw-TCP protocol, use a server that owns its ports.",
+		"supported": paasSupportedCombinations(),
+	}
+}
+
+// transportLabel names a transport for an error message, including the empty
+// one, which otherwise renders as "over " and reads like a truncated sentence.
+func transportLabel(nw model.Network) string {
+	if nw == "" {
+		return "its own port"
+	}
+	return string(nw)
+}
+
+func platformLabel(p string) string {
+	if p == "" {
+		return "this platform"
+	}
+	return p
+}
+
+// paasSupportedCombinations is the exact set an operator may create here. It is
+// returned with a refusal and served to the UI, so the form offers precisely
+// what will work rather than the panel's full catalogue.
+func paasSupportedCombinations() []gin.H {
+	out := make([]gin.H, 0, len(paasQuickstartSet))
+	for _, e := range paasQuickstartSet {
+		out = append(out, gin.H{
+			"protocol": e.Protocol, "network": e.Network,
+			"client_support": e.Tier, "note": e.Note,
+		})
+	}
+	return out
+}
+
+// paasProtocolSupport reports whether this deployment can serve the protocol at
+// all, and why not when it cannot.
+func (s *Server) paasProtocolSupport(p model.Protocol) (bool, string) {
+	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+		return render.ServesInbound(p), ""
+	}
+	if !render.ServesInbound(p) {
+		return false, "no core in this panel implements a server for it"
+	}
+	for _, e := range paasQuickstartSet {
+		if e.Protocol == p {
+			return true, ""
+		}
+	}
+	if isUDPProtocol(p) {
+		return false, "needs UDP, which the platform does not route"
+	}
+	if p == model.ProtoShadowsocks {
+		// The one that runs perfectly and cannot be handed to anybody: the
+		// ss:// URI has nowhere standard to put a transport, so a client reads
+		// the link as plain TCP Shadowsocks and times out. Offering it produces
+		// a config that works in testing and fails for every recipient.
+		return false, "its link cannot carry a transport, so most clients would dial plain TCP and time out"
+	}
+	return false, "needs a TCP port of its own, which the platform does not give out"
+}
+
+// paasNarrowTransports keeps only the transports a shared HTTP port can route.
+func (s *Server) paasNarrowTransports(all []string) []string {
+	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+		return all
+	}
+	ok := map[string]bool{string(model.NetWS): true, string(model.NetHTTPUpgrade): true, string(model.NetXHTTP): true}
+	out := make([]string, 0, 3)
+	for _, t := range all {
+		if ok[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// paasNarrowSecurities keeps only TLS.
+//
+// The edge terminates it, so the link always says tls and the core is always
+// given none — there is no third option to offer. REALITY in particular is not
+// merely unsupported here, it is contradictory: it performs its own TLS
+// handshake with a borrowed certificate, and the edge has already completed a
+// different one with its own.
+func (s *Server) paasNarrowSecurities(all []string) []string {
+	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+		return all
+	}
+	return []string{string(model.SecTLS)}
 }

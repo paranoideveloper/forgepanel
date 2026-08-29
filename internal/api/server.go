@@ -769,6 +769,7 @@ func (s *Server) routes() {
 			admin.DELETE("/domains/:id", s.handleDeleteDomain)
 			admin.GET("/domains-status", s.handleDomainStatus)
 			admin.POST("/inbounds/reality-quickstart", s.handleRealityQuickstart)
+			admin.POST("/inbounds/paas-quickstart", s.handlePaaSQuickstart)
 			admin.POST("/wizard/preset", s.handlePresetWizard)
 			admin.POST("/inbounds/:id/tls", s.handleInboundOneClickTLS)
 			admin.POST("/certs/import", s.handleCertImport)
@@ -960,6 +961,13 @@ type protoMeta struct {
 	// core can serve, and the resulting inbound sat in the database serving
 	// nobody.
 	ServesInbound bool `json:"serves_inbound"`
+	// ServesHere is false for a protocol this DEPLOYMENT cannot serve, as
+	// opposed to one the panel cannot serve anywhere. Behind a platform edge
+	// that is most of the catalogue, and a form that offers the full list there
+	// is offering choices that end in an inbound carrying nothing.
+	ServesHere bool `json:"serves_here"`
+	// HereNote says why, when ServesHere is false.
+	HereNote string `json:"here_note,omitempty"`
 }
 
 func (s *Server) handleProtocols(c *gin.Context) {
@@ -987,6 +995,16 @@ func (s *Server) handleProtocols(c *gin.Context) {
 			m.Securities = securitiesAll
 		} else if p.IsQUICBased() {
 			m.Securities = []string{string(model.SecTLS)}
+		}
+		// Behind a platform edge, narrow the catalogue to what can actually be
+		// served here — and narrow the TRANSPORT list too, not just the
+		// protocol list. VLESS is servable, and VLESS over tcp is not; a form
+		// that offers the protocol but every transport still leads the operator
+		// straight into an inbound that cannot work.
+		m.ServesHere, m.HereNote = s.paasProtocolSupport(p)
+		if m.ServesHere && len(m.Transports) > 0 {
+			m.Transports = s.paasNarrowTransports(m.Transports)
+			m.Securities = s.paasNarrowSecurities(m.Securities)
 		}
 		out = append(out, m)
 	}

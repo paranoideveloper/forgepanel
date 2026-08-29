@@ -137,7 +137,7 @@ func (s *Server) handleGetUser(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"user":        u,
 		"assignments": a,
-		"sub_url":     subURL(c, u.SubToken),
+		"sub_url":     s.subURL(c, u.SubToken),
 		// updated_at is the optimistic-concurrency token: send it back with a
 		// PATCH and the write is refused if someone else edited in the meantime.
 		"updated_at": u.UpdatedAt,
@@ -354,7 +354,7 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 	s.auditNote(c, "user.credentials.reset", u.Username, "rotated: "+strings.Join(rotated, ", "))
 	s.startBackground(s.reloadEngines)
 	fresh, _ := s.db.UserByID(u.ID)
-	c.JSON(200, gin.H{"user": fresh, "sub_url": subURL(c, fresh.SubToken)})
+	c.JSON(200, gin.H{"user": fresh, "sub_url": s.subURL(c, fresh.SubToken)})
 }
 
 // --- groups ---------------------------------------------------------------

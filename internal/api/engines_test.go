@@ -117,23 +117,36 @@ func TestTheReloadPathUsesTheFilteredSpecList(t *testing.T) {
 			"inbound bound to a node's address stops the panel's own core from starting at all", line)
 	}
 
-	// reloadSpecs is an indirection, so following it is part of the guard: it
-	// must still end at the FILTERED list, and must never hand the cores the raw
-	// enabled list. Checking only the call site above would let the filter be
-	// removed one function further down with this test still green.
-	j := strings.Index(body, "func (s *Server) reloadSpecs()")
+	// The chain is an indirection, so following it is part of the guard: it must
+	// still end at the FILTERED list and never at the raw enabled one. Checking
+	// only the call site above would let the filter be removed one function
+	// further down with this test still green.
+	j := strings.Index(body, "func (s *Server) specsForBuild()")
 	if j < 0 {
-		t.Fatal("reloadSpecs is gone; this guard needs updating")
+		t.Fatal("specsForBuild is gone; this guard needs updating, not deleting")
 	}
 	fn := body[j:]
 	if k := strings.Index(fn[1:], "\nfunc "); k > 0 {
 		fn = fn[:k]
 	}
 	if !strings.Contains(fn, "s.localInboundSpecs()") {
-		t.Error("reloadSpecs no longer returns the filtered list for a normal install")
+		t.Error("specsForBuild no longer returns the filtered list for a normal install")
 	}
 	if strings.Contains(fn, "s.enabledInboundSpecs()") {
-		t.Error("reloadSpecs hands the cores the unfiltered list")
+		t.Error("specsForBuild hands the cores the unfiltered list")
+	}
+	// And reloadSpecs must go through it rather than building its own list.
+	k := strings.Index(body, "func (s *Server) reloadSpecs()")
+	if k < 0 {
+		t.Fatal("reloadSpecs is gone; this guard needs updating")
+	}
+	rf := body[k:]
+	if m := strings.Index(rf[1:], "\nfunc "); m > 0 {
+		rf = rf[:m]
+	}
+	if !strings.Contains(rf, "s.specsForBuild()") {
+		t.Error("reloadSpecs builds its own spec list instead of the shared one, so validation " +
+			"and the running config can drift apart again")
 	}
 }
 
