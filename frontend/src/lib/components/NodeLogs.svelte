@@ -6,7 +6,10 @@
   let { nodeId, nodeName }: { nodeId: number; nodeName: string } = $props();
 
   let lines = $state<string[]>([]);
-  let state = $state<'connecting' | 'open' | 'closed'>('connecting');
+  // Named `conn`, not `state`: a local called `state` in a runes component
+  // shadows the `$state` rune for the type checker, and every rune in the
+  // file then reports "used before its declaration".
+  let conn = $state<'connecting' | 'open' | 'closed'>('connecting');
   let ws: WebSocket | null = null;
 
   // The token goes in the QUERY, not a header.
@@ -32,18 +35,18 @@
     try {
       ws = new WebSocket(url());
     } catch {
-      state = 'closed';
+      conn = 'closed';
       return;
     }
-    ws.onopen = () => (state = 'open');
+    ws.onopen = () => (conn = 'open');
     ws.onmessage = (ev) => {
       // Empty frames are the server's keepalive: a node that is behaving says
       // nothing for hours and an idle proxy would close a stream that is fine.
       if (typeof ev.data !== 'string' || ev.data === '') return;
       lines = [...lines, ev.data].slice(-MAX_LINES);
     };
-    ws.onclose = () => (state = 'closed');
-    ws.onerror = () => (state = 'closed');
+    ws.onclose = () => (conn = 'closed');
+    ws.onerror = () => (conn = 'closed');
   }
   connect();
 
@@ -58,8 +61,8 @@
 
 <div class="node-logs" data-testid="node-logs">
   <p class="muted">
-    {#if state === 'connecting'}{tr('nodes.logs_connecting')}
-    {:else if state === 'open'}{tr('nodes.logs_streaming', { p1: nodeName })}
+    {#if conn === 'connecting'}{tr('nodes.logs_connecting')}
+    {:else if conn === 'open'}{tr('nodes.logs_streaming', { p1: nodeName })}
     {:else}{tr('nodes.logs_disconnected')}{/if}
   </p>
   <pre data-testid="node-log-lines">{lines.join('\n')}</pre>
