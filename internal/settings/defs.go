@@ -99,6 +99,16 @@ func buildRegistry() *Registry {
 		Help: "Hostname exported links use when an inbound binds a wildcard address. Mirrors the panel domain.",
 	})
 
+	// --- panel self-update ----------------------------------------------------
+	r.Register(Def{
+		// "stable" reads /releases/latest, which by definition never returns a
+		// prerelease — so an operator already running a release candidate could
+		// not see the next one at all before this key existed.
+		Key: "update_channel", Kind: KindEnum, Scope: ScopePanel, Default: "stable",
+		Choices: []string{"stable", "prerelease"},
+		Help:    "Which releases the panel offers as updates. \"prerelease\" includes release candidates.",
+	})
+
 	// --- Telegram alerts ------------------------------------------------------
 	r.Register(Def{
 		Key: "telegram_bot_token", Kind: KindSecret, Scope: ScopeTelegram, Default: "", Secret: true,

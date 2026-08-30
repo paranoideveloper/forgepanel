@@ -150,6 +150,76 @@
     }
   }
 
+  // Panel self-update.
+  //
+  // The panel could only be updated by shelling into the host and running
+  // `forgectl update`, which reads /releases/latest — so an operator on a
+  // release candidate could not see the next one at all. Applying is still
+  // forgectl's job (the unit's ProtectSystem=full makes /usr/local/bin
+  // read-only to the panel), which is why apply_hint is rendered rather than
+  // an Install button that could never work.
+  interface UpdateInfo {
+    current: string;
+    latest: string;
+    update_available: boolean;
+    channel: string;
+    prerelease?: boolean;
+    html_url?: string;
+    apply_hint?: string;
+  }
+  let upd = $state<UpdateInfo | null>(null);
+  let updChannel = $state('stable');
+  let updBusy = $state(false);
+  let updErr = $state('');
+  let updStaged = $state<{ tag: string; path: string } | null>(null);
+
+  async function loadUpdate() {
+    updBusy = true;
+    updErr = '';
+    try {
+      upd = await apiFetch<UpdateInfo>('/admin/update');
+      updChannel = upd.channel || 'stable';
+    } catch (e: any) {
+      updErr = e.message || tr('systemhealth.update_check_failed');
+    } finally {
+      updBusy = false;
+    }
+  }
+
+  async function saveChannel() {
+    updBusy = true;
+    updErr = '';
+    try {
+      await apiFetch('/admin/update/channel', {
+        method: 'POST',
+        body: JSON.stringify({ channel: updChannel })
+      });
+      // Re-check on the new channel: the whole point of switching is to see a
+      // different answer, and leaving the old one on screen claims it applies.
+      await loadUpdate();
+    } catch (e: any) {
+      updErr = e.message || tr('systemhealth.update_channel_failed');
+      // Put the selector back on what the panel actually stored.
+      updChannel = upd?.channel || 'stable';
+    } finally {
+      updBusy = false;
+    }
+  }
+
+  async function stageUpdate() {
+    updBusy = true;
+    updErr = '';
+    updStaged = null;
+    try {
+      updStaged = await apiFetch<{ tag: string; path: string }>('/admin/update/stage', { method: 'POST' });
+      showToast(tr('systemhealth.update_staged_ok', { tag: updStaged.tag }), 'success');
+    } catch (e: any) {
+      updErr = e.message || tr('systemhealth.update_stage_failed');
+    } finally {
+      updBusy = false;
+    }
+  }
+
   // Panel Doctor
   let doctor = $state<any>(null);
   let doctorBusy = $state(false);
@@ -337,6 +407,7 @@
     loadData();
     loadTelegram();
     loadNetTune();
+    loadUpdate();
   });
 </script>
 
@@ -494,6 +565,39 @@
     <p class="err-text" data-testid="nettune-error">{netTuneErr}</p>
     {#if netTuneRemedy}<p class="hint" data-testid="nettune-remedy">{netTuneRemedy}</p>{/if}
   {/if}
+</div>
+
+<div class="card" data-testid="update-card">
+  <h3>{tr('systemhealth.update_title')}</h3>
+  <p class="hint">{tr('systemhealth.update_hint')}</p>
+  <div class="form-row">
+    <select bind:value={updChannel} onchange={saveChannel} disabled={updBusy}
+            data-testid="update-channel" aria-label={tr('systemhealth.update_channel_label')}>
+      <option value="stable">{tr('systemhealth.update_channel_stable')}</option>
+      <option value="prerelease">{tr('systemhealth.update_channel_prerelease')}</option>
+    </select>
+    <button class="btn-secondary" data-testid="update-check" onclick={loadUpdate} disabled={updBusy}>
+      {updBusy ? tr('systemhealth.update_working') : tr('systemhealth.update_check')}
+    </button>
+    <button class="btn-primary" data-testid="update-stage" onclick={stageUpdate}
+            disabled={updBusy || !upd?.update_available}>
+      {tr('systemhealth.update_stage')}
+    </button>
+  </div>
+  {#if upd}
+    <p class="hint" data-testid="update-status">
+      <span class="badge {upd.update_available ? 'warn' : 'ok'}">{upd.latest}</span>
+      {tr('systemhealth.update_running', { current: upd.current })}
+      {#if upd.update_available}· {tr('systemhealth.update_available')}{:else}· {tr('systemhealth.update_current')}{/if}
+    </p>
+    {#if upd.apply_hint}
+      <p class="hint" data-testid="update-apply-hint">{tr('systemhealth.update_apply', { cmd: upd.apply_hint })}</p>
+    {/if}
+  {/if}
+  {#if updStaged}
+    <p class="hint" data-testid="update-staged">{tr('systemhealth.update_staged', { tag: updStaged.tag, path: updStaged.path })}</p>
+  {/if}
+  {#if updErr}<p class="err-text" data-testid="update-error">{updErr}</p>{/if}
 </div>
 
 <div class="card">

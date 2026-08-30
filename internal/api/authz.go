@@ -113,6 +113,10 @@ var adminAuthzRules = []authzRule{
 	{path: "/api/admin/panel-address", roles: ownerOnly},
 	{path: "/api/admin/certs", roles: ownerOnly},
 	{path: "/api/admin/settings", roles: ownerOnly},
+	// Staging fetches and EXECUTES a panel binary on this host. Without a rule
+	// here the catch-all below still resolves it, so nothing looks unclassified
+	// while a plain admin quietly gains that.
+	{path: "/api/admin/update", roles: ownerOnly},
 
 	// --- credential-bearing reads: never a viewer, never a reseller -------
 	// Each of these returns key material, a token, or a ready-to-use client

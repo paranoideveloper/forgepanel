@@ -29,6 +29,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core/porthop"
 	"github.com/forgepanel/forgepanel/internal/lifecycle"
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -848,7 +849,10 @@ var latestRelease = func() (releaseMetadata, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "forgectl")
-	client := &http.Client{Timeout: 20 * time.Second}
+	// GitHub, not the local panel: this has to honour the configured egress
+	// proxy, because the network that cannot reach api.github.com directly is
+	// exactly the one an operator runs `forgectl update` on.
+	client := netegress.Client(20 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return releaseMetadata{}, fmt.Errorf("check latest release: %w", err)
@@ -952,7 +956,7 @@ func cmdUpdate(args []string) error {
 			return nil
 		}
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := netegress.Client(60 * time.Second)
 	script, err := downloadReleaseAsset(client, metadata, "install.sh")
 	if err != nil {
 		return err

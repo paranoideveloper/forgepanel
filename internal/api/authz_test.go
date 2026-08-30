@@ -140,7 +140,10 @@ func TestAuthzSensitiveReadsAreRestricted(t *testing.T) {
 // Panel-level reconfiguration is owner-only: an admin who manages proxy users
 // should not be able to move the panel's address or import its certificate.
 func TestAuthzPanelConfigIsOwnerOnly(t *testing.T) {
-	for _, p := range []string{"/api/admin/panel-address", "/api/admin/certs", "/api/admin/settings/subscription"} {
+	// /api/admin/update stages a panel BINARY: it is the most privileged thing
+	// the panel can be told to fetch, and the catch-all at the bottom of the
+	// table would silently hand it to a plain admin.
+	for _, p := range []string{"/api/admin/panel-address", "/api/admin/certs", "/api/admin/settings/subscription", "/api/admin/update"} {
 		roles := rolesForRoute(http.MethodPost, p)
 		if len(roles) != 1 || roles[0] != string(store.RoleOwner) {
 			t.Errorf("POST %s should be owner-only, got %v", p, roles)
