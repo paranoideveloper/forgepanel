@@ -1,6 +1,7 @@
 package api
 
 import (
+	warppkg "github.com/forgepanel/forgepanel/internal/warp"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -918,11 +919,11 @@ func TestEdgeWarpRegisterAndConf(t *testing.T) {
 		_, _ = w.Write([]byte(`{"config":{"client_id":"AAAA","interface":{"addresses":{"v4":"172.16.0.2","v6":"2606:4700:110::1"}},"peers":[{"public_key":"PEERPUBKEY="}]}}`))
 	}))
 	defer warp.Close()
-	oldWarp := edge.WarpRegBase
-	edge.WarpRegBase = warp.URL
-	oldPause := edge.WarpRegPause
-	edge.WarpRegPause = 0
-	defer func() { edge.WarpRegBase = oldWarp; edge.WarpRegPause = oldPause }()
+	oldWarp := warppkg.RegBase
+	warppkg.RegBase = warp.URL
+	oldPause := warppkg.RegPause
+	warppkg.RegPause = 0
+	defer func() { warppkg.RegBase = oldWarp; warppkg.RegPause = oldPause }()
 	created := registerEdge(t, r, fmt.Sprintf(
 		`{"name":"wd","origin":%q,"secure_path":%q,"push_token":"push-tok"}`, m.srv.URL, path))
 	id := int(created["id"].(float64))

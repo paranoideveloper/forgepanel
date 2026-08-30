@@ -61,6 +61,42 @@ type Outbound struct {
 
 func (Outbound) TableName() string { return "outbounds" }
 
+// SetSettings replaces the core settings blob.
+//
+// The field's type is unexported — deliberately, so a malformed value fails on
+// write rather than when the config is generated — which also means no other
+// package can assign to it. Callers that build an outbound programmatically
+// (the WARP provisioner is the first) need this rather than a JSON round-trip
+// through the whole struct.
+//
+// It validates, for the same reason the type exists: a caller that renders
+// settings itself can hand over something that only fails later, inside the
+// core, as an error naming neither this outbound nor the field.
+func (o *Outbound) SetSettings(raw []byte) error {
+	if len(raw) == 0 {
+		o.Settings = nil
+		return nil
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("outbound %q: settings are not valid JSON", o.Tag)
+	}
+	o.Settings = datatypesJSON(append([]byte(nil), raw...))
+	return nil
+}
+
+// SetStreamSettings replaces the transport blob, with the same contract.
+func (o *Outbound) SetStreamSettings(raw []byte) error {
+	if len(raw) == 0 {
+		o.StreamSettings = nil
+		return nil
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("outbound %q: stream settings are not valid JSON", o.Tag)
+	}
+	o.StreamSettings = datatypesJSON(append([]byte(nil), raw...))
+	return nil
+}
+
 // RoutingRule is one ordered matcher-to-outbound decision.
 type RoutingRule struct {
 	ID   uint   `gorm:"primaryKey" json:"id"`

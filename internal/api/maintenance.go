@@ -75,6 +75,7 @@ func (s *Server) runMaintenance() {
 	s.reconcileCores()
 	s.applyNetTune()
 	s.checkNodesReachable()
+	s.rotateWarpIfDue()
 }
 
 // reconcileCores brings back inbounds that went away on their own.

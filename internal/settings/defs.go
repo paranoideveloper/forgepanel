@@ -9,6 +9,7 @@ package settings
 
 import (
 	"fmt"
+	"strconv"
 	"net"
 	"strings"
 
@@ -184,6 +185,36 @@ func buildRegistry() *Registry {
 	r.Register(Def{
 		Key: "pending_totp_", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true, Prefix: true,
 		Help: "Per-admin TOTP secret held between 2FA setup and confirmation, then cleared.",
+	})
+	// The registered WARP device, as JSON: its WireGuard private key, the bearer
+	// that can rebind it, and the endpoint in use.
+	//
+	// ScopeInternal and Secret: a ScopePanel key would be listed by
+	// GET /api/admin/settings/registry, and this one holds a private key. It is
+	// written only by the WARP provisioner, which owns its shape.
+	r.Register(Def{
+		Key: "warp_account", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true,
+		Help: "The Cloudflare WARP device the panel registered, including its keys. Managed by /api/admin/routing/warp.",
+	})
+	r.Register(Def{
+		Key: "warp_rotate_hours", Kind: KindString, Scope: ScopeInternal, Default: "0",
+		Help: "How often, in whole hours, to move the WARP outbound to a different Cloudflare address. 0 is off.",
+		// Validated here rather than at the handler so the table cannot hold a
+		// value the rotator will silently read as "off".
+		Validate: func(v string) error {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				return nil
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return fmt.Errorf("must be a whole number of hours, got %q", v)
+			}
+			if n < 0 {
+				return fmt.Errorf("cannot be negative, got %d", n)
+			}
+			return nil
+		},
 	})
 	// Operator-selected core versions, and the version each one displaced so a
 	// rollback has a target. Empty means "the version this build shipped with".

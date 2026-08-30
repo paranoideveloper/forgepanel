@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/auth"
+	"github.com/forgepanel/forgepanel/internal/store"
 )
 
 // generateRecoveryCodes mints a fresh set of one-time 2FA recovery codes for an
@@ -77,13 +78,17 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 		fail(c, 400, "run 2fa/setup first")
 		return
 	}
-	if !auth.VerifyTOTP(secret, req.Code, time.Now()) {
-		fail(c, 400, "invalid code")
-		return
-	}
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
 		failErr(c, 500, err)
+		return
+	}
+	// Claimed against the account even though the secret is still the pending
+	// one: the code being spent here is a code for the secret that is about to
+	// become the account's, and leaving it unspent would let the same code be
+	// replayed straight back at 2fa/disable.
+	if !s.claimTOTP(admin, secret, req.Code) {
+		fail(c, 400, "invalid code")
 		return
 	}
 	admin.TOTPSecret = secret
@@ -127,7 +132,7 @@ func (s *Server) handle2FADisable(c *gin.Context) {
 		c.JSON(200, gin.H{"enabled": false})
 		return
 	}
-	if !auth.VerifyTOTP(admin.TOTPSecret, req.Code, time.Now()) {
+	if !s.claimTOTP(admin, admin.TOTPSecret, req.Code) {
 		fail(c, 400, "invalid code")
 		return
 	}
@@ -179,7 +184,7 @@ func (s *Server) handle2FARecoveryRegenerate(c *gin.Context) {
 		return
 	}
 	reauthed := false
-	if req.Code != "" && auth.VerifyTOTP(admin.TOTPSecret, req.Code, time.Now()) {
+	if req.Code != "" && s.claimTOTP(admin, admin.TOTPSecret, req.Code) {
 		reauthed = true
 	} else if req.Password != "" {
 		if ok, _ := auth.VerifyPassword(req.Password, admin.PasswordHash); ok {
@@ -241,4 +246,35 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"ok": true, "sessions_revoked": true,
 		"access_token": access, "refresh_token": refresh})
+}
+
+// claimTOTP verifies a code and spends its time step, so the same code cannot be
+// used twice.
+//
+// RFC 6238 §5.2 requires a verifier to accept each one-time password only once.
+// A code stays valid across the ±1-step skew window — up to 90 seconds — so
+// without this an observed code (shoulder-surfed, phished, captured by a proxy)
+// can be replayed for the rest of that window. Login has always claimed the
+// step; these management flows did not, which left the more dangerous
+// operations as the unprotected ones: a replayed code here turns 2FA OFF or
+// mints a fresh set of recovery codes.
+//
+// The claim is a conditional UPDATE rather than a read-then-write, so two
+// concurrent requests carrying the same code cannot both succeed.
+func (s *Server) claimTOTP(admin *store.Admin, secret, code string) bool {
+	if secret == "" || code == "" {
+		return false
+	}
+	step, ok := auth.VerifyTOTPStep(secret, code, time.Now(), admin.LastTOTPStep)
+	if !ok {
+		return false
+	}
+	claimed, err := s.db.ClaimTOTPStep(admin.ID, step)
+	if err != nil || !claimed {
+		return false
+	}
+	// Keep the in-memory copy in step with the row, so a later SaveAdmin in the
+	// same handler cannot write back the stale value and un-spend the code.
+	admin.LastTOTPStep = step
+	return true
 }

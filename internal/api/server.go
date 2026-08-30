@@ -840,6 +840,16 @@ func (s *Server) routes() {
 			admin.POST("/routing/outbounds", s.handleSaveOutbound)
 			admin.PUT("/routing/outbounds/:id", s.handleSaveOutbound)
 			admin.DELETE("/routing/outbounds/:id", s.handleDeleteOutbound)
+
+			// Cloudflare WARP, provisioned as one of those outbounds. Separate
+			// routes rather than a protocol option on the generic outbound
+			// editor because it has a lifecycle the others do not: a device is
+			// registered with Cloudflare, a license may be attached to it, and
+			// the endpoint rotates without the account changing.
+			admin.GET("/routing/warp", s.handleWarpStatus)
+			admin.POST("/routing/warp", s.handleWarpProvision)
+			admin.POST("/routing/warp/rotate", s.handleWarpRotate)
+			admin.DELETE("/routing/warp", s.handleWarpDelete)
 			admin.GET("/routing/rules", s.handleListRoutingRules)
 			admin.POST("/routing/rules", s.handleSaveRoutingRule)
 			admin.PUT("/routing/rules/:id", s.handleSaveRoutingRule)

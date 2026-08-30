@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"github.com/forgepanel/forgepanel/internal/warp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -35,9 +36,9 @@ func TestRegisterWarpAccounts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	old, oldPause := WarpRegBase, WarpRegPause
-	WarpRegBase, WarpRegPause = srv.URL, 0
-	defer func() { WarpRegBase, WarpRegPause = old, oldPause }()
+	old, oldPause := warp.RegBase, warp.RegPause
+	warp.RegBase, warp.RegPause = srv.URL, 0
+	defer func() { warp.RegBase, warp.RegPause = old, oldPause }()
 
 	accts, err := RegisterWarpAccounts(context.Background(), nil)
 	if err != nil {
