@@ -8,6 +8,14 @@ package webhook
 // to get OUT of a censored network, while a webhook receiver is very often an
 // internal service on the other side of a different hop entirely. Forcing both
 // through one proxy breaks whichever of the two was configured second.
+//
+// That is also why deliveries use netegress.PolicyNoMetadata and not
+// PolicyStrict: an internal receiver is the intended case, so loopback and
+// RFC1918 stay reachable, while the cloud instance-metadata endpoints — which
+// nobody ever legitimately posts a webhook to, and which hand out the hosting
+// account's credentials — are refused. A stored endpoint is retried by a
+// background goroutine, so this is the one delivery path with no operator
+// watching it.
 
 import (
 	"net/http"
@@ -24,9 +32,9 @@ import (
 // would keep dialling the old one until the panel restarted.
 func newClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	if strings.TrimSpace(proxyURL) == "" {
-		return netegress.Client(timeout), nil
+		return netegress.GuardedClient(netegress.PolicyNoMetadata, timeout), nil
 	}
-	return netegress.ClientVia(proxyURL, timeout)
+	return netegress.GuardedClientVia(netegress.PolicyNoMetadata, proxyURL, timeout)
 }
 
 // ValidateProxy reports whether a per-endpoint proxy can be used at all, so an

@@ -141,11 +141,17 @@ func Probe(ctx context.Context, target string) error {
 	if strings.TrimSpace(target) == "" {
 		target = "https://api.github.com/"
 	}
+	// Guarded AFTER the default above, so the built-in target keeps working.
+	// Without this the test button is an internal port scanner with a
+	// three-way oracle: reachable, unreachable, and answered-5xx.
+	if _, err := GuardTarget(ctx, PolicyStrict, target); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := Client(10 * time.Second).Do(req)
+	resp, err := GuardedClient(PolicyStrict, 10*time.Second).Do(req)
 	if err != nil {
 		return err
 	}
