@@ -36,6 +36,61 @@ type UserInbound struct {
 // TableName pins the table name so it reads clearly in migrations.
 func (UserInbound) TableName() string { return "user_inbounds" }
 
+// GroupInbound is one group→inbound binding, mirroring Group.InboundIDs.
+//
+// That column is a comma-separated TEXT list with no foreign key and no index,
+// so the reverse question — which groups reference inbound N — could only be
+// answered by loading every group and filtering in Go, and nothing stopped the
+// list naming an inbound that had been deleted. This table answers it with an
+// index and lets a delete cascade reach it.
+//
+// The text column stays as the source of truth for at least one release: a
+// half-deployed panel, or one rolled back, still resolves subscriptions from it.
+// This is an indexed mirror plus the reverse query, not a replacement — which is
+// why every writer of the column has to write here too, in the same transaction.
+type GroupInbound struct {
+	GroupID   uint      `gorm:"primaryKey;index:idx_group_inbound_group" json:"group_id"`
+	InboundID uint      `gorm:"primaryKey;index:idx_group_inbound_inbound" json:"inbound_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TableName pins the table name so it reads clearly in migrations.
+func (GroupInbound) TableName() string { return "group_inbounds" }
+
+// setGroupInbounds replaces a group's join rows inside an existing transaction.
+// Callers pass the same slice they write to Group.InboundIDs, so the two cannot
+// diverge within one write.
+func setGroupInbounds(tx *gorm.DB, groupID uint, ids IntSlice) error {
+	if err := tx.Where("group_id = ?", groupID).Delete(&GroupInbound{}).Error; err != nil {
+		return err
+	}
+	seen := map[uint]bool{}
+	for _, id := range ids {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := tx.Create(&GroupInbound{GroupID: groupID, InboundID: id}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GroupsForInbound reports which groups reference an inbound, in id order.
+//
+// This is the query the text column could not serve. cascade.go answered it by
+// loading every group and filtering in Go; on a panel with many groups that is a
+// full table read for a question asked on every inbound delete.
+func (s *Store) GroupsForInbound(inboundID uint) ([]uint, error) {
+	var out []uint
+	err := s.db.Model(&GroupInbound{}).
+		Where("inbound_id = ?", inboundID).
+		Order("group_id").
+		Pluck("group_id", &out).Error
+	return out, err
+}
+
 // ErrStaleWrite reports that a record changed between the caller reading it and
 // writing it back, so the write was refused rather than silently discarding the
 // other edit.
@@ -208,7 +263,17 @@ func (s *Store) UpdateGroupFields(groupID uint, fields map[string]any, ifUnchang
 				}
 			}
 		}
-		return tx.Model(&Group{}).Where("id = ?", groupID).Updates(fields).Error
+		if err := tx.Model(&Group{}).Where("id = ?", groupID).Updates(fields).Error; err != nil {
+			return err
+		}
+		// Same transaction as the column write. This is the PATCH path the panel
+		// uses for every membership change, so a join table not maintained here
+		// is a join table that is wrong for every group after its first edit.
+		if ids, ok := fields["inbound_ids"]; ok {
+			slice, _ := ids.(IntSlice)
+			return setGroupInbounds(tx, groupID, slice)
+		}
+		return nil
 	})
 }
 
@@ -242,6 +307,11 @@ func (s *Store) DeleteGroupSafely(groupID, reassignTo uint, allowOrphan bool) (m
 				return e
 			}
 			moved = n
+		}
+		// Its join rows go with it. A group row deleted while its mirror rows
+		// remain leaves GroupsForInbound naming a group that does not exist.
+		if err := tx.Where("group_id = ?", groupID).Delete(&GroupInbound{}).Error; err != nil {
+			return err
 		}
 		return tx.Delete(&Group{}, groupID).Error
 	})

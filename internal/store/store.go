@@ -152,8 +152,20 @@ func (s *Store) UpdateInboundFields(id uint, fields map[string]any) error {
 
 // --- groups & users -------------------------------------------------------
 
-// CreateGroup persists a group.
-func (s *Store) CreateGroup(g *Group) error { return s.db.Create(g).Error }
+// CreateGroup persists a group and its inbound bindings.
+//
+// It was a one-line s.db.Create, which is exactly why it is the likeliest place
+// for the join table to be left unwritten: the function reads as already done.
+// Both writes are in one transaction, so a group can never exist with the column
+// set and no join rows.
+func (s *Store) CreateGroup(g *Group) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(g).Error; err != nil {
+			return err
+		}
+		return setGroupInbounds(tx, g.ID, g.InboundIDs)
+	})
+}
 
 // ListGroups returns all groups.
 func (s *Store) ListGroups() ([]Group, error) {

@@ -46,6 +46,7 @@ const (
 	migVInboundHosts  uint64 = 16
 	migVWGPeers       uint64 = 17
 	migVBridges       uint64 = 18
+	migVGroupInbounds uint64 = 19
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -277,6 +278,31 @@ func migrations() []migrate.Migration {
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&Bridge{}})
 				return err
+			},
+		},
+		{
+			Version: migVGroupInbounds,
+			Name:    "group_inbound_join_table",
+			Rollback: "safe to drop: Group.InboundIDs remains the source of truth, so membership " +
+				"survives. Only the indexed reverse lookup and the delete cascade are lost.",
+			Up: func(tx *gorm.DB) error {
+				if _, err := alignSchema(tx, []any{&GroupInbound{}}); err != nil {
+					return err
+				}
+				// BACKFILL. Without it an already-installed panel gets an empty
+				// table forever: it exists, the reverse query returns nothing,
+				// and nothing looks broken until a delete cascade quietly misses
+				// every group that predates this migration.
+				var groups []Group
+				if err := tx.Find(&groups).Error; err != nil {
+					return err
+				}
+				for i := range groups {
+					if err := setGroupInbounds(tx, groups[i].ID, groups[i].InboundIDs); err != nil {
+						return err
+					}
+				}
+				return nil
 			},
 		},
 	}

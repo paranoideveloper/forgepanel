@@ -38,6 +38,13 @@ func deleteInboundTx(tx *gorm.DB, id uint) error {
 	if err := detachInboundFromGroups(tx, id); err != nil {
 		return err
 	}
+	// The join rows go with it too. detachInboundFromGroups above rewrites the
+	// text column; leaving the mirror behind would make GroupsForInbound answer
+	// with a group that no longer references this inbound — confidently, from an
+	// index. Same shape as the assignment leak this function already fixes.
+	if err := tx.Where("inbound_id = ?", id).Delete(&GroupInbound{}).Error; err != nil {
+		return fmt.Errorf("delete inbound %d group bindings: %w", id, err)
+	}
 	// The inbound's public endpoints go with it, inside the same transaction.
 	// An orphaned host row publishes nothing and would be inherited outright by
 	// whatever inbound next takes that id — SQLite hands out the lowest free
