@@ -269,6 +269,17 @@ func (s *Server) checkNodesReachable() {
 			// it would fire forever for a node nobody finished setting up.
 			continue
 		}
+		if n.Disabled {
+			// Switched off by the operator. It is silent because they asked it
+			// to be, and the heartbeat handler refuses it anyway — paging them
+			// once a minute forever for their own decision is how an alert
+			// channel stops being read. Resolve rather than skip outright, so a
+			// node disabled WHILE it was down clears the alert it had already
+			// raised instead of leaving it open with nothing left to close it.
+			s.notifier.Resolve(telegram.EventNodeDown, n.Name,
+				fmt.Sprintf("*%s* has been disabled by an operator.", n.Name))
+			continue
+		}
 		silent := n.LastSeen == nil || n.LastSeen.Before(cutoff)
 		if silent {
 			s.emit(telegram.EventNodeDown, n.Name,

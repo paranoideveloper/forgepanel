@@ -119,5 +119,36 @@ func bearer(c *gin.Context) string {
 	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
+	// A WebSocket handshake, and ONLY a WebSocket handshake, may carry the token
+	// in the query.
+	//
+	// The browser's WebSocket constructor takes a URL and nothing else: there is
+	// no way to set an Authorization header on it. Without this, a live-log route
+	// mounted correctly behind a correct handler answers 401 for the only client
+	// that will ever call it, and every Go test still passes because tests can
+	// set headers.
+	//
+	// This does NOT reopen the CSRF hole the cookie path was removed for. The
+	// danger there was that browsers attach cookies to cross-site requests
+	// automatically, so a foreign page could act as the operator without ever
+	// seeing the credential. A query parameter is not attached by anything; the
+	// caller has to know the token. Confined to the handshake so an ordinary
+	// request cannot be authenticated this way — that would put a live session
+	// token in every proxy access log and Referer header the panel touches.
+	if isWebsocketUpgrade(c) {
+		return c.Query("access_token")
+	}
 	return ""
+}
+
+func isWebsocketUpgrade(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	// Connection is a comma-separated list ("keep-alive, Upgrade"), which is what
+	// Firefox sends, so it is searched rather than compared.
+	if !strings.Contains(strings.ToLower(c.GetHeader("Connection")), "upgrade") {
+		return false
+	}
+	return strings.EqualFold(c.GetHeader("Upgrade"), "websocket")
 }

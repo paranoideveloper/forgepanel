@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,12 +23,57 @@ import (
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
-// nodeIsLive reports whether a node has reported recently enough to be called
-// up. A node that has never reported is not live whatever its stored Healthy
-// flag says, and the cutoff is deliberately the one nodeSilentAfter already
-// defines for the metrics and health endpoints.
-func nodeIsLive(n *store.Node) bool {
-	return n != nil && n.LastSeen != nil && time.Since(*n.LastSeen) < nodeSilentAfter
+// nodeStatus derives a node's lifecycle state and the reason for it.
+//
+// Healthy is one bit and the Nodes table needed four states. Before this, a
+// node mid-install, a node that had died, a node whose core was refusing every
+// config it was sent, and a node an operator had deliberately switched off all
+// rendered the same "Stale" badge — so the page reported four emergencies where
+// there was one, and the operator had to go to the server to find out which.
+//
+// DERIVED, not read back from the column. Node.Status is stored so the last
+// thing a node said survives a restart, but a state written only at heartbeat
+// time is a state that stays "connected" forever for a node that has stopped
+// heartbeating — which is precisely how Healthy came to mean nothing (see
+// handleListNodes). The stored value is the input; this is the answer.
+//
+// The silence cutoff is deliberately nodeSilentAfter, the one /metrics, the
+// overview counter and the health page already use, so every place the panel
+// talks about a node agrees with the others.
+func nodeStatus(n *store.Node) (store.NodeStatus, string) {
+	if n == nil {
+		return store.NodeError, ""
+	}
+	// Deliberate beats everything. A node the operator turned off is not an
+	// error and must not read as one, however long it has been quiet — being
+	// quiet is what was asked of it.
+	if n.Disabled {
+		return store.NodeDisabled, ""
+	}
+	// Enrolled-but-never-heard-from is an install in progress. Calling it an
+	// error is what made the table unreadable during a fleet rollout, and it is
+	// also what would page an operator at 3am for a node they created at 2:59.
+	if !n.Enrolled || n.LastSeen == nil {
+		return store.NodeConnecting, ""
+	}
+	// StatusMessage holds the last failure the NODE reported about itself, which
+	// is the only way the panel learns that a node whose agent is perfectly
+	// healthy is running a core that refuses to start.
+	last := strings.TrimSpace(n.StatusMessage)
+	if age := time.Since(*n.LastSeen); age >= nodeSilentAfter {
+		msg := fmt.Sprintf("no heartbeat for %s", age.Truncate(time.Second))
+		if last != "" {
+			// The cause usually predates the silence: a core that will not start
+			// is why the box went away. Dropping it would leave the operator
+			// with "it is gone" and nothing to act on.
+			msg += "; last reported: " + last
+		}
+		return store.NodeError, msg
+	}
+	if last != "" {
+		return store.NodeError, last
+	}
+	return store.NodeConnected, ""
 }
 
 // handleListNodes lists remote nodes (spec §10).
@@ -46,8 +92,15 @@ func (s *Server) handleListNodes(c *gin.Context) {
 	// Derive it from the heartbeat age instead, using the same nodeSilentAfter
 	// cutoff /metrics, the overview counter and the health page already use, so
 	// every place the panel talks about a node agrees with the others.
+	//
+	// Status is derived in the same loop and for the same reason, and Healthy is
+	// then defined as "status is connected" rather than computed separately: two
+	// fields on one row that answer the same question from different inputs will
+	// eventually disagree, and the operator has no way to tell which one lied.
 	for i := range ns {
-		ns[i].Healthy = nodeIsLive(&ns[i])
+		st, msg := nodeStatus(&ns[i])
+		ns[i].Status, ns[i].StatusMessage = st, msg
+		ns[i].Healthy = st == store.NodeConnected
 	}
 	if !q.Paged() {
 		c.JSON(200, ns)
@@ -144,15 +197,27 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 		failErr(c, 401, err)
 		return
 	}
+	// A disabled node is refused at the door, exactly as at heartbeat: an agent
+	// that has been restarted re-registers before it heartbeats, and letting it
+	// through here would mark a node the operator switched off as enrolled and
+	// reporting again.
+	if n.Disabled {
+		c.JSON(403, gin.H{"error": "node is disabled"})
+		return
+	}
 	now := time.Now()
 	n.Enrolled = true
-	n.Healthy = true
 	if n.LastSeen != nil && now.Before(*n.LastSeen) {
 		c.JSON(200, gin.H{"xray_config": ""})
 		return
 	}
 	n.LastSeen = &now
 	n.CoreVersion = req.CoreVersion
+	// Registering is a fresh start: whatever failure the node last reported
+	// belonged to the process that has just been replaced.
+	n.StatusMessage = ""
+	n.Status, _ = nodeStatus(n)
+	n.Healthy = n.Status == store.NodeConnected
 	_ = s.db.SaveNode(n)
 	c.JSON(200, gin.H{"node_id": n.ID, "name": n.Name})
 }
@@ -184,6 +249,28 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// falls back to the installer's default rather than failing.
 		DataDir      string `json:"data_dir"`
 		SingboxStats bool   `json:"singbox_stats"`
+		// LastError is the node's own verdict on itself: the most recent thing
+		// one of its cores said before it stopped serving. A node whose agent is
+		// perfectly healthy can be running an xray that refuses every config it
+		// is handed, and without this the panel calls that node "connected"
+		// forever — which is how a node stayed green in the UI for hours while
+		// serving nobody. Empty from an older agent, which simply reports no
+		// fault rather than being called faulty.
+		LastError string `json:"last_error"`
+		// Logs are the lines that node's cores have written since the sequence
+		// number the panel last acknowledged, and LogSeq is where they start.
+		//
+		// They ride the heartbeat because the agent is strictly pull: it polls
+		// the panel and the panel can never open a connection to it (a node is
+		// commonly behind NAT and always behind its own firewall). See nodelogs.go.
+		Logs   []string `json:"logs"`
+		LogSeq int      `json:"log_seq"`
+		// LogEpoch identifies the agent PROCESS those numbers belong to. Without
+		// it a restarted agent — whose sequence starts at zero again — is
+		// indistinguishable from one re-sending its first batch, and the panel
+		// has to choose between losing every line after a restart and
+		// duplicating lines on every dropped response.
+		LogEpoch string `json:"log_epoch"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		failErr(c, 400, err)
@@ -192,6 +279,20 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n, err := s.authenticateNode(c, req.Token)
 	if err != nil {
 		fail(c, 401, "invalid token")
+		return
+	}
+	// THE REFUSAL IS THE FEATURE. A Disabled flag the heartbeat does not consult
+	// is a decorative column: the node keeps checking in, keeps being handed the
+	// full config bundle below, and keeps serving traffic while the panel tells
+	// the operator it is switched off. ConfigDirty on this same model is the
+	// warning from history — declared, migrated, serialised, typed in the
+	// frontend and rendered as a badge, and written by nothing in the tree.
+	//
+	// Refused BEFORE last_seen is touched, so a disabled node also stops looking
+	// alive, and long before the bundle is built, so it is handed no credentials
+	// and no inbounds to serve.
+	if n.Disabled {
+		c.JSON(403, gin.H{"error": "node is disabled"})
 		return
 	}
 	now := time.Now()
@@ -203,8 +304,18 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	n.TCPConns = req.TCPConns
 	n.CoreUptimeSec = req.CoreUptimeSec
 	n.SingboxStats = req.SingboxStats
-	n.Healthy = true
+	// What the node says about itself, kept verbatim so the operator reads the
+	// core's own words rather than a category. Trimmed to a sane length: this is
+	// a badge tooltip, and an agent shipping a stack trace should not turn every
+	// node list into a page of it.
+	n.StatusMessage = clipStatusMessage(req.LastError)
+	// Derived through the same function the list endpoint uses, so the stored
+	// state and the served state cannot drift apart. Healthy stays in step with
+	// it for the same reason.
+	n.Status, _ = nodeStatus(n)
+	n.Healthy = n.Status == store.NodeConnected
 	_ = s.db.SaveNode(n)
+	s.logs.publish(n.ID, req.LogEpoch, req.LogSeq, req.Logs)
 	s.accountNodeTraffic(n.ID, req.Traffic, req.TrafficCumulative)
 	// Return the current config bundle so the node runs the same inbounds.
 	//
@@ -415,6 +526,72 @@ func keepReferencedOutbounds(outs []engine.OutboundSpec, rules []engine.RuleSpec
 	return kept
 }
 
+// nodeStatusMessageMax bounds what a node can make the panel store and render
+// for itself. The field is a badge tooltip; an agent shipping a stack trace or a
+// core looping on a long error would otherwise turn the Nodes list into a wall
+// of it, and put an unbounded string from a remote machine in the database.
+const nodeStatusMessageMax = 400
+
+func clipStatusMessage(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= nodeStatusMessageMax {
+		return s
+	}
+	// Cut on a rune boundary. A core's error can be in any language the operator
+	// runs it in, and a byte-exact cut through a multi-byte character produces
+	// invalid UTF-8 that JSON encoding silently replaces with a question mark in
+	// the middle of the one sentence that was supposed to explain the outage.
+	cut := nodeStatusMessageMax
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// handleSetNodeState turns a node on or off (spec §10).
+//
+// Disabling is a control-plane action, not a label: handleNodeHeartbeat and
+// handleNodeRegister refuse a disabled node, so it stops receiving config
+// bundles and its inbounds drain rather than continuing to be served by a box
+// the operator believes is out of service. The alternative — a badge and nothing
+// else — is worse than no feature, because it tells the operator a machine is
+// off while it keeps taking traffic.
+func (s *Server) handleSetNodeState(c *gin.Context) {
+	var req struct {
+		// A POINTER, so "not mentioned" is distinguishable from "false". A plain
+		// bool would make every PATCH that forgot the field silently re-enable
+		// the node it was meant to be editing.
+		Disabled *bool `json:"disabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Disabled == nil {
+		c.JSON(400, gin.H{"error": "disabled is required"})
+		return
+	}
+	n, err := s.db.NodeByID(parseID(c))
+	if err != nil {
+		c.JSON(404, gin.H{"error": "not found"})
+		return
+	}
+	n.Disabled = *req.Disabled
+	// Re-derive rather than assign a state: a node coming back on is
+	// "connecting" or "error" depending on how long it has been quiet, and that
+	// judgement already exists in one place.
+	st, msg := nodeStatus(n)
+	n.Status = st
+	n.Healthy = st == store.NodeConnected
+	if err := s.db.SaveNode(n); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if n.Disabled {
+		s.audit(c, "node.disable", n.Name)
+	} else {
+		s.audit(c, "node.enable", n.Name)
+	}
+	c.JSON(200, gin.H{"id": n.ID, "name": n.Name, "disabled": n.Disabled,
+		"status": st, "status_message": msg})
+}
+
 // handleDeleteNode removes a node.
 func (s *Server) handleDeleteNode(c *gin.Context) {
 	id := parseID(c)
@@ -429,6 +606,10 @@ func (s *Server) handleDeleteNode(c *gin.Context) {
 		failErr(c, 500, err)
 		return
 	}
+	// Its log buffer has no owner any more. Left behind it is a few hundred
+	// lines the panel holds for the lifetime of the process about a node nobody
+	// can look at.
+	s.logs.forget(id)
 	s.audit(c, "node.delete", "")
 	c.JSON(200, gin.H{"deleted": id})
 }

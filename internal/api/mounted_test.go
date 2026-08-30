@@ -159,6 +159,11 @@ func TestRoutesTheUIDependsOnExist(t *testing.T) {
 		"GET /api/admin/users",
 		"GET /api/admin/quota",
 		"GET /api/protocols/schema",
+		// The Nodes table's Disable/Enable button and its live log panel. Both
+		// are the shape this guard exists for: a handler that exists, compiles
+		// and tests green behind a path the router never learned.
+		"PATCH /api/admin/nodes/:id",
+		"GET /api/admin/nodes/:id/logs",
 	} {
 		if !registered[want] {
 			t.Errorf("the UI calls %q and the router does not serve it", want)

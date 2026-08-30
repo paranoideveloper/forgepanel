@@ -144,6 +144,11 @@ type Server struct {
 	// deployments (§6); see EdgePushSoon in edge.go.
 	edgePush edgePushState
 
+	// logs holds each node's recent core output and the admins watching it. A
+	// zero value works, deliberately: the panel has two constructors and a hub
+	// that needed constructing is a hub that gets wired into one of them.
+	logs nodeLogHub
+
 	// paasRoutes maps a URL path to the loopback port a core bound for it, when
 	// the panel runs behind a platform edge that gives out one port. Rebuilt on
 	// every engine reload and read by the front proxy on every request, so it is
@@ -867,6 +872,13 @@ func (s *Server) routes() {
 			admin.GET("/certs", s.handleCertList)
 			admin.GET("/nodes", s.handleListNodes)
 			admin.POST("/nodes/enroll", s.handleEnrollNode)
+			// Take a node out of service, and put it back. Enforced at the
+			// heartbeat, not painted on the list — see handleSetNodeState.
+			admin.PATCH("/nodes/:id", s.handleSetNodeState)
+			// The node's own core output, live. Authenticated by the query token
+			// the WebSocket handshake carries, because a browser cannot set an
+			// Authorization header on `new WebSocket()`; see auth.bearer.
+			admin.GET("/nodes/:id/logs", s.handleNodeLogsStream)
 			admin.DELETE("/nodes/:id", s.handleDeleteNode)
 			admin.GET("/forgedns/adapters", s.handleForgeDNSAdapters)
 			admin.GET("/forgedns/upstream/adapters", s.handleForgeDNSUpstreamAdapters)

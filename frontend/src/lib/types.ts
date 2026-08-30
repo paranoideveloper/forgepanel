@@ -38,6 +38,19 @@ export interface Node {
   healthy: boolean;
   config_dirty?: boolean;
   config_dirty_at?: string | null;
+  /** Where the node is in its life, derived server-side on every read.
+   *
+   *  `healthy` is one bit and the table needed four states: a node mid-install,
+   *  a node that has died, a node whose core is refusing its config, and one an
+   *  operator switched off all rendered the same "Stale" badge. Only the server
+   *  can tell them apart — nothing in last_seen says a node was disabled or that
+   *  its core is failing. */
+  status: 'connecting' | 'connected' | 'error' | 'disabled';
+  /** Why, in the node's own words where it has any. */
+  status_message?: string;
+  /** Switched off by an operator. The panel refuses its heartbeats, so it stops
+   *  receiving config bundles rather than merely looking off in the list. */
+  disabled?: boolean;
 }
 
 export interface DNSZone {

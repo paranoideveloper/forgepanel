@@ -28,13 +28,18 @@ describe('NodesView Component', () => {
       return {
         ok: true,
         json: async () => [
-          // last_seen is what the badge is derived from, and the real API always
-          // sends it; a fixture without it is a node that has never reported.
+          // `status` is derived server-side on every read and is what the badge
+          // renders. It has to come from there: three of its four states —
+          // disabled, a node-reported core failure, and an install in progress —
+          // are invisible to anything working from last_seen alone.
           {
             id: 1, name: 'EU-Node', address: '1.2.3.4', cpu: 10, mem_mb: 512, healthy: true,
-            last_seen: new Date(Date.now() - 20_000).toISOString()
+            status: 'connected', last_seen: new Date(Date.now() - 20_000).toISOString()
           },
-          { id: 2, name: 'Stale-Node', address: '2.2.2.2', cpu: 0, mem_mb: 0, healthy: false }
+          {
+            id: 2, name: 'Stale-Node', address: '2.2.2.2', cpu: 0, mem_mb: 0, healthy: false,
+            status: 'error', status_message: 'no heartbeat for 2h0m0s'
+          }
         ]
       } as Response;
     };
@@ -43,8 +48,10 @@ describe('NodesView Component', () => {
 
     expect(await screen.findByText('EU-Node')).toBeTruthy();
     expect(screen.getByText('Stale-Node')).toBeTruthy();
-    expect(screen.getByTestId('node-status-1').textContent?.trim()).toBe('Online');
-    expect(screen.getByTestId('node-status-2').textContent?.trim()).toBe('Stale');
+    expect(screen.getByTestId('node-status-1').textContent?.trim()).toBe('Connected');
+    expect(screen.getByTestId('node-status-2').textContent?.trim()).toBe('Error');
+    // An error badge with no reason sends the operator to the server to find one.
+    expect(screen.getByTestId('node-status-msg-2').textContent).toContain('no heartbeat');
 
     const nameInput = screen.getByPlaceholderText('Node Name (e.g. EU-West-1)');
     const addrInput = screen.getByPlaceholderText('Public IP or Domain (optional)');
@@ -271,14 +278,15 @@ describe('NodesView Component', () => {
   // that field is only ever written true on the server — nothing anywhere sets
   // it false. So a node that stopped reporting an hour ago rendered "Online"
   // beside a last-seen cell reading "1h ago", and the badge was decorative.
-  it('calls a node that stopped reporting Stale even when the payload claims healthy', async () => {
+  it('shows the state the server derived, not the healthy flag the payload claims', async () => {
     (globalThis as any).fetch = async () =>
       ({
         ok: true,
         json: async () => [
           {
             id: 7, name: 'Zombie', address: '1.2.3.4', healthy: true, enrolled: true,
-            cpu: 0, mem_mb: 0, last_seen: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+            cpu: 0, mem_mb: 0, status: 'error', status_message: 'no heartbeat for 1h0m0s',
+            last_seen: new Date(Date.now() - 60 * 60 * 1000).toISOString()
           }
         ]
       }) as Response;
@@ -288,7 +296,81 @@ describe('NodesView Component', () => {
     expect(await screen.findByText('Zombie')).toBeTruthy();
     // Assert the badge itself, not merely that the word appears somewhere: the
     // table has a Status column header and other badges in the same cell.
-    expect(screen.getByTestId('node-status-7').textContent?.trim()).toBe('Stale');
+    expect(screen.getByTestId('node-status-7').textContent?.trim()).toBe('Error');
     expect(screen.getByText('1h ago')).toBeTruthy();
+  });
+
+  // Four states, because before this a node mid-install, a node that had died,
+  // a node whose core refuses every config and a node the operator switched off
+  // all rendered the same badge — so the page reported four emergencies where
+  // there was at most one.
+  it('tells an install in progress apart from a dead node and one switched off', async () => {
+    (globalThis as any).fetch = async () =>
+      ({
+        ok: true,
+        json: async () => [
+          { id: 1, name: 'Installing', address: '', healthy: false, enrolled: true, status: 'connecting' },
+          { id: 2, name: 'Dead', address: '', healthy: false, enrolled: true, status: 'error' },
+          { id: 3, name: 'Off', address: '', healthy: false, enrolled: true, status: 'disabled', disabled: true }
+        ]
+      }) as Response;
+
+    render(NodesView);
+
+    expect(await screen.findByText('Installing')).toBeTruthy();
+    expect(screen.getByTestId('node-status-1').textContent?.trim()).toBe('Connecting');
+    expect(screen.getByTestId('node-status-2').textContent?.trim()).toBe('Error');
+    expect(screen.getByTestId('node-status-3').textContent?.trim()).toBe('Disabled');
+    // Deliberately off must not wear the colour of a fault, or the operator
+    // learns to ignore the colour.
+    expect(screen.getByTestId('node-status-3').className).not.toContain('badge-err');
+  });
+
+  // The button has to reach the route that actually refuses the node's
+  // heartbeat. A Disable control that only repaints the badge is worse than none:
+  // it tells the operator a machine is off while it keeps serving traffic.
+  it('disables a node through the PATCH route that gates its heartbeat', async () => {
+    let patched: { url: string; body: any } | null = null;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'PATCH') {
+        patched = { url, body: JSON.parse(opts.body) };
+        return { ok: true, json: async () => ({ id: 1, disabled: true }) } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => [
+          { id: 1, name: 'EU-Node', address: '1.2.3.4', healthy: true, enrolled: true, status: 'connected' }
+        ]
+      } as Response;
+    };
+
+    render(NodesView);
+    await fireEvent.click(await screen.findByText('Disable'));
+
+    expect(patched).not.toBeNull();
+    expect(patched!.url).toContain('/admin/nodes/1');
+    expect(patched!.body).toEqual({ disabled: true });
+  });
+
+  // And back again, or the only way to re-enable a node is the database.
+  it('offers Enable for a node that is already disabled', async () => {
+    let patchedBody: any = null;
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'PATCH') {
+        patchedBody = JSON.parse(opts.body);
+        return { ok: true, json: async () => ({ id: 1, disabled: false }) } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => [
+          { id: 1, name: 'Off', address: '1.2.3.4', healthy: false, enrolled: true, status: 'disabled', disabled: true }
+        ]
+      } as Response;
+    };
+
+    render(NodesView);
+    await fireEvent.click(await screen.findByText('Enable'));
+
+    expect(patchedBody).toEqual({ disabled: false });
   });
 });

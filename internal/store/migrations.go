@@ -52,6 +52,8 @@ const (
 	// never renumbered, and two migrations sharing a number would leave one of
 	// them recorded as already applied on every database that ran the other.
 	migVWebhooks uint64 = 21
+	// 22: 20 went to outbound_groups and 21 to webhooks in the same batch.
+	migVNodeStatus uint64 = 22
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -335,6 +337,46 @@ func migrations() []migrate.Migration {
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&WebhookEndpoint{}})
 				return err
+			},
+		},
+		{
+			Version: migVNodeStatus,
+			Name:    "node_status_machine",
+			Rollback: "safe to drop. The panel falls back to the single healthy bit, which cannot " +
+				"tell an install in progress from a dead node — and every node stops being " +
+				"refusable: a node an operator disabled starts receiving config bundles again.",
+			Up: func(tx *gorm.DB) error {
+				if _, err := alignSchema(tx, []any{&Node{}}); err != nil {
+					return err
+				}
+				// BACKFILL. Adding the column stamps every existing row with
+				// the same default, so an established fleet would come out of
+				// the migration with every node — including ones that have been
+				// serving for months — recorded as mid-install. The API derives
+				// the state on every read and would hide that, but the column is
+				// also what a backup carries and what anything querying the
+				// store directly sees, and a stored value that contradicts the
+				// served one is the seed of the next "the panel says two
+				// different things" bug.
+				//
+				// LastSeen is the only evidence available here: a node that has
+				// reported was connected as of that moment. If it has since gone
+				// quiet the read path calls it an error on the next list, so
+				// this only has to be right about the past.
+				//
+				// Scoped to rows this migration could itself have produced, so a
+				// re-run cannot overwrite a state the panel has since decided.
+				if err := tx.Model(&Node{}).
+					Where("status IS NULL OR status = ? OR status = ?", "", string(NodeConnecting)).
+					Where("last_seen IS NOT NULL").
+					Update("status", string(NodeConnected)).Error; err != nil {
+					return err
+				}
+				// A dialect that adds the column without applying the default
+				// leaves NULLs behind, which is not one of the four states.
+				return tx.Model(&Node{}).
+					Where("status IS NULL OR status = ?", "").
+					Update("status", string(NodeConnecting)).Error
 			},
 		},
 	}

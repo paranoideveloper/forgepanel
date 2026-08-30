@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -662,5 +664,266 @@ func TestFailoverGroupReachesANode(t *testing.T) {
 		if !strings.Contains(resp.XrayConfig, want) {
 			t.Errorf("member %s is missing from the node's config: %s", want, resp.XrayConfig)
 		}
+	}
+}
+
+// --- node lifecycle status machine -----------------------------------------
+//
+// `healthy` is one bit and the panel needed four states. An operator looking at
+// the Nodes table could not tell a node that has never phoned home from one
+// that has died, and could not tell either from one they had deliberately
+// turned off — all three read "Stale", so the table said "something is wrong
+// with three nodes" when one was mid-install, one was on fire, and one was
+// switched off on purpose.
+
+// A node that has been enrolled but has never reported is still coming up. It
+// is not an error and it is not connected; calling it either is what made the
+// table useless during an install.
+func TestNodeStatusIsConnectingBeforeTheFirstHeartbeat(t *testing.T) {
+	s, token := adminAPI(t)
+	// The stored column is deliberately WRONG — "error" is what a panel that
+	// only ever wrote this state at heartbeat time would leave behind. A node
+	// that has never reported is coming up whatever the column remembers.
+	if err := s.db.SaveNode(&store.Node{Name: "fra1", Address: "203.0.113.30",
+		EnrollToken: "t-fra1", Enrolled: true, Status: store.NodeError,
+		StatusMessage: "stale"}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := doGET(t, s, "/api/admin/nodes", token)
+	if code != 200 {
+		t.Fatalf("listing nodes: %d %s", code, body)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want one node, got %d", len(got))
+	}
+	if got[0]["status"] != "connecting" {
+		t.Fatalf("a node that has never reported has status %v, want \"connecting\"; "+
+			"the operator cannot tell an install in progress from a dead node", got[0]["status"])
+	}
+	if got[0]["status_message"] != "" {
+		t.Errorf("a node that is merely coming up carries the message %q", got[0]["status_message"])
+	}
+}
+
+// The read path has to derive the state, not read back a column the write path
+// last touched. Node.Healthy was shipped as write-only-true once already and the
+// Online badge lied for an hour at a time; a Status column written only at
+// heartbeat would read "connected" forever for a node that died.
+func TestNodeStatusGoesToErrorWhenTheHeartbeatsStop(t *testing.T) {
+	s, token := adminAPI(t)
+	long := time.Now().Add(-2 * time.Hour)
+	just := time.Now().Add(-5 * time.Second)
+	// Both rows are stored saying "connected", because that is what the last
+	// heartbeat wrote. Only one of them still is.
+	dead := &store.Node{Name: "dead", Address: "203.0.113.31", EnrollToken: "t-d",
+		Enrolled: true, LastSeen: &long, Status: store.NodeConnected}
+	live := &store.Node{Name: "live", Address: "203.0.113.32", EnrollToken: "t-l",
+		Enrolled: true, LastSeen: &just, Status: store.NodeConnected}
+	for _, n := range []*store.Node{dead, live} {
+		if err := s.db.SaveNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	code, body := doGET(t, s, "/api/admin/nodes", token)
+	if code != 200 {
+		t.Fatalf("listing nodes: %d %s", code, body)
+	}
+	var got []struct {
+		Name          string `json:"name"`
+		Status        string `json:"status"`
+		StatusMessage string `json:"status_message"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	st := map[string]string{}
+	msg := map[string]string{}
+	for _, n := range got {
+		st[n.Name] = n.Status
+		msg[n.Name] = n.StatusMessage
+	}
+	if st["dead"] != "error" {
+		t.Errorf("a node silent for two hours reads %q, want \"error\"", st["dead"])
+	}
+	if msg["dead"] == "" {
+		t.Error("the error state carries no message, so the operator is told something is wrong and not what")
+	}
+	if st["live"] != "connected" {
+		t.Errorf("a node that reported five seconds ago reads %q, want \"connected\"", st["live"])
+	}
+}
+
+// A node the operator switched off must READ disabled whatever its heartbeat
+// age says, or "disabled" is just another way of spelling "error".
+func TestADisabledNodeReadsDisabledNotError(t *testing.T) {
+	s, token := adminAPI(t)
+	long := time.Now().Add(-2 * time.Hour)
+	if err := s.db.SaveNode(&store.Node{Name: "off", Address: "203.0.113.33",
+		EnrollToken: "t-off", Enrolled: true, LastSeen: &long, Disabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, body := doGET(t, s, "/api/admin/nodes", token)
+	if code != 200 {
+		t.Fatalf("listing nodes: %d %s", code, body)
+	}
+	var got []struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Status != "disabled" {
+		t.Fatalf("a deliberately-disabled node reads %+v, want status \"disabled\"", got)
+	}
+}
+
+// The one that makes "disabled" a state rather than a label. ConfigDirty is the
+// warning from history: declared, migrated, serialized, typed in the frontend,
+// rendered as a badge — and written by nothing. A Disabled flag the heartbeat
+// does not consult is the same shape of dead column, except this one tells the
+// operator a node is off while it keeps serving traffic.
+func TestADisabledNodeIsRefusedAtHeartbeat(t *testing.T) {
+	s, token := adminAPI(t)
+	n := &store.Node{Name: "off", Address: "203.0.113.34", EnrollToken: "tok-off", Enrolled: true}
+	if err := s.db.SaveNode(n); err != nil {
+		t.Fatal(err)
+	}
+	// An inbound on that node, so a bundle genuinely exists to leak.
+	if code, b := doPOST(t, s, "/api/admin/inbounds", token,
+		`{"protocol":"vless","address":"203.0.113.34","port":8443,"remark":"v-off"}`); code != 200 && code != 201 {
+		t.Fatalf("creating the node's inbound: %d %s", code, b)
+	}
+	if code, b := doPATCH(t, s, fmt.Sprintf("/api/admin/nodes/%d", n.ID), token,
+		map[string]any{"disabled": true}); code != 200 {
+		t.Fatalf("disabling the node: %d %s", code, b)
+	}
+
+	code, body := doPOST(t, s, "/api/node/heartbeat", "", `{"token":"tok-off"}`)
+	if code != 403 {
+		t.Fatalf("a disabled node's heartbeat returned %d, want 403: %s", code, body)
+	}
+	if strings.Contains(body, "\"xray_config\"") && !strings.Contains(body, `"xray_config":""`) {
+		t.Fatalf("a disabled node was still handed a config bundle: %s", body)
+	}
+	// And the flag actually persisted, so the refusal survives a panel restart.
+	got, err := s.db.NodeByID(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Disabled {
+		t.Fatal("PATCH reported success and the node is not disabled in the database")
+	}
+}
+
+// Re-enabling has to work too, or the only way back is the database.
+func TestReEnablingANodeLetsItHeartbeatAgain(t *testing.T) {
+	s, token := adminAPI(t)
+	n := &store.Node{Name: "back", Address: "203.0.113.35", EnrollToken: "tok-back",
+		Enrolled: true, Disabled: true}
+	if err := s.db.SaveNode(n); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := doPATCH(t, s, fmt.Sprintf("/api/admin/nodes/%d", n.ID), token,
+		map[string]any{"disabled": false}); code != 200 {
+		t.Fatalf("enabling the node: %d %s", code, b)
+	}
+	if code, b := doPOST(t, s, "/api/node/heartbeat", "", `{"token":"tok-back"}`); code != 200 {
+		t.Fatalf("a re-enabled node's heartbeat returned %d: %s", code, b)
+	}
+}
+
+// The write half: a node that reports its core is broken is in error even while
+// its heartbeats keep arriving on time. Without this, "connected" means only
+// "the agent is alive", which is the least interesting thing about a node whose
+// core is crash-looping and serving nobody.
+func TestANodeReportingAFailureIsInErrorWhileStillHeartbeating(t *testing.T) {
+	s, token := adminAPI(t)
+	if err := s.db.SaveNode(&store.Node{Name: "sick", Address: "203.0.113.36",
+		EnrollToken: "tok-sick", Enrolled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := doPOST(t, s, "/api/node/heartbeat", "",
+		`{"token":"tok-sick","last_error":"xray rejected the config: missing certificate"}`); code != 200 {
+		t.Fatalf("heartbeat: %d %s", code, b)
+	}
+
+	code, body := doGET(t, s, "/api/admin/nodes", token)
+	if code != 200 {
+		t.Fatalf("listing nodes: %d %s", code, body)
+	}
+	var got []struct {
+		Status        string `json:"status"`
+		StatusMessage string `json:"status_message"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Status != "error" {
+		t.Fatalf("a node reporting a core failure reads %+v, want status \"error\"", got)
+	}
+	if !strings.Contains(got[0].StatusMessage, "missing certificate") {
+		t.Errorf("the failure the node reported is not shown to the operator: %q", got[0].StatusMessage)
+	}
+}
+
+// A node that is off on purpose is not an incident. The reachability sweep reads
+// "has not reported recently" and pages the operator; a disabled node has not
+// reported recently BY DESIGN, so without this it pages them every minute,
+// forever, for a machine they themselves switched off — which is how an alert
+// channel stops being read.
+func TestTheReachabilitySweepIgnoresADisabledNode(t *testing.T) {
+	s, _ := adminAPI(t)
+	long := time.Now().Add(-2 * time.Hour)
+	if err := s.db.SaveNode(&store.Node{Name: "off-on-purpose", Address: "203.0.113.50",
+		EnrollToken: "t-sweep-off", Enrolled: true, LastSeen: &long, Disabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	var alerts []string
+	s.notifier = testNotifier2(func(msg string) { alerts = append(alerts, msg) })
+
+	s.checkNodesReachable()
+
+	if len(alerts) != 0 {
+		t.Fatalf("a deliberately-disabled node paged the operator: %v", alerts)
+	}
+}
+
+// The sweep must still fire for a node that went down on its own, or turning the
+// guard above into "never alert" would go unnoticed.
+func TestTheReachabilitySweepStillAlertsOnANodeThatDied(t *testing.T) {
+	s, _ := adminAPI(t)
+	long := time.Now().Add(-2 * time.Hour)
+	if err := s.db.SaveNode(&store.Node{Name: "died", Address: "203.0.113.51",
+		EnrollToken: "t-sweep-dead", Enrolled: true, LastSeen: &long}); err != nil {
+		t.Fatal(err)
+	}
+	var alerts []string
+	s.notifier = testNotifier2(func(msg string) { alerts = append(alerts, msg) })
+
+	s.checkNodesReachable()
+
+	if len(alerts) == 0 {
+		t.Fatal("a node silent for two hours raised no alert")
+	}
+}
+
+// A core's error can be in any language the operator runs it in. A byte-exact
+// cut through a multi-byte character produces invalid UTF-8, which JSON encoding
+// replaces with a replacement character in the middle of the one sentence that
+// was supposed to explain the outage.
+func TestALongStatusMessageIsCutOnARuneBoundary(t *testing.T) {
+	long := strings.Repeat("پیکربندی نامعتبر ", 200)
+	got := clipStatusMessage(long)
+	if len(got) > nodeStatusMessageMax+len("…") {
+		t.Fatalf("clipped message is %d bytes, want at most %d", len(got), nodeStatusMessageMax)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("clipped message is not valid UTF-8: %q", got)
 	}
 }

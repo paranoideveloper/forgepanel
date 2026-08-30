@@ -9,7 +9,9 @@ package main
 // anywhere said why. Half the protocol matrix worked locally and not remotely.
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/forgepanel/forgepanel/internal/core/binmgr"
+	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/core/xrayapi"
 )
 
@@ -77,6 +80,62 @@ type engineProc struct {
 	lastCfg   string
 	cmd       *exec.Cmd
 	startedAt time.Time
+	// logs is what this core has most recently written.
+	//
+	// Its output used to go straight to the agent's stdout and stderr, which
+	// means into the node's journal and nowhere else: the panel could see that a
+	// node was unhappy and could not say one word about why, so diagnosing any
+	// remote node meant an SSH session on another continent. Still tee'd to
+	// stderr — journalctl on the node stays exactly as useful as it was.
+	logs *supervisor.LogRing
+	// logCursor is the absolute position in logs already accepted by the panel.
+	// It advances only when a heartbeat SUCCEEDS; see NodeAgent.collectLogs.
+	logCursor int
+	// lastErr is the most recent thing that went wrong applying or starting this
+	// core, in its own words where it has any, and empty once it accepts a
+	// config. The panel reports it as the node's status: a node whose agent is
+	// healthy and whose core refuses every config it is handed used to read
+	// "connected" forever.
+	lastErr string
+}
+
+// ring returns this core's output buffer, creating it on first use.
+func (e *engineProc) ring() *supervisor.LogRing {
+	if e.logs == nil {
+		e.logs = supervisor.NewLogRing(nodeLogLines)
+	}
+	return e.logs
+}
+
+// nodeLogLines is how much of each core's output the node keeps between
+// heartbeats. Ten seconds of a healthy core is a handful of lines; ten seconds of
+// one crash-looping is not, and this is the bound on what a node can hand the
+// panel after being unreachable.
+const nodeLogLines = 400
+
+// capture drains a core's output into a ring and on to the node's own stderr.
+//
+// The tee is not optional: journalctl on the node is what an operator falls back
+// to when the panel itself is the thing that is broken, and quietly taking that
+// away in exchange for a nicer UI would be a bad trade.
+//
+// It takes the ring rather than the engineProc deliberately. This runs on its
+// own goroutine for the life of the process while every field on engineProc is
+// read and written under the agent's mutex; handing it the one thing that is
+// safe to share — the ring has its own lock — is what keeps that boundary
+// impossible to cross by accident.
+func capture(r io.ReadCloser, logs *supervisor.LogRing, name string) {
+	defer r.Close()
+	sc := bufio.NewScanner(r)
+	// A core can emit a very long line — a config dump, a stack trace — and the
+	// default 64KB limit makes Scan STOP at the first one, silently ending the
+	// capture for the life of the process.
+	sc.Buffer(make([]byte, 0, 8192), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		fmt.Fprintf(os.Stderr, "%s: %s\n", name, line)
+		logs.Add(line)
+	}
 }
 
 // apply validates and installs a new config, restarting the core.
@@ -100,7 +159,7 @@ func (e *engineProc) apply(dataDir, cfg string) {
 
 	tmp := tempConfigPath(configPath)
 	if err := os.WriteFile(tmp, []byte(cfg), 0o600); err != nil {
-		fmt.Fprintf(os.Stderr, "forgenode: %s: write temp config: %v\n", e.spec.name, err)
+		e.fail("write temp config: %v", err)
 		return
 	}
 
@@ -109,14 +168,16 @@ func (e *engineProc) apply(dataDir, cfg string) {
 		// leaves the node serving the last good one rather than nothing.
 		out, err := exec.Command(e.bin, e.spec.testArgs(tmp)...).CombinedOutput()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "forgenode: %s rejected the config: %v: %s\n",
-				e.spec.name, err, out)
+			// The core's OWN words, not "validation failed": "invalid inbound
+			// settings" tells the operator which inbound to go and fix, and it
+			// is the whole reason this travels to the panel at all.
+			e.fail("rejected the config: %s", firstLine(string(out), err))
 			_ = os.Remove(tmp)
 			return
 		}
 	}
 	if err := os.Rename(tmp, configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "forgenode: %s: commit config: %v\n", e.spec.name, err)
+		e.fail("commit config: %v", err)
 		_ = os.Remove(tmp)
 		return
 	}
@@ -133,6 +194,7 @@ func (e *engineProc) apply(dataDir, cfg string) {
 	if e.bin != "" && e.running() && e.spec.hotApply != nil {
 		if applied, err := e.spec.hotApply(e.bin, dataDir, []byte(prev), []byte(cfg)); err == nil && applied {
 			fmt.Printf("forgenode: %s users updated without a restart\n", e.spec.name)
+			e.lastErr = ""
 			return
 		} else if err != nil {
 			// Fall through to the restart, which is the one action that always
@@ -145,22 +207,75 @@ func (e *engineProc) apply(dataDir, cfg string) {
 
 	e.stop()
 	if e.bin == "" {
+		// Not a stub state to be silent about: this node has been given inbounds
+		// it physically cannot serve, and until now the only trace of that was
+		// one line in its own journal.
+		e.fail("no %s binary on this node, so its inbounds are not being served", e.spec.name)
 		fmt.Printf("forgenode: %s config updated (binary not available to launch)\n", e.spec.name)
 		return
 	}
 	cmd := exec.Command(e.bin, e.spec.runArgs(configPath)...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	// One pipe for both streams, so the lines interleave in the order the core
+	// actually wrote them. os.Pipe rather than cmd.StdoutPipe: those are closed
+	// by Wait, which stop() calls, and the reader would race the close and lose
+	// the last lines — which are the ones that say why the core went away.
+	pr, pw, perr := os.Pipe()
+	// Created HERE, under the agent's lock, so the drain goroutine below only
+	// ever reads an already-published pointer.
+	logs := e.ring()
+	if perr == nil {
+		cmd.Stdout, cmd.Stderr = pw, pw
+	} else {
+		// Capture is a diagnostic; losing it must not stop the core from running.
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	}
 	// Stamped on every (re)start so the heartbeat reports real uptime. A core
 	// that is quietly crash-looping shows a permanently near-zero value, which is
 	// the only signal the panel gets that a node is "connected" but serving
 	// nothing.
 	e.startedAt = time.Now()
-	if err := cmd.Start(); err != nil {
+	err := cmd.Start()
+	if perr == nil {
+		// The parent must drop its write end or the reader never sees EOF when
+		// the core exits, and the drain goroutine lives forever.
+		_ = pw.Close()
+		if err == nil {
+			go capture(pr, logs, e.spec.name)
+		} else {
+			_ = pr.Close()
+		}
+	}
+	if err != nil {
+		e.fail("failed to start: %v", err)
 		fmt.Fprintf(os.Stderr, "forgenode: failed to start %s: %v\n", e.spec.name, err)
 		return
 	}
 	e.cmd = cmd
+	// The config was accepted and the process is up: whatever last went wrong
+	// belonged to a config this one has replaced. Without this a single bad
+	// config would mark the node broken in the panel until the agent restarted.
+	e.lastErr = ""
 	fmt.Printf("forgenode: started %s with the new config\n", e.spec.name)
+}
+
+// fail records why this core is not serving, and says so on stderr as before.
+func (e *engineProc) fail(format string, args ...any) {
+	e.lastErr = fmt.Sprintf(format, args...)
+	fmt.Fprintf(os.Stderr, "forgenode: %s: %s\n", e.spec.name, e.lastErr)
+}
+
+// firstLine reduces a core's rejection to the part worth showing in a badge.
+//
+// A validator prints its complaint and then, commonly, a usage banner. The
+// complaint is the first non-empty line; the banner is noise that would fill the
+// panel's Nodes table with the same twenty lines for every node.
+func firstLine(out string, fallback error) string {
+	for _, ln := range strings.Split(out, "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			return ln
+		}
+	}
+	return fallback.Error()
 }
 
 func (e *engineProc) stop() {

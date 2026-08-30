@@ -199,3 +199,46 @@ func TestLogHintLooksPastTheVeryLastLine(t *testing.T) {
 		t.Errorf("hint = %q; the cause was 30 lines back and was missed", hint)
 	}
 }
+
+// since is what makes a bounded buffer resumable: the node agent re-sends
+// anything the panel did not acknowledge, so it asks the ring for everything
+// after the position it last had accepted. Same wraparound trap as snapshotN,
+// with the added hazard that the caller's cursor can be older than anything the
+// ring still holds.
+func TestRingSinceReturnsEverythingAfterACursorAcrossAWrap(t *testing.T) {
+	r := newRing(8)
+	// 22 again, and for the same reason: an exact multiple of the size wraps
+	// back to index 0 and a naive slice is right by luck.
+	for i := 0; i < 22; i++ {
+		r.add(fmt.Sprintf("line-%d", i))
+	}
+
+	// A cursor inside the window: exactly the lines after it, in order.
+	got, next := r.since(19)
+	want := []string{"line-19", "line-20", "line-21"}
+	if next != 22 {
+		t.Fatalf("next = %d, want 22 — the caller would re-send accepted lines forever", next)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("since(19) = %v, want %v", got, want)
+	}
+
+	// A cursor older than the window: everything still held, not nothing and not
+	// a slice from some arbitrary earlier lap.
+	old, _ := r.since(0)
+	if len(old) != 8 || old[0] != "line-14" || old[7] != "line-21" {
+		t.Fatalf("since(0) = %v, want the eight lines the ring still holds", old)
+	}
+
+	// A cursor ahead of the ring — the process restarted under the reader. It
+	// gets what is there rather than silently nothing forever.
+	ahead, _ := r.since(99)
+	if len(ahead) != 8 {
+		t.Fatalf("since(99) = %v, want the whole window", ahead)
+	}
+
+	// Caught up: nothing to send.
+	if none, _ := r.since(22); len(none) != 0 {
+		t.Fatalf("since(22) = %v, want nothing", none)
+	}
+}

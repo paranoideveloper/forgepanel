@@ -4,6 +4,7 @@
   import { apiFetch } from '$lib/api';
   import type { Node } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
+  import NodeLogs from '$lib/components/NodeLogs.svelte';
   import { showToast } from '$lib/components/Toast.svelte';
 
   let nodes = $state<Node[]>([]);
@@ -53,22 +54,36 @@
     return `${Math.round(s / 86400)}d`;
   }
 
-  // A node is up if it reported recently — not because a boolean says so.
+  // The badge reads the state the SERVER derived, and does not re-derive one.
   //
-  // The panel now derives `healthy` from the heartbeat age server-side, but the
-  // stored column behind it is only ever written TRUE (on register and on every
-  // heartbeat) and never written false, so any older panel — and any payload
-  // this table is still holding from an earlier fetch — reports a node that died
-  // an hour ago as Online while the last_seen cell beside it says "1h ago".
-  // Deriving the badge from the same timestamp the cell renders means the two
-  // can never contradict each other. 3 minutes is the panel's own cutoff
-  // (nodeSilentAfter), shared with /metrics, the overview counter and the
-  // health page.
-  const NODE_SILENT_AFTER_MS = 3 * 60 * 1000;
-  function isOnline(n: Node): boolean {
-    if (!n.last_seen) return false;
-    const age = Date.now() - new Date(n.last_seen).getTime();
-    return Number.isFinite(age) && age < NODE_SILENT_AFTER_MS;
+  // The table used to compute "online" here from last_seen, because the server's
+  // `healthy` column was only ever written true and a node that died an hour ago
+  // still claimed to be Online. The server now derives a four-state answer on
+  // every read — and three of those four states are things this file cannot see:
+  // nothing in last_seen says a node was switched off by an operator, or that
+  // its agent is reporting on time while the core it supervises refuses every
+  // config it is handed. A second opinion computed here could only disagree with
+  // the one the rest of the panel uses.
+  const STATUS_CLASS: Record<string, string> = {
+    connected: 'badge-ok',
+    connecting: 'badge-warn',
+    error: 'badge-err',
+    disabled: 'badge-muted'
+  };
+  function statusClass(n: Node): string {
+    return STATUS_CLASS[n.status] ?? 'badge-warn';
+  }
+  function statusLabel(n: Node): string {
+    switch (n.status) {
+      case 'connected':
+        return tr('nodes.status_connected');
+      case 'error':
+        return tr('nodes.status_error');
+      case 'disabled':
+        return tr('nodes.status_disabled');
+      default:
+        return tr('nodes.status_connecting');
+    }
   }
 
   function lastSeenLabel(n: Node): string {
@@ -128,6 +143,30 @@
     } catch (err: any) {
       createErr = err.message || tr('nodes.failed_to_register_node');
     }
+  }
+
+  // Taking a node out of service is a control-plane action, not a label: the
+  // panel refuses a disabled node's heartbeat, so it stops receiving config
+  // bundles and drains instead of quietly serving yesterday's config while this
+  // table says it is off.
+  async function setDisabled(n: Node, disabled: boolean) {
+    if (disabled && !confirm(tr('nodes.disable_confirm', { p1: n.name }))) return;
+    try {
+      await apiFetch(`/admin/nodes/${n.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ disabled })
+      });
+      showToast(disabled ? tr('nodes.node_disabled') : tr('nodes.node_enabled'), 'info');
+      await loadNodes();
+    } catch (err: any) {
+      showToast(err.message || tr('nodes.failed_to_change_node_state'), 'error');
+    }
+  }
+
+  // The node whose core output is being watched, or null when the panel is shut.
+  let logsNode = $state<Node | null>(null);
+  function openLogs(n: Node) {
+    logsNode = n;
   }
 
   async function deleteNode(id: number) {
@@ -218,11 +257,17 @@
             <td title={n.last_seen || 'never'}>{lastSeenLabel(n)}</td>
             <td>
               <span
-                class="badge {isOnline(n) ? 'badge-ok' : 'badge-err'}"
+                class="badge {statusClass(n)}"
                 data-testid="node-status-{n.id}"
+                title={n.status_message || ''}
               >
-                {isOnline(n) ? tr('nodes.online') : tr('nodes.stale')}
+                {statusLabel(n)}
               </span>
+              {#if n.status_message}
+                <span class="err-text status-msg" data-testid="node-status-msg-{n.id}">
+                  {n.status_message}
+                </span>
+              {/if}
               {#if !n.enrolled}
                 <span class="badge badge-warn" title={tr('nodes.registered_but_the_agent_has_never')}>
                   {tr('nodes.not_enrolled')}
@@ -235,6 +280,10 @@
               {/if}
             </td>
             <td>
+              <button class="btn-sm" onclick={() => openLogs(n)}>{tr('nodes.logs')}</button>
+              <button class="btn-sm" onclick={() => setDisabled(n, !n.disabled)}>
+                {n.disabled ? tr('nodes.enable') : tr('nodes.disable')}
+              </button>
               <button class="btn-sm danger" onclick={() => deleteNode(n.id)}>{tr('nodes.remove')}</button>
             </td>
           </tr>
@@ -266,6 +315,21 @@
   {/if}
 </Modal>
 
+<Modal
+  title={tr('nodes.logs_title', { p1: logsNode?.name })}
+  isOpen={logsNode !== null}
+  onClose={() => (logsNode = null)}
+>
+  {#if logsNode}
+    <!-- Keyed by node id so opening the panel for a second node builds a fresh
+         component, and therefore a fresh socket, instead of leaving the first
+         node's stream running under the second node's title. -->
+    {#key logsNode.id}
+      <NodeLogs nodeId={logsNode.id} nodeName={logsNode.name} />
+    {/key}
+  {/if}
+</Modal>
+
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
@@ -289,4 +353,8 @@
   pre { background: #0F1420; padding: 14px; border-radius: 8px; overflow-x: auto; color: #FF7A1A; font-family: monospace; }
   .warn-cell { color: #d99b2b; font-weight: 600; }
   .badge-warn { background: rgba(217,155,43,0.15); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); }
+  /* Deliberately off is not a fault: a disabled node must not wear the same red
+     as one that died, or the operator learns to ignore red. */
+  .badge-muted { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.65); }
+  .status-msg { display: block; margin-top: 4px; font-size: 11px; max-width: 22rem; }
 </style>

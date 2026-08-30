@@ -344,7 +344,46 @@ type Node struct {
 	Healthy       bool       `json:"healthy"`
 	ConfigDirty   bool       `json:"config_dirty"`
 	ConfigDirtyAt *time.Time `json:"config_dirty_at"`
+
+	// --- lifecycle ----------------------------------------------------------
+
+	// Status is where this node is in its life, not merely whether it answered.
+	// Healthy is one bit and the table needed four states: a node mid-install,
+	// a node that has died, a node whose core is refusing its config, and a node
+	// the operator switched off all read the same "not healthy" before this, so
+	// the Nodes page reported three emergencies where there was one.
+	//
+	// It is STORED so the last thing the node said survives a panel restart, and
+	// DERIVED again on every read (api.nodeStatus): the read path is what stops
+	// this becoming another Healthy — a column written only true, at heartbeat,
+	// that still says "connected" an hour after the node stopped answering.
+	Status NodeStatus `gorm:"default:connecting" json:"status"`
+	// StatusMessage is why, in the node's own words where it has any. An error
+	// state with no message tells the operator something is wrong and not what.
+	StatusMessage string `json:"status_message"`
+	// Disabled is the operator deliberately taking a node out of service.
+	//
+	// Enforced at the control plane, not painted on the list: handleNodeHeartbeat
+	// and handleNodeRegister refuse a disabled node, so it stops receiving config
+	// bundles and drifts out of service instead of quietly serving yesterday's
+	// config while the UI says it is off.
+	Disabled bool `json:"disabled"`
 }
+
+// NodeStatus enumerates a node's lifecycle states (spec §10).
+type NodeStatus string
+
+const (
+	// NodeConnecting is enrolled but not yet heard from — an install in
+	// progress, which is not a fault and must not be alerted on as one.
+	NodeConnecting NodeStatus = "connecting"
+	NodeConnected  NodeStatus = "connected"
+	// NodeError is reporting a failure, or no longer reporting at all.
+	NodeError NodeStatus = "error"
+	// NodeDisabled is switched off by the operator. Deliberate, so it is neither
+	// an error nor a thing to page anyone about.
+	NodeDisabled NodeStatus = "disabled"
+)
 
 // ForgeDNSZone is a panel-managed DNS-tunnel zone (spec §5). The operator creates
 // it in the UI, picks an adapter, and activates it — the panel starts the

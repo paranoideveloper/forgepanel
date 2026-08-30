@@ -643,6 +643,36 @@ func (r *ring) add(line string) {
 	r.n++
 }
 
+// since returns the lines at or after absolute position seq, oldest first, and
+// the next position to ask for.
+//
+// r.n counts every line ever added, including the ones that have been
+// overwritten, so it doubles as the absolute cursor. A caller behind the window
+// is fast-forwarded to the oldest line still held; a caller ahead of it (a ring
+// that was replaced under it) is given everything, which is the safe direction —
+// repeating lines is recoverable, silently returning nothing forever is not.
+func (r *ring) since(seq int) ([]string, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	held := r.n
+	if held > r.size {
+		held = r.size
+	}
+	if held > len(r.buf) {
+		held = len(r.buf)
+	}
+	first := r.n - held
+	if seq < first || seq > r.n {
+		seq = first
+	}
+	out := make([]string, 0, r.n-seq)
+	for i := seq; i < r.n; i++ {
+		out = append(out, r.buf[i%r.size])
+	}
+	return out, r.n
+}
+
 // snapshotN returns the most recent n lines, OLDEST FIRST.
 //
 // The previous version sliced the backing array by index — buf[len-20:len] —

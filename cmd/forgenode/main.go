@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -18,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +69,97 @@ type NodeAgent struct {
 	// every hysteria2, tuic, anytls, shadowtls and wireguard inbound vanished
 	// the moment it was assigned to a remote node.
 	engines map[string]*engineProc
+	// logSeq is how many log lines this agent has had ACCEPTED by the panel. It
+	// is the sequence the panel dedups against, and it advances only on a
+	// successful post — see collectLogs.
+	logSeq int
+	// logEpoch identifies this agent PROCESS. A restarted agent numbers from
+	// zero again, which the panel cannot tell from a re-send of the first batch
+	// unless it is told which process is speaking; getting that wrong one way
+	// loses every line after a restart, and the other way duplicates lines on
+	// every dropped response.
+	logEpoch string
+}
+
+// collectLogs gathers what the cores have said that the panel has not accepted,
+// and returns the func that marks it accepted.
+//
+// Nothing is committed until the heartbeat SUCCEEDS, for the same reason the
+// traffic counters are cumulative: a dropped response must not cost the operator
+// the lines that explain why their node is down. Re-sending is free — the panel
+// files by absolute position and discards what it already holds.
+//
+// Lines are grouped by core within a batch rather than interleaved by time. A
+// batch covers one ten-second poll, and merging two cores' output by timestamp
+// would mean parsing two cores' log formats to gain ordering nobody can act on.
+func (a *NodeAgent) collectLogs() ([]string, func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	names := make([]string, 0, len(a.engines))
+	for name := range a.engines {
+		names = append(names, name)
+	}
+	// Deterministic, so a node's log panel does not reorder itself between
+	// heartbeats purely because Go randomised a map.
+	sort.Strings(names)
+
+	var out []string
+	cursors := make(map[string]int, len(names))
+	for _, name := range names {
+		e := a.engines[name]
+		lines, next := e.ring().Since(e.logCursor)
+		cursors[name] = next
+		for _, ln := range lines {
+			// Prefixed, because the panel shows one stream per node and "failed
+			// to start inbound" means something different depending on which
+			// core said it.
+			out = append(out, name+": "+ln)
+		}
+	}
+	if extra := len(out) - nodeLogBatch; extra > 0 {
+		// Keep the TAIL: when a core is looping, the newest lines describe the
+		// state it is in now. The dropped ones are still in the node's journal.
+		out = out[extra:]
+	}
+	return out, func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for name, next := range cursors {
+			if e := a.engines[name]; e != nil {
+				e.logCursor = next
+			}
+		}
+		a.logSeq += len(out)
+	}
+}
+
+// nodeLogBatch bounds what one heartbeat carries. A core looping on a stack
+// trace would otherwise put an unbounded body on the wire every ten seconds.
+const nodeLogBatch = 200
+
+// lastFailure is this node's verdict on itself: what most recently stopped one
+// of its cores from serving, in that core's own words.
+//
+// The panel has no other way to learn it. A node whose agent is perfectly
+// healthy can be running an xray that refuses every config it is handed, and
+// without this the panel called that node "connected" indefinitely while it
+// served nobody.
+func (a *NodeAgent) lastFailure() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	names := make([]string, 0, len(a.engines))
+	for name, e := range a.engines {
+		if e.lastErr != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+": "+a.engines[name].lastErr)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // stateDir is the filesystem the node's own data lives on, and the one whose
@@ -111,6 +204,11 @@ func main() {
 		binMgr:         bm,
 		hops:           porthop.New(),
 		engines:        map[string]*engineProc{},
+		// A fresh identity per agent process, so the panel can tell "I restarted
+		// and my line numbers begin again" from "you did not answer, here they
+		// are again". Both are ordinary on a flaky link and they look identical
+		// without it.
+		logEpoch: newLogEpoch(),
 	}
 	for _, spec := range engineSpecs() {
 		// Resolved LAZILY per engine, and a failure is not fatal: a node that
@@ -149,6 +247,20 @@ func main() {
 	for range ticker.C {
 		agent.step()
 	}
+}
+
+// newLogEpoch mints this process's log identity. Time is not enough on its own —
+// a supervised agent that crash-loops can restart inside the same second — so it
+// is a random value, and it never leaves the node except in its own heartbeat.
+func newLogEpoch() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Randomness is unavailable on this box for the moment. A timestamp is
+		// a weaker epoch, not a broken one, and refusing to start the agent over
+		// a log cursor would be absurd.
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func nodeVersionRequested(args []string) bool {
@@ -241,6 +353,7 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 	// totals yields a zero delta on the panel, so a lost response costs nothing
 	// and no reset has to succeed for accounting to be correct.
 	traffic := a.collectTraffic(false)
+	logs, acceptLogs := a.collectLogs()
 	body, _ := json.Marshal(map[string]any{
 		"token": a.token, "cpu": cpu, "mem_mb": mem, "traffic": traffic,
 		// Tells the panel these are running totals rather than deltas. An older
@@ -265,6 +378,16 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 		// than merely leaving them unmetered. So the node says, and the panel
 		// only asks for what the node can serve.
 		"singbox_stats": a.singboxStatsSupported(),
+		// What went wrong here, so the panel can say so instead of showing a
+		// green node that serves nobody.
+		"last_error": a.lastFailure(),
+		// The cores' own output. This is the whole of the panel's live log panel:
+		// the agent is strictly pull — the panel can never open a connection to a
+		// node behind NAT — so the lines ride the request the node is already
+		// making.
+		"logs":      logs,
+		"log_seq":   a.logSeq,
+		"log_epoch": a.logEpoch,
 	})
 	var resp struct {
 		XrayConfig string `json:"xray_config"`
@@ -279,6 +402,10 @@ func (a *NodeAgent) heartbeat() (map[string]string, error) {
 	if err := a.post("/api/node/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
+	// The panel has them now, so stop re-sending them. Only here: a lost
+	// response leaves the cursor where it was and the next beat repeats the
+	// batch, which the panel discards by sequence.
+	acceptLogs()
 	a.applyPortHops(resp.PortHops)
 	return map[string]string{
 		"xray":     resp.XrayConfig,

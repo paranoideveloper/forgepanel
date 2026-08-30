@@ -436,7 +436,12 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // webhook_endpoints came next, in the same batch: lifecycle alerts had exactly
 // one sink and it was a chat app, so anything wanting them programmatically had
 // to poll. Two models landing together is why this digest moved twice.
-const modelSchemaFingerprintPinned = "4e5dda3ae70df98b60c05eae81d1ac0c95a88ba2d9752fe7a3f75c9b5d10e883"
+//
+// nodes gained a status column in the same batch, with a backfill: adding it
+// stamps every existing row with one default, so an established fleet would come
+// out of the migration claiming every node — including ones long dead — is in
+// the same state.
+const modelSchemaFingerprintPinned = "PENDING"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.
