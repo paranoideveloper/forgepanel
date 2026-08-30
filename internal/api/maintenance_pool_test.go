@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,14 +34,31 @@ func testNotifier2(onSend func(string)) *telegram.Notifier {
 }
 
 // countingProber answers a fixed verdict and records what it was asked about.
+// countingProber records what a sweep probed.
+//
+// The mutex is load-bearing: Pool.check probes its entries CONCURRENTLY from a
+// worker pool, so Probe is called from several goroutines at once and an
+// unsynchronised append loses writes. That is not theoretical — it was seen as
+// "probed [a1 b1], want all three", a lost append on a machine under load, and
+// it reads as a sweep that skipped a domain rather than as a broken test.
 type countingProber struct {
+	mu      sync.Mutex
 	ok      bool
 	probed  []string
 	verdict map[string]bool
 }
 
+// seen returns a copy of what was probed, safely.
+func (p *countingProber) seen() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.probed...)
+}
+
 func (p *countingProber) Probe(_ context.Context, domain string) dns.ProbeResult {
+	p.mu.Lock()
 	p.probed = append(p.probed, domain)
+	p.mu.Unlock()
 	ok := p.ok
 	if p.verdict != nil {
 		if v, found := p.verdict[domain]; found {
@@ -96,8 +114,8 @@ func TestTheScheduledSweepFindsEveryPoolAndRetiresWhatIsDead(t *testing.T) {
 	s.poolProber = p
 	s.checkRotationPools()
 
-	if len(p.probed) != 3 {
-		t.Errorf("probed %v, want all three domains across both pools", p.probed)
+	if got := p.seen(); len(got) != 3 {
+		t.Errorf("probed %v, want all three domains across both pools", got)
 	}
 }
 
@@ -150,8 +168,8 @@ func TestTheSweepIsANoOpWithNoPools(t *testing.T) {
 	p := &countingProber{ok: true}
 	s.poolProber = p
 	s.checkRotationPools()
-	if len(p.probed) != 0 {
-		t.Errorf("probed %v with no pools configured", p.probed)
+	if got := p.seen(); len(got) != 0 {
+		t.Errorf("probed %v with no pools configured", got)
 	}
 }
 
@@ -172,7 +190,7 @@ func TestRunMaintenanceActuallySweepsThePools(t *testing.T) {
 
 	s.runMaintenance()
 
-	if len(p.probed) == 0 {
+	if got := p.seen(); len(got) == 0 {
 		t.Error("runMaintenance did not health-check the rotation pools, so nothing ever will")
 	}
 }

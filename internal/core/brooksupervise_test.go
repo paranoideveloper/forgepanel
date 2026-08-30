@@ -24,13 +24,22 @@ func fakeBrook(t *testing.T, body string) string {
 
 func waitForBrook(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	// Ten seconds, not three. The assertion is unchanged; only the patience is.
-	// Three was enough alone and not enough inside the full suite, where
-	// TestFullMatrixConnectivity has dozens of cores starting at once and a
-	// subprocess exiting plus two pump goroutines flushing can take noticeably
-	// longer. A test that passes alone and fails in the suite teaches people to
-	// re-run rather than to read.
-	deadline := time.Now().Add(10 * time.Second)
+	// Sixty seconds, and the number is deliberately generous rather than tuned.
+	//
+	// The assertion is unchanged; only the patience is. This waits on a
+	// subprocess exiting and two pump goroutines flushing, which is scheduler
+	// work, so the time it needs is a function of how loaded the machine is and
+	// not of the code under test. Three seconds was enough alone; ten was enough
+	// in the suite; neither survived a machine also running parallel build and
+	// test agents, where it failed as "timed out waiting for the crash
+	// diagnosis" — a message that reads like a broken supervisor.
+	//
+	// A long deadline costs nothing when the condition is met, because the loop
+	// returns the moment it is. It is paid only by a test that is genuinely
+	// failing, and a slow red is worth far more than an intermittent one: a
+	// suite that fails under load teaches people to re-run rather than to read,
+	// and that habit is how a real regression gets waved through.
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

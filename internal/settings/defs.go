@@ -38,6 +38,13 @@ func Choices(key string) []string {
 func buildRegistry() *Registry {
 	r := NewRegistry()
 
+	// --- host tuning ---------------------------------------------------------
+	r.Register(Def{
+		Key: "net_tune_bbr", Kind: KindBool, Scope: ScopePanel, Default: "0",
+		Help: "Ask the host to use BBR congestion control with the fq queueing discipline, " +
+			"re-applied on every panel start so a reboot or a kernel upgrade does not quietly revert it.",
+	})
+
 	// --- subscription rendering ---------------------------------------------
 	r.Register(Def{
 		Key: "sub_routing_preset", Kind: KindEnum, Scope: ScopeSubscription,

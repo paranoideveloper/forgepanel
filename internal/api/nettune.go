@@ -33,7 +33,10 @@ var (
 var netTuneLog = func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) }
 
 func (s *Server) bbrEnabled() bool {
-	return s.db != nil && s.db.GetSetting(settingNetTuneBBR) == "1"
+	// Through the typed registry, not the raw settings table. The registry owns
+	// the default, so a reader that consulted the table directly would carry its
+	// own copy of it — and the two would drift the first time either changed.
+	return s.db != nil && s.knobs().Bool(settingNetTuneBBR)
 }
 
 // applyNetTune re-asserts the operator's choice on the host.
@@ -96,7 +99,10 @@ func (s *Server) handleSetNetTune(c *gin.Context) {
 	// Persist BEFORE touching the host, and keep the stored choice even when the
 	// apply fails. A kernel that gains BBR after a `apt install` and a reboot
 	// then comes up with it on, because the boot path re-applies what is stored.
-	if err := s.db.SetSetting(settingNetTuneBBR, value); err != nil {
+	// Set, not SetSetting: the registry validates the value against the knob's
+	// declared kind before it is stored, so the table cannot end up holding
+	// something no reader can parse.
+	if err := s.knobs().Set(settingNetTuneBBR, value); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
