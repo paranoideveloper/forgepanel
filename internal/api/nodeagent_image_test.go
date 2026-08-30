@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,72 @@ func TestEveryDockerfileCOPYSurvivesDockerignore(t *testing.T) {
 						df, src, ex, src)
 				}
 			}
+		}
+	}
+}
+
+// The PaaS image bakes the cores rather than letting the panel fetch them,
+// because a platform deploy with no volume downloads them again on every
+// restart and a restricted build network leaves the panel with no cores at all
+// — the Dockerfile says exactly that, at the top of its cores stage.
+//
+// It baked two of the three. Brook was fetched from GitHub at first use, so on a
+// host that sleeps and has no disk it was re-downloaded on every wake, and a
+// failed or slow download left a Brook inbound configured, enabled, and dead
+// with nothing in the panel to say why.
+//
+// This compares the versions too. The Dockerfile's own comment is right that a
+// stale one here is not an error but a silent download at every boot: binmgr
+// looks for <data>/bin/<engine>-<version>/<binary> and fetches when it is not
+// there, so a version that does not match the constant stages a directory
+// nothing will ever look in.
+func TestThePaaSImageBakesEveryCoreThePanelSupervises(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "deploy", "paas", "Dockerfile"))
+	if err != nil {
+		t.Skipf("no PaaS Dockerfile: %v", err)
+	}
+	body := string(b)
+
+	// The staged directory names are built from ARG defaults, so resolve those
+	// first — comparing against the literal version would only ever prove the
+	// Dockerfile spells it inline.
+	args := map[string]string{}
+	for _, ln := range strings.Split(body, "\n") {
+		f := strings.Fields(strings.TrimSpace(ln))
+		if len(f) < 2 || !strings.EqualFold(f[0], "ARG") {
+			continue
+		}
+		k, v, ok := strings.Cut(f[1], "=")
+		if ok {
+			args[k] = v
+		}
+	}
+	resolve := func(s string) string {
+		for k, v := range args {
+			s = strings.ReplaceAll(s, "${"+k+"}", v)
+		}
+		return s
+	}
+
+	for _, core := range []struct{ name, version string }{
+		{"xray", binmgr.XrayVersion},
+		{"sing-box", binmgr.SingboxVersion},
+		{"brook", binmgr.BrookVersion},
+	} {
+		// The staged directory the entrypoint copies into place, in the exact
+		// shape binmgr resolves: <engine>-<version>.
+		want := core.name + "-" + core.version
+		found := false
+		for _, ln := range strings.Split(body, "\n") {
+			if strings.Contains(resolve(ln), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("the PaaS image does not stage %q: a %s inbound on a platform with no volume "+
+				"downloads the core on every restart, and comes up dead when that download fails",
+				want, core.name)
 		}
 	}
 }

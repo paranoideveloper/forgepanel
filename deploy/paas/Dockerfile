@@ -52,6 +52,7 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
 FROM alpine:3.21 AS cores
 ARG XRAY_VERSION=v26.3.27
 ARG SINGBOX_VERSION=1.13.15
+ARG BROOK_VERSION=v20260101.0
 RUN apk add --no-cache curl unzip tar
 RUN set -eux; \
     mkdir -p "/opt/forgepanel-cores/xray-${XRAY_VERSION}"; \
@@ -59,6 +60,17 @@ RUN set -eux; \
       "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"; \
     unzip -o /tmp/xray.zip -d "/opt/forgepanel-cores/xray-${XRAY_VERSION}"; \
     chmod +x "/opt/forgepanel-cores/xray-${XRAY_VERSION}/xray"
+# Brook, which used to be fetched at first use. That is the failure this whole
+# stage exists to prevent, and it was the worst case of it: a platform with no
+# volume re-downloads on every restart, so a Brook inbound on a host that sleeps
+# was configured, enabled, and dead — with the download failure nowhere an
+# operator would look. brook ships a bare binary, not an archive.
+RUN set -eux; \
+    mkdir -p "/opt/forgepanel-cores/brook-${BROOK_VERSION}"; \
+    curl -fsSL -o "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook" \
+      "https://github.com/txthinking/brook/releases/download/${BROOK_VERSION}/brook_linux_amd64"; \
+    chmod +x "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook"
+
 RUN set -eux; \
     mkdir -p "/opt/forgepanel-cores/sing-box-${SINGBOX_VERSION}"; \
     curl -fsSL -o /tmp/sb.tar.gz \
