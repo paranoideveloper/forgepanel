@@ -441,7 +441,14 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // stamps every existing row with one default, so an established fleet would come
 // out of the migration claiming every node — including ones long dead — is in
 // the same state.
-const modelSchemaFingerprintPinned = "80db10ca072ad78a1d6bfecd7a70fbef621a8c472a886ee1890afb3df3f597d7"
+//
+// user_templates arrived with migVUserTemplates: saved plans, so "the 5 GB
+// monthly trial" is a row rather than something an operator retypes from memory
+// on every new account. It adds a table and touches no existing one, but a
+// database already at the previous version has no such table, and the create-user
+// handler now reads it — so an unmigrated panel would answer every template-backed
+// create with a missing-table error.
+const modelSchemaFingerprintPinned = "a6a3982edaba9138aad38d513188018e1d1e9be8e0840506b717cd96fe8abdf6"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

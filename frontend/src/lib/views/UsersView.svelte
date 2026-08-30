@@ -9,15 +9,24 @@
   import { showToast } from '$lib/components/Toast.svelte';
 
   interface Inbound { id: number; remark: string; protocol: string; port: number; }
+  // A saved plan. Only the fields this view renders or sends are declared; the
+  // stamping itself happens server-side from template_id.
+  interface UserTemplate {
+    id: number; name: string; note?: string; data_limit?: number; expire_days?: number;
+    reset_strategy?: string; status?: string; group_id?: number; inbound_ids?: number[];
+    ip_limit?: number; username_prefix?: string; username_suffix?: string;
+  }
 
   let users = $state<User[]>([]);
   let groups = $state<UserGroup[]>([]);
   let inbounds = $state<Inbound[]>([]);
+  let templates = $state<UserTemplate[]>([]);
   let loading = $state(true);
 
   // create user
   let newUsername = $state('');
   let newGroupId = $state<number | undefined>(undefined);
+  let newTemplateId = $state<number | undefined>(undefined);
   let newLimitGB = $state(0);
   let newExpireDays = $state(0);
   let createErr = $state('');
@@ -58,6 +67,21 @@
   let mGroupId = $state<number | undefined>(undefined);
   let mAssigned = $state<Set<number>>(new Set());
   let mInherited = $state<Set<number>>(new Set());
+
+  // saved-plan modal
+  let planOpen = $state(false);
+  let pEditing = $state<UserTemplate | null>(null);
+  let pName = $state('');
+  let pNote = $state('');
+  let pLimitGB = $state(0);
+  let pExpireDays = $state(0);
+  let pIPLimit = $state(0);
+  let pReset = $state('no_reset');
+  let pStatus = $state('active');
+  let pGroupId = $state<number | undefined>(undefined);
+  let pPrefix = $state('');
+  let pSuffix = $state('');
+  let pInbounds = $state<Set<number>>(new Set());
 
   // groups modal
   let groupOpen = $state(false);
@@ -105,6 +129,10 @@
   // offers buttons the handler refuses — the UI promising something the API
   // will not do.
   let canManageGroups = $derived(role === 'owner' || role === 'admin');
+  // Saved plans are tenant management, so unlike groups a reseller may keep
+  // their own. A viewer may not, and rendering the controls to one would offer
+  // buttons the handler refuses.
+  let canManagePlans = $derived(role === 'owner' || role === 'admin' || role === 'reseller');
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
     full: 'Full (bypass Iran + block ads/malware/porn/QUIC)',
@@ -190,6 +218,14 @@
       } catch (_) {
         subSettings = null;
       }
+      // Saved plans are tenant management, so a viewer is refused them. Same
+      // treatment as groups above: an endpoint this role was never meant to
+      // reach must not take away the part of the view they were.
+      try {
+        templates = await apiFetch<UserTemplate[]>('/admin/user-templates');
+      } catch (_) {
+        templates = [];
+      }
     } catch (err: any) {
       showToast(err.message || tr('users.failed_to_load_users'), 'error');
     } finally {
@@ -204,6 +240,9 @@
       await apiFetch('/admin/users', {
         method: 'POST',
         body: JSON.stringify({ username: newUsername.trim(), group_id: newGroupId,
+          // The saved plan supplies the BASE limits; anything typed here still
+          // wins, so picking a plan never discards what is in the boxes.
+          template_id: newTemplateId || 0,
           // Bytes, not whole gigabytes: a 500 MB trial sent as data_limit_gb
           // truncates to 0, and 0 is UNLIMITED.
           data_limit: Math.round((newLimitGB || 0) * 1024 ** 3),
@@ -403,6 +442,61 @@
       manageOpen = false;
       await loadData();
     } catch (err: any) { showToast(err.message || tr('users.failed_to_save'), 'error'); }
+  }
+
+  // --- saved plans ---
+  // Built here rather than inline in the template: the affixes surround the
+  // typed name, and showing them as "tr-…-x" is the only rendering that makes
+  // the shape of the generated username obvious at a glance.
+  const affixLabel = (t: UserTemplate) => `${t.username_prefix ?? ''}…${t.username_suffix ?? ''}`;
+  function openPlanNew() {
+    pEditing = null; pName = ''; pNote = ''; pLimitGB = 0; pExpireDays = 0; pIPLimit = 0;
+    pReset = 'no_reset'; pStatus = 'active'; pGroupId = undefined; pPrefix = ''; pSuffix = '';
+    pInbounds = new Set(); planOpen = true;
+  }
+  function openPlanEdit(t: UserTemplate) {
+    pEditing = t; pName = t.name; pNote = t.note ?? '';
+    pLimitGB = (t.data_limit ?? 0) / 1024 ** 3;
+    pExpireDays = t.expire_days ?? 0; pIPLimit = t.ip_limit ?? 0;
+    pReset = t.reset_strategy || 'no_reset'; pStatus = t.status || 'active';
+    pGroupId = t.group_id || undefined;
+    pPrefix = t.username_prefix ?? ''; pSuffix = t.username_suffix ?? '';
+    pInbounds = new Set(t.inbound_ids ?? []); planOpen = true;
+  }
+  function togglePlanInbound(id: number) {
+    const s = new Set(pInbounds); if (s.has(id)) s.delete(id); else s.add(id); pInbounds = s;
+  }
+  async function savePlan() {
+    if (!pName.trim()) { showToast(tr('users.plan_name_required'), 'error'); return; }
+    const body = JSON.stringify({
+      name: pName.trim(), note: pNote,
+      // Bytes, like the create form: a 500 MB plan expressed in whole
+      // gigabytes truncates to 0, and 0 is UNLIMITED.
+      data_limit: Math.round((pLimitGB || 0) * 1024 ** 3),
+      expire_days: pExpireDays || 0, ip_limit: pIPLimit || 0,
+      reset_strategy: pReset, status: pStatus, group_id: pGroupId || 0,
+      inbound_ids: [...pInbounds],
+      username_prefix: pPrefix, username_suffix: pSuffix
+    });
+    try {
+      if (pEditing) {
+        await apiFetch(`/admin/user-templates/${pEditing.id}`, { method: 'PATCH', body });
+      } else {
+        await apiFetch('/admin/user-templates', { method: 'POST', body });
+      }
+      showToast(tr('users.plan_saved'), 'success'); planOpen = false; await loadData();
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_save_plan'), 'error'); }
+  }
+  async function deletePlan(t: UserTemplate) {
+    // No confirmation beyond this one: deleting a plan cannot touch an account.
+    // A plan is stamped at creation, so the users made from it hold values, not
+    // a reference, and keep exactly the limits they were sold.
+    if (!confirm(tr('users.delete_plan_name', { name: t.name }))) return;
+    try {
+      await apiFetch(`/admin/user-templates/${t.id}`, { method: 'DELETE' });
+      if (newTemplateId === t.id) newTemplateId = undefined;
+      showToast(tr('users.plan_deleted'), 'info'); await loadData();
+    } catch (err: any) { showToast(err.message || tr('users.failed_to_delete_plan'), 'error'); }
   }
 
   // --- groups ---
@@ -618,6 +712,12 @@
       <option value={undefined}>{tr('users.no_group')}</option>
       {#each groups as g}<option value={g.id}>{g.name}</option>{/each}
     </select>
+    {#if templates.length}
+      <select bind:value={newTemplateId} title={tr('users.saved_plan_hint')} data-testid="create-template">
+        <option value={undefined}>{tr('users.no_saved_plan')}</option>
+        {#each templates as t}<option value={t.id}>{t.name}</option>{/each}
+      </select>
+    {/if}
     <input type="number" step="0.001" min="0" placeholder={tr('users.limit_gb_0')} bind:value={newLimitGB} title={tr('users.data_limit_in_gb')} data-testid="create-limit" />
     <input type="number" placeholder={tr('users.expire_days_0_never')} bind:value={newExpireDays} title={tr('users.expire_in_n_days')} />
     <button class="primary" data-testid="create-user" onclick={createUser}>{tr('users.create')}</button>
@@ -693,6 +793,32 @@
     </table>
   {/if}
 </div>
+
+{#if canManagePlans}
+<div class="card">
+  <div class="ghead"><h3>{tr('users.saved_plans')}</h3><button class="sm" data-testid="new-plan" onclick={openPlanNew}>{tr('users.new_plan')}</button></div>
+  {#if templates.length === 0}<p class="muted">{tr('users.no_plans_hint')}</p>
+  {:else}
+    <table>
+      <thead><tr><th>{tr('users.name')}</th><th>{tr('users.data_limit')}</th><th>{tr('users.expiry')}</th><th>{tr('users.username_affixes')}</th><th></th></tr></thead>
+      <tbody>
+        {#each templates as t (t.id)}
+          <tr>
+            <td><strong>{t.name}</strong></td>
+            <td>{t.data_limit ? fmtBytes(t.data_limit) : tr('users.unlimited')}</td>
+            <td>{t.expire_days ? tr('users.n_days', { n: t.expire_days }) : tr('users.never')}</td>
+            <td class="muted">{affixLabel(t)}</td>
+            <td class="acts">
+              <button class="sm" onclick={() => openPlanEdit(t)}>{tr('users.edit')}</button>
+              <button class="sm danger" data-testid="plan-delete" onclick={() => deletePlan(t)}>{tr('users.delete')}</button>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+</div>
+{/if}
 
 {#if canManageGroups}
 <div class="card">
@@ -832,6 +958,39 @@
     </button>
   {/if}
   <button class="primary" data-testid="save-manage" onclick={saveManage}>{tr('users.save')}</button>
+</Modal>
+
+<!-- Saved-plan modal -->
+<Modal title={pEditing ? tr('users.edit_plan') : tr('users.new_plan_2')} isOpen={planOpen} onClose={() => planOpen = false}>
+  <div class="mgrid">
+    <label>{tr('users.name')}<input data-testid="plan-name" bind:value={pName} /></label>
+    <label>{tr('users.note')}<input bind:value={pNote} /></label>
+    <label>{tr('users.limit_gb_0')}<input type="number" step="0.001" min="0" bind:value={pLimitGB} /></label>
+    <label>{tr('users.expire_days_0_never')}<input type="number" min="0" bind:value={pExpireDays} /></label>
+    <label>{tr('users.ip_limit')}<input type="number" min="0" bind:value={pIPLimit} /></label>
+    <label>{tr('users.reset_strategy')}<select bind:value={pReset}>
+      {#each ['no_reset', 'day', 'week', 'month', 'year', 'on_expire'] as r}<option value={r}>{r}</option>{/each}
+    </select></label>
+    <!-- limited and expired are states the panel DERIVES from usage and the
+         clock, so a plan may not stamp one: it would create an account already
+         dead that no top-up brings back. The handler refuses them too. -->
+    <label>{tr('users.status')}<select bind:value={pStatus} data-testid="plan-status">
+      {#each ['active', 'disabled', 'on_hold'] as st}<option value={st}>{st}</option>{/each}
+    </select></label>
+    <label>{tr('users.group')}<select bind:value={pGroupId}>
+      <option value={undefined}>{tr('users.no_group')}</option>
+      {#each groups as g}<option value={g.id}>{g.name}</option>{/each}
+    </select></label>
+    <label>{tr('users.username_prefix')}<input maxlength="20" bind:value={pPrefix} data-testid="plan-prefix" /></label>
+    <label>{tr('users.username_suffix')}<input maxlength="20" bind:value={pSuffix} /></label>
+  </div>
+  <h4>{tr('users.inbounds_stamped_by_this_plan')}</h4>
+  <div class="assign">
+    {#each inbounds as inb}
+      <label class="chk"><input type="checkbox" checked={pInbounds.has(inb.id)} onchange={() => togglePlanInbound(inb.id)} /> {inb.remark || inb.protocol} <span class="muted">:{inb.port}</span></label>
+    {/each}
+  </div>
+  <button class="primary" data-testid="save-plan" onclick={savePlan}>{tr('users.save_plan')}</button>
 </Modal>
 
 <!-- Group modal -->

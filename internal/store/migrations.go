@@ -54,6 +54,11 @@ const (
 	migVWebhooks uint64 = 21
 	// 22: 20 went to outbound_groups and 21 to webhooks in the same batch.
 	migVNodeStatus uint64 = 22
+	// 24, not 23: 23 was assigned to another row landing in the same batch.
+	// Versions only have to increase, never be contiguous (ValidateRegistry,
+	// internal/migrate/schema.go:129), and leaving the gap is cheaper than
+	// renumbering a step somebody else has already written.
+	migVUserTemplates uint64 = 24
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -377,6 +382,17 @@ func migrations() []migrate.Migration {
 				return tx.Model(&Node{}).
 					Where("status IS NULL OR status = ?", "").
 					Update("status", string(NodeConnecting)).Error
+			},
+		},
+		{
+			Version: migVUserTemplates,
+			Name:    "user_templates",
+			Rollback: "safe to drop: nothing references it and no user row points at a template — a " +
+				"plan is a stamp applied at creation, not a live binding. Dropping it forgets every " +
+				"saved plan; the accounts created from one keep their limits and are unaffected.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&UserTemplate{}})
+				return err
 			},
 		},
 	}

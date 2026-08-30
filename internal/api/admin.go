@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -575,6 +576,11 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		// than a float so there is no rounding to argue about at the boundary.
 		DataLimit  *int64 `json:"data_limit"`
 		ExpireDays int    `json:"expire_days"`
+		// TemplateID names a saved plan (store.UserTemplate) whose limits are
+		// stamped onto this account. Every field it supplies is a BASE that an
+		// explicitly-sent request field still overrides, so picking a plan never
+		// silently discards something the operator typed next to it.
+		TemplateID uint `json:"template_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" {
 		fail(c, 400, "username required")
@@ -585,6 +591,37 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		Username: req.Username, Status: store.StatusActive, GroupID: req.GroupID,
 		OwnerAdminID: claims.AdminID, UUID: keygen.UUID(), Password: pw,
 		SubToken: token26(), DataLimit: req.DataLimitGB * 1024 * 1024 * 1024,
+	}
+	var tpl *store.UserTemplate
+	if req.TemplateID != 0 {
+		found, err := s.db.UserTemplateByID(req.TemplateID)
+		// A reseller may only stamp their own plans: another tenant's plan
+		// carries that tenant's group and inbound ids. Answered the same as a
+		// plan that does not exist, so ids cannot be probed across tenants.
+		if err != nil || (templateScope(claims) != 0 && found.OwnerAdminID != claims.AdminID) {
+			apierr.Fail(c, &apierr.Error{Op: "user-create", Kind: apierr.KindNotFound,
+				Status: 404, Message: "no such user template", Cause: err})
+			return
+		}
+		tpl = found
+		// Composed SERVER-side. The affixes are the plan's naming convention,
+		// and a browser that forgot to prepend them would produce an account
+		// that looks hand-made and sorts nowhere near its cohort.
+		u.Username = tpl.UsernamePrefix + strings.TrimSpace(req.Username) + tpl.UsernameSuffix
+		u.DataLimit = tpl.DataLimit
+		u.OnHoldDuration = tpl.OnHoldDuration
+		u.ResetStrategy = tpl.ResetStrategy
+		u.IPLimit = tpl.IPLimit
+		if tpl.Status != "" {
+			u.Status = tpl.Status
+		}
+		if req.GroupID == 0 {
+			u.GroupID = tpl.GroupID
+		}
+		if tpl.ExpireDays > 0 {
+			exp := time.Now().AddDate(0, 0, tpl.ExpireDays)
+			u.ExpireAt = &exp
+		}
 	}
 	if req.DataLimit != nil {
 		if *req.DataLimit < 0 {
@@ -611,6 +648,22 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		}
 		failErr(c, 500, err)
 		return
+	}
+	if tpl != nil && len(tpl.InboundIDs) > 0 {
+		// Through the scope-checked path, not a direct insert: a plan must not
+		// be a way to assign an inbound the caller could not have assigned by
+		// hand. The account itself is already created, so a refusal here is
+		// reported without unwinding it — the operator fixes the plan and
+		// assigns, rather than losing the user and its quota charge.
+		if err := s.db.SetUserInbounds(u.ID, tpl.InboundIDs, s.assignableInbounds(claims)); err != nil {
+			s.audit(c, "user.create", u.Username)
+			if errors.Is(err, store.ErrForbiddenRef) {
+				failErr(c, 403, err)
+				return
+			}
+			failErr(c, 400, err)
+			return
+		}
 	}
 	s.audit(c, "user.create", u.Username)
 	s.startBackground(s.reloadEngines)

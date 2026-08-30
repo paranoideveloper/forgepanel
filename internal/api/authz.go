@@ -204,6 +204,14 @@ var adminAuthzRules = []authzRule{
 
 	// --- customer management: the reseller's job --------------------------
 	{path: "/api/admin/users", roles: tenantMgmt},
+	// Saved plans are customer management, but matches() ends in a bare
+	// HasPrefix with no segment boundary — "/api/admin/user-templates" is not
+	// prefixed by "/api/admin/users", so without this line it falls through to
+	// the owner-only catch-all and 403s the one role that wanted plans. The
+	// policy test only asserts a rule matched, so nothing would have said so.
+	// The path must stay this exact string: "/api/admin/user" would swallow
+	// "/api/admin/users" by the same rule and silently re-scope customers.
+	{path: "/api/admin/user-templates", roles: tenantMgmt},
 	{path: "/api/admin/groups", roles: tenantMgmt},
 	{methods: get, path: "/api/admin/quota", exact: true, roles: tenantMgmt},
 
