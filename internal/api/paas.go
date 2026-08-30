@@ -66,9 +66,37 @@ type paasRoute struct {
 // a Hysteria2 inbound on Railway, show it green, and never say that the
 // platform does not route UDP at all — which is exactly the failure the
 // not-serving column was added to end.
-func paasRoutable(n *model.Node) (string, string) {
+// paasServe is how one inbound reaches the outside world on a PaaS.
+//
+// Three outcomes, and the difference between the last two is the whole point of
+// this type: an inbound the platform routes DIRECTLY must not be rewritten onto
+// loopback with its TLS stripped, which is exactly what makes a path-routed one
+// work.
+type paasServe struct {
+	// Path is set when the inbound shares the panel's HTTP port and is told
+	// apart by its transport path.
+	Path string
+	// OwnPort is set when the platform routes this inbound's own port straight
+	// to the container — raw TCP or UDP, nothing terminated in front.
+	OwnPort bool
+	// Why is set when the inbound cannot be served here at all.
+	Why string
+}
+
+func paasRoutable(pa config.PaaS, n *model.Node) paasServe {
 	if n == nil {
-		return "", "no configuration"
+		return paasServe{Why: "no configuration"}
+	}
+	// A port the platform routes directly is served AS IT IS: its own port, its
+	// own TLS, no front proxy. That is the only way REALITY can work anywhere —
+	// it performs its own handshake, and an edge that terminates first destroys
+	// it — and the only way a UDP protocol can work at all.
+	if isUDPProtocol(n.Protocol) || n.Transport.Network == model.NetQUIC || n.Transport.Network == model.NetMKCP {
+		if pa.RoutesUDP(n.Port) {
+			return paasServe{OwnPort: true}
+		}
+	} else if pa.RoutesTCP(n.Port) {
+		return paasServe{OwnPort: true}
 	}
 	// Brook does not use Transport at all — it is supervised as its own process
 	// and carries its mode and path in BrookOptions — so judging it by
@@ -76,7 +104,8 @@ func paasRoutable(n *model.Node) (string, string) {
 	// is a WebSocket server with a path on it, which is exactly what a shared
 	// HTTP port can route.
 	if n.Protocol == model.ProtoBrook {
-		return brookRoutable(n)
+		path, why := brookRoutable(n)
+		return paasServe{Path: path, Why: why}
 	}
 	switch n.Transport.Network {
 	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
@@ -86,30 +115,28 @@ func paasRoutable(n *model.Node) (string, string) {
 			// by. Without a path this one would either capture the panel or be
 			// captured by another inbound, so it is refused rather than served
 			// ambiguously.
-			return "", "needs a transport path to share the platform's single port"
+			return paasServe{Why: "needs a transport path to share the platform's single port"}
 		}
 		if !strings.HasPrefix(p, "/") {
 			p = "/" + p
 		}
-		return p, ""
+		return paasServe{Path: p}
 	case model.NetGRPC, model.NetH2:
 		// Both require end-to-end HTTP/2. A PaaS edge terminates the client's
 		// connection and re-issues it to the container over HTTP/1.1, so the
 		// stream multiplexing these transports are built on never arrives.
-		return "", "needs end-to-end HTTP/2, which the platform edge does not forward"
-	case model.NetQUIC:
-		return "", "needs UDP, which the platform does not route"
-	case model.NetMKCP:
-		return "", "needs UDP, which the platform does not route"
+		return paasServe{Why: "needs end-to-end HTTP/2, which the platform edge does not forward"}
+	case model.NetQUIC, model.NetMKCP:
+		return paasServe{Why: udpRefusal(pa)}
 	}
 	// Everything left is a raw-TCP or UDP protocol: Hysteria2, TUIC, AnyTLS,
 	// ShadowTLS, WireGuard, Shadowsocks-on-tcp, Brook, plain VLESS/Trojan on
 	// tcp. The platform gives out one HTTP port and nothing else, so there is
 	// no honest way to serve any of them.
 	if isUDPProtocol(n.Protocol) {
-		return "", "needs UDP, which the platform does not route"
+		return paasServe{Why: udpRefusal(pa)}
 	}
-	return "", "needs its own TCP port, which the platform does not give out — use ws, httpupgrade or xhttp"
+	return paasServe{Why: tcpRefusal(pa)}
 }
 
 // isUDPProtocol reports whether the protocol is UDP-only at the wire level.
@@ -130,6 +157,46 @@ func isUDPProtocol(p model.Protocol) bool {
 // answer that plaintext HTTP request with a ServerHello and every connection
 // would fail — with a certificate error on a connection that never needed a
 // certificate here.
+// udpRefusal and tcpRefusal say WHY, and on a platform that could carry it they
+// say what to do about it. "the platform does not route UDP" is false on Fly and
+// sends an operator looking for a fault that is not there.
+func udpRefusal(pa config.PaaS) string {
+	if pa.Platform == "fly" {
+		return "needs UDP: allocate a dedicated IPv4 (fly ips allocate-v4), declare the port " +
+			"in a [[services]] block with protocol = \"udp\", and list it in FORGEPANEL_PAAS_UDP_PORTS"
+	}
+	return "needs UDP, which the platform does not route"
+}
+
+func tcpRefusal(pa config.PaaS) string {
+	if pa.Platform == "fly" {
+		return "needs its own TCP port: allocate a dedicated IPv4 (fly ips allocate-v4), declare the " +
+			"port in a [[services]] block with protocol = \"tcp\" and no handlers, and list it in " +
+			"FORGEPANEL_PAAS_TCP_PORTS — or use ws, httpupgrade or xhttp on the shared port"
+	}
+	return "needs its own TCP port, which the platform does not give out — use ws, httpupgrade or xhttp"
+}
+
+// paasServeNode is what the engine binds for one inbound.
+//
+// An own-port inbound is returned UNCHANGED: the platform routes its port
+// straight here, so moving it to loopback and stripping its security would hand
+// REALITY a plaintext socket nothing reaches. Only a path-routed inbound gets
+// the rewrite, and for it the rewrite is the whole mechanism.
+func paasServeNode(pa config.PaaS, n *model.Node, port int) *model.Node {
+	if r := paasRoutable(pa, n); r.OwnPort {
+		c := n.Clone()
+		// Fly routes UDP only to fly-global-services and will not rewrite the
+		// port, so a wildcard bind receives nothing and reports nothing.
+		if pa.UDPBindHost != "" && (isUDPProtocol(n.Protocol) ||
+			n.Transport.Network == model.NetQUIC || n.Transport.Network == model.NetMKCP) {
+			c.Address = pa.UDPBindHost
+		}
+		return c
+	}
+	return paasEngineNode(n, port)
+}
+
 func paasEngineNode(n *model.Node, port int) *model.Node {
 	c := n.Clone()
 	c.Address = "127.0.0.1"
@@ -153,6 +220,7 @@ func paasEngineNode(n *model.Node, port int) *model.Node {
 // returns the specs to hand the cores alongside the routing table the front
 // proxy needs and the inbounds that cannot be served here at all.
 func (s *Server) paasSpecs() ([]engine.InboundSpec, []paasRoute, []engine.SkippedInbound) {
+	pa := s.cfg.PaaS()
 	all := s.enabledInboundSpecs()
 	var (
 		specs   []engine.InboundSpec
@@ -168,11 +236,23 @@ func (s *Server) paasSpecs() ([]engine.InboundSpec, []paasRoute, []engine.Skippe
 		if sp.Node == nil {
 			continue
 		}
-		prefix, why := paasRoutable(sp.Node)
-		if why != "" {
-			skipped = append(skipped, engine.SkippedInbound{Remark: sp.Node.Remark, Reason: why})
+		r := paasRoutable(pa, sp.Node)
+		if r.Why != "" {
+			skipped = append(skipped, engine.SkippedInbound{Remark: sp.Node.Remark, Reason: r.Why})
 			continue
 		}
+		if r.OwnPort {
+			// The platform routes this port straight to the container, so the
+			// core binds it as entered — its real port, its own TLS — and the
+			// inbound never enters the path table. It keeps its certificate
+			// too: nothing terminates in front of it, so the core is the only
+			// thing that can present one.
+			out := sp
+			out.Node = paasServeNode(pa, sp.Node, 0)
+			specs = append(specs, out)
+			continue
+		}
+		prefix := r.Path
 		if other, dup := taken[prefix]; dup {
 			skipped = append(skipped, engine.SkippedInbound{
 				Remark: sp.Node.Remark,
@@ -349,7 +429,7 @@ func (s *Server) applyPaaSAddressing(n *model.Node) {
 		n.Security = model.Security{Type: model.SecTLS, ServerName: pa.Domain}
 		return
 	}
-	if _, why := paasRoutable(n); why != "" {
+	if why := paasRoutable(pa, n).Why; why != "" {
 		// One exception: a routable transport that simply has no path yet. That
 		// is a form the operator left blank, not an unservable protocol, and a
 		// path is something the panel can supply.
@@ -473,7 +553,7 @@ func (s *Server) ReconcilePaaSAddresses() int {
 		if err != nil {
 			continue
 		}
-		if _, why := paasRoutable(n); why != "" {
+		if paasRoutable(pa, n).Why != "" {
 			continue // not servable here; leave it exactly as entered
 		}
 		if n.Address == pa.Domain && n.Port == pa.PublicPort && n.Security.Type == model.SecTLS {
@@ -575,7 +655,7 @@ func (s *Server) paasCreateRefusal(n *model.Node) *apierr.Error {
 	if paasSharesPublicPort(n) {
 		return nil
 	}
-	_, why := paasRoutable(n)
+	why := paasRoutable(pa, n).Why
 	if why == "" {
 		return nil
 	}

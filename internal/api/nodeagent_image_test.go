@@ -25,7 +25,7 @@ func TestEveryImageShipsTheAgentThePanelServes(t *testing.T) {
 
 	for _, df := range []string{
 		filepath.Join("..", "..", "Dockerfile"),
-		filepath.Join("..", "..", "deploy", "railway", "Dockerfile"),
+		filepath.Join("..", "..", "deploy", "paas", "Dockerfile"),
 	} {
 		b, err := os.ReadFile(df)
 		if err != nil {

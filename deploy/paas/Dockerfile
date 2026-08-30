@@ -14,7 +14,7 @@
 #     build network it is a panel that comes up with no cores at all.
 #
 # Build from the repository ROOT:
-#   docker build -f deploy/railway/Dockerfile -t forgepanel-paas .
+#   docker build -f deploy/paas/Dockerfile -t forgepanel-paas .
 
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 
@@ -87,7 +87,7 @@ COPY --from=build /out/forgectl   /usr/local/bin/forgectl
 # deploy gets a 503 naming paths the operator cannot create.
 COPY --from=build /out/forgenode  /usr/local/bin/forgenode
 COPY --from=cores /opt/forgepanel-cores /opt/forgepanel-cores
-COPY deploy/railway/entrypoint.sh /usr/local/bin/forgepanel-paas-entrypoint
+COPY deploy/paas/entrypoint.sh /usr/local/bin/forgepanel-paas-entrypoint
 RUN chmod +x /usr/local/bin/forgepanel-paas-entrypoint
 
 ENV FORGEPANEL_DATA=/var/lib/forgepanel \

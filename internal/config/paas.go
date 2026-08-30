@@ -42,6 +42,55 @@ type PaaS struct {
 	// PublicPort is the port the outside world connects to — 443, because the
 	// edge terminates TLS there. Links and the panel URL use this, never Port.
 	PublicPort int
+	// TCPPorts and UDPPorts are ports the platform routes to this container
+	// DIRECTLY, in addition to the one HTTP port — raw, without terminating
+	// anything. Fly does this when a service block declares them and a
+	// dedicated IPv4 is allocated; Railway, Render and Koyeb do not do it at
+	// all.
+	//
+	// They are declared by the operator rather than detected, because nothing
+	// in the container's environment reports either fact. That cuts both ways
+	// and the wrong way is worse: a port listed here but not actually routed
+	// produces an inbound the panel offers and no client can reach, which is
+	// harder to diagnose than the refusal it replaced.
+	TCPPorts []int
+	UDPPorts []int
+	// UDPBindHost is the address a UDP inbound must bind, when the platform
+	// demands a particular one. Fly routes UDP only to `fly-global-services`
+	// and refuses to rewrite the port; binding 0.0.0.0 there silently receives
+	// nothing. Empty means the ordinary wildcard bind.
+	UDPBindHost string
+}
+
+// RoutesTCP reports whether the platform routes raw TCP to this port.
+func (p PaaS) RoutesTCP(port int) bool { return containsPort(p.TCPPorts, port) }
+
+// RoutesUDP reports whether the platform routes UDP to this port.
+func (p PaaS) RoutesUDP(port int) bool { return containsPort(p.UDPPorts, port) }
+
+func containsPort(ports []int, port int) bool {
+	for _, p := range ports {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePorts reads a comma-separated port list, dropping anything that is not a
+// usable port rather than failing the whole boot: one typo in an env var must
+// not stop a panel from starting, and the ports it did understand are still
+// correct.
+func parsePorts(raw string) []int {
+	var out []int
+	for _, f := range strings.Split(raw, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil || n < 1 || n > 65535 {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // paasPort is the port to bind when a platform did not name one. Railway,
@@ -72,6 +121,10 @@ func DetectPaaS() PaaS {
 	case os.Getenv("FLY_APP_NAME") != "":
 		p.Enabled, p.Platform = true, "fly"
 		p.Domain = os.Getenv("FLY_APP_NAME") + ".fly.dev"
+		// Fly routes UDP only to this name and will not rewrite the port. An
+		// app that binds 0.0.0.0 there receives nothing at all, with no error
+		// anywhere to say why.
+		p.UDPBindHost = "fly-global-services"
 	case os.Getenv("KOYEB_PUBLIC_DOMAIN") != "":
 		p.Enabled, p.Platform = true, "koyeb"
 		p.Domain = os.Getenv("KOYEB_PUBLIC_DOMAIN")
@@ -98,6 +151,12 @@ func DetectPaaS() PaaS {
 	p.Port = envInt("PORT", envInt("FORGEPANEL_PANEL_PORT", paasPort))
 	if n := envInt("FORGEPANEL_PUBLIC_PORT", 0); n > 0 {
 		p.PublicPort = n
+	}
+	// Extra routed ports. Declared, never inferred — see the field comments.
+	p.TCPPorts = parsePorts(os.Getenv("FORGEPANEL_PAAS_TCP_PORTS"))
+	p.UDPPorts = parsePorts(os.Getenv("FORGEPANEL_PAAS_UDP_PORTS"))
+	if h := envStr("FORGEPANEL_PAAS_UDP_BIND", ""); h != "" {
+		p.UDPBindHost = h
 	}
 	return p
 }

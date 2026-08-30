@@ -242,7 +242,7 @@ func TestAnInboundThePlatformCannotCarryIsReportedWithItsReason(t *testing.T) {
 		}, "HTTP/2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, why := paasRoutable(tc.node)
+			why := paasRoutable(config.PaaS{}, tc.node).Why
 			if why == "" {
 				t.Fatalf("%s was accepted for a shared HTTP port", tc.name)
 			}
@@ -572,7 +572,7 @@ func TestTheQuickstartMakesAServableInboundOnAPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, why := paasRoutable(n); why != "" {
+	if why := paasRoutable(config.PaaS{}, n).Why; why != "" {
 		t.Fatalf("the quickstart made an inbound this platform cannot serve: %s", why)
 	}
 	if n.Address != "forge-test.up.railway.app" || n.Port != 443 {
@@ -639,7 +639,7 @@ func TestThePortExemptionDoesNotExemptAnInboundTheEdgeCannotServe(t *testing.T) 
 		Transport: model.Transport{Network: model.NetTCP},
 		Security:  model.Security{Type: model.SecTLS, ServerName: "x"},
 	}
-	if _, why := paasRoutable(tcp); why == "" {
+	if why := paasRoutable(config.PaaS{}, tcp).Why; why == "" {
 		t.Fatal("precondition: a raw-tcp inbound must not be path-routable")
 	}
 	// It is exempted only when path-routable; this one is not, so the guard is
@@ -703,5 +703,94 @@ func TestMountDetectionRecognisesARealMountPoint(t *testing.T) {
 	// "/" is a mount point on every Linux system.
 	if mounted, known := dirIsMounted("/"); known && !mounted {
 		t.Error("/ was not recognised as a mount point")
+	}
+}
+
+// Railway, Render and Koyeb hand a container exactly one HTTP port, which is
+// why everything but ws/httpupgrade/xhttp is refused there. Fly will route raw
+// TCP and UDP as well, so on Fly those refusals are simply wrong — the panel
+// would turn down REALITY and Hysteria2 on a platform that can carry both.
+//
+// The platform cannot tell us: a dedicated IPv4 has to be allocated and the
+// port declared in fly.toml, and nothing in the container's environment reports
+// either. So the operator declares it, and these ports are the declaration.
+func TestADeclaredRawTCPPortIsServedOnItsOwnPort(t *testing.T) {
+	pa := config.PaaS{Enabled: true, Platform: "fly", Domain: "app.fly.dev",
+		Port: 8080, PublicPort: 443, TCPPorts: []int{8443}}
+
+	// REALITY does its own TLS handshake, so an edge that terminates first
+	// destroys it. On a pass-through port it works.
+	reality := &model.Node{
+		Remark: "reality", Protocol: model.ProtoVLESS, Address: "app.fly.dev", Port: 8443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetTCP},
+		Security:  model.Security{Type: model.SecReality, ServerName: "www.microsoft.com"},
+	}
+	r := paasRoutable(pa, reality)
+	if r.Why != "" {
+		t.Fatalf("a declared raw-TCP port was refused: %s", r.Why)
+	}
+	if !r.OwnPort {
+		t.Fatal("a raw-TCP inbound was routed by path; it has no path and the edge would terminate its TLS")
+	}
+	if r.Path != "" {
+		t.Fatalf("path = %q, want none", r.Path)
+	}
+
+	// The same inbound on a port nobody declared is still refused. Offering it
+	// would produce a config the client cannot reach, which is worse than a
+	// refusal with a reason.
+	undeclared := reality.Clone()
+	undeclared.Port = 9443
+	if r := paasRoutable(pa, undeclared); r.Why == "" {
+		t.Fatal("an undeclared port was accepted")
+	}
+}
+
+func TestADeclaredUDPPortLetsHysteriaBeServed(t *testing.T) {
+	pa := config.PaaS{Enabled: true, Platform: "fly", Domain: "app.fly.dev",
+		Port: 8080, PublicPort: 443, UDPPorts: []int{443}}
+
+	hy2 := &model.Node{
+		Remark: "hy2", Protocol: model.ProtoHysteria2, Address: "app.fly.dev", Port: 443,
+		Password: "pw", Security: model.Security{Type: model.SecTLS, ServerName: "app.fly.dev"},
+	}
+	r := paasRoutable(pa, hy2)
+	if r.Why != "" {
+		t.Fatalf("a declared UDP port was refused: %s", r.Why)
+	}
+	if !r.OwnPort {
+		t.Fatal("a UDP inbound cannot be path-routed over the HTTP edge")
+	}
+
+	// And without the declaration, the old refusal stands.
+	bare := config.PaaS{Enabled: true, Platform: "railway", Port: 8080, PublicPort: 443}
+	if r := paasRoutable(bare, hy2); r.Why == "" {
+		t.Fatal("Hysteria2 was accepted on a platform that routes only HTTP")
+	}
+}
+
+// An own-port inbound must NOT be rewritten to loopback with TLS stripped. That
+// rewrite is what makes a path-routed inbound work behind the edge, and doing
+// it here would hand REALITY a plaintext socket on 127.0.0.1 that no client
+// ever reaches.
+func TestAnOwnPortInboundKeepsItsPortAndItsTLS(t *testing.T) {
+	pa := config.PaaS{Enabled: true, Platform: "fly", Domain: "app.fly.dev",
+		Port: 8080, PublicPort: 443, TCPPorts: []int{8443}}
+	reality := &model.Node{
+		Remark: "reality", Protocol: model.ProtoVLESS, Address: "app.fly.dev", Port: 8443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetTCP},
+		Security:  model.Security{Type: model.SecReality, ServerName: "www.microsoft.com"},
+	}
+	got := paasServeNode(pa, reality, 39000)
+	if got.Port != 8443 {
+		t.Fatalf("port = %d, want the declared 8443 — the platform routes it directly", got.Port)
+	}
+	if got.Security.Type != model.SecReality {
+		t.Fatalf("security = %v, want REALITY kept: the edge never sees this connection", got.Security.Type)
+	}
+	if got.Address == "127.0.0.1" {
+		t.Fatal("an own-port inbound was moved to loopback, where the platform cannot route to it")
 	}
 }

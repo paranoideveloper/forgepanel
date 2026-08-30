@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/forgepanel/forgepanel/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,7 +45,7 @@ func TestTheQuickstartCreatesEveryConfigThePlatformCanCarry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, why := paasRoutable(n); why != "" {
+		if why := paasRoutable(config.PaaS{}, n).Why; why != "" {
 			t.Errorf("%s cannot be served here: %s", ins[i].Remark, why)
 		}
 		if n.Address != "forge-test.up.railway.app" || n.Port != 443 {
