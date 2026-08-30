@@ -55,6 +55,7 @@ const (
 	ScopeSubscription Scope = "subscription"
 	ScopePanel        Scope = "panel"
 	ScopeTelegram     Scope = "telegram"
+	ScopeBackup       Scope = "backup"
 	ScopeInternal     Scope = "internal"
 )
 

@@ -293,7 +293,10 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		BackupConfig: func() (string, string, time.Duration, int) {
 			return cfg.DataDir, cfg.MasterKey, 24 * time.Hour, 7
 		},
-		DeliverBackup: func(path string) { s.deliverBackupToTelegram(path) },
+		// The fan-out, not one destination: this is the single hook the
+		// scheduler holds, so a destination not named here is a destination
+		// that never runs however completely it is built.
+		DeliverBackup: s.deliverBackup,
 		PollTraffic: func(reset bool) (map[string]store.TrafficSplit, error) {
 			if s.engine == nil {
 				return nil, nil
@@ -916,6 +919,13 @@ func (s *Server) routes() {
 			admin.PUT("/settings/webhooks/:id", s.handleUpdateWebhook)
 			admin.DELETE("/settings/webhooks/:id", s.handleDeleteWebhook)
 			admin.POST("/settings/webhooks/:id/test", s.handleTestWebhook)
+			// The secret key is a bearer credential for a bucket holding the
+			// panel's whole state — the database, the master key and every
+			// certificate — so it belongs under the same owner-only
+			// /api/admin/settings prefix as the bot token.
+			admin.GET("/settings/backup/s3", s.handleGetBackupS3Settings)
+			admin.POST("/settings/backup/s3", s.handleSetBackupS3Settings)
+			admin.POST("/settings/backup/s3/test", s.handleTestBackupS3)
 			admin.GET("/settings/egress", s.handleGetEgressSettings)
 			admin.POST("/settings/egress", s.handleSetEgressSettings)
 			admin.POST("/settings/egress/test", s.handleTestEgress)

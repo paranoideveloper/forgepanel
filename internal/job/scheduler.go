@@ -911,3 +911,10 @@ func (s *Scheduler) PollAndAccountForTest() { _ = s.pollAndAccount() }
 
 // SweepAtForTest exposes sweepAt for internal package testing.
 func (s *Scheduler) SweepAtForTest(now time.Time) { _ = s.sweepAt(now) }
+
+// RunScheduledBackupForTest exposes runScheduledBackup for cross-package tests
+// that need to drive the REAL scheduler the server constructed, rather than one
+// the test wired itself. The only other way in is the hourly retention loop, and
+// a test cannot wait an hour — which is exactly why the delivery hook could be
+// replaced with a destination that is never called and nothing would notice.
+func (s *Scheduler) RunScheduledBackupForTest() error { return s.runScheduledBackup() }

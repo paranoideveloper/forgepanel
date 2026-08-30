@@ -2,8 +2,10 @@ package apierr
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
+	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/edge"
 	"github.com/forgepanel/forgepanel/internal/telegram"
@@ -41,6 +43,10 @@ func From(err error) *Error {
 			return Unspecified()
 		}
 	case *telegram.SendError:
+		if v == nil {
+			return Unspecified()
+		}
+	case *backup.S3Error:
 		if v == nil {
 			return Unspecified()
 		}
@@ -86,6 +92,10 @@ func From(err error) *Error {
 	if errors.As(err, &se) && se != nil {
 		return fromTelegram(se, err)
 	}
+	var s3e *backup.S3Error
+	if errors.As(err, &s3e) && s3e != nil {
+		return fromS3(s3e, err)
+	}
 	// An untyped error is our fault until a handler says otherwise; handlers
 	// that already know better pass a fallback through Coerce.
 	return &Error{Kind: KindServer, Message: err.Error(), Cause: err}
@@ -118,6 +128,46 @@ func fromTelegram(se *telegram.SendError, cause error) *Error {
 	}
 }
 
+// fromS3 classifies a bucket's refusal of a backup upload.
+//
+// The three an operator can actually act on need opposite fixes and used to be
+// one line in the log: a key the bucket does not accept, a bucket that is not
+// there, and a service asking to be slowed down. A status of 0 means the
+// endpoint was never reached at all, which is a different problem again and the
+// one most likely to be the egress proxy rather than the bucket.
+func fromS3(e *backup.S3Error, cause error) *Error {
+	code := strings.ToLower(e.Code)
+	kind := KindNetwork
+	remediation := "Check the endpoint URL and that this panel can reach it; if an egress proxy is configured, this upload goes through it too."
+	switch {
+	case e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden ||
+		strings.Contains(code, "signature") || strings.Contains(code, "accesskey") ||
+		strings.Contains(code, "accessdenied") || strings.Contains(code, "invalidaccesskeyid"):
+		kind = KindAuth
+		remediation = "Check the access key and secret key, and that the key is allowed to PutObject in this bucket. A wrong region also signs wrongly on services that enforce one."
+	case e.Status == http.StatusNotFound || strings.Contains(code, "nosuchbucket"):
+		kind = KindNotFound
+		remediation = "Create the bucket first, or correct its name. The panel never creates a bucket: doing so silently would put the panel's whole state somewhere nobody chose."
+	case e.Status == http.StatusTooManyRequests || strings.Contains(code, "slowdown"):
+		kind = KindRateLimit
+		remediation = "The service is throttling. The next scheduled backup retries on its own."
+	case e.Status >= 500:
+		kind = KindUnavailable
+		remediation = "The storage service reported its own failure. The next scheduled backup retries on its own."
+	}
+	out := &Error{
+		Op:          "backup-s3",
+		Kind:        kind,
+		Message:     e.Error(),
+		Remediation: remediation,
+		Cause:       cause,
+	}
+	if e.Code != "" {
+		out.Details = map[string]any{"s3_code": e.Code}
+	}
+	return out
+}
+
 // Unspecified is the answer when there is no usable error to describe. It is
 // never a 200: a writer called with nothing to report is a bug in the caller,
 // and hiding it behind an empty success body is how it stays one.
@@ -142,6 +192,8 @@ func IsTyped(err error) bool {
 		return v != nil
 	case *telegram.SendError:
 		return v != nil
+	case *backup.S3Error:
+		return v != nil
 	}
 	if e, ok := As(err); ok && e != nil {
 		return true
@@ -153,7 +205,11 @@ func IsTyped(err error) bool {
 		return true
 	}
 	var se *telegram.SendError
-	return errors.As(err, &se) && se != nil
+	if errors.As(err, &se) && se != nil {
+		return true
+	}
+	var s3e *backup.S3Error
+	return errors.As(err, &s3e) && s3e != nil
 }
 
 // Coerce is From for a handler that has already chosen a status.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/edge"
 	"github.com/forgepanel/forgepanel/internal/telegram"
@@ -158,7 +159,8 @@ func TestFromSurvivesNilTypedPointers(t *testing.T) {
 	var e *edge.Error
 	var s *telegram.SendError
 	var a *Error
-	for _, err := range []error{error(d), error(e), error(s), error(a)} {
+	var b *backup.S3Error
+	for _, err := range []error{error(d), error(e), error(s), error(a), error(b)} {
 		got := From(err)
 		if got == nil {
 			t.Fatalf("From(%T(nil)) returned nil", err)
@@ -172,5 +174,38 @@ func TestFromSurvivesNilTypedPointers(t *testing.T) {
 		if c := Coerce(err, http.StatusBadRequest); c == nil || c.HTTPStatus() != http.StatusBadRequest {
 			t.Errorf("Coerce(%T(nil)) did not fall back to the caller's status", err)
 		}
+	}
+}
+
+// A bucket refusal has to arrive as something an operator can act on. All three
+// of "your key is wrong", "there is no such bucket" and "slow down" used to be
+// one sentence in a log line, and each needs a different fix.
+func TestS3RefusalsAreClassified(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  *backup.S3Error
+		want Kind
+	}{
+		{"bad signature", &backup.S3Error{Status: 403, Code: "SignatureDoesNotMatch"}, KindAuth},
+		{"no such bucket", &backup.S3Error{Status: 404, Code: "NoSuchBucket"}, KindNotFound},
+		{"throttled", &backup.S3Error{Status: 503, Code: "SlowDown"}, KindRateLimit},
+		{"service down", &backup.S3Error{Status: 500}, KindUnavailable},
+		{"never reached", &backup.S3Error{Message: "dial tcp: no route to host"}, KindNetwork},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := From(tc.err)
+			if got.Kind != tc.want {
+				t.Errorf("kind = %q, want %q", got.Kind, tc.want)
+			}
+			if got.Op != "backup-s3" {
+				t.Errorf("op = %q, want backup-s3", got.Op)
+			}
+			if got.Remediation == "" {
+				t.Error("no remediation; the operator is told what failed and not what to change")
+			}
+			if got.HTTPStatus() < 400 {
+				t.Errorf("status = %d, want an error status", got.HTTPStatus())
+			}
+		})
 	}
 }
