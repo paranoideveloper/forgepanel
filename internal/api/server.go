@@ -761,6 +761,14 @@ func (s *Server) routes() {
 			admin.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
 			admin.POST("/users/:id/sub-revoked", s.handleSetSubRevoked)
 			admin.GET("/users/:id/sub-requests", s.handleUserSubRequests)
+			// Saved plans. handleCreateUser reads one when the request carries
+			// template_id; these five only maintain the list.
+			admin.GET("/user-templates", s.handleListUserTemplates)
+			admin.POST("/user-templates", s.handleCreateUserTemplate)
+			admin.GET("/user-templates/:id", s.handleGetUserTemplate)
+			admin.PATCH("/user-templates/:id", s.handleUpdateUserTemplate)
+			admin.DELETE("/user-templates/:id", s.handleDeleteUserTemplate)
+			admin.POST("/users/:id/apply-template", s.handleApplyUserTemplate)
 			admin.GET("/quota", s.handleQuota)
 			// The audit trail. Entries carry the actor, their IP and what they
 			// did across every admin, so this is owner/admin only.

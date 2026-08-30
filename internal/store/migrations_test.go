@@ -448,7 +448,16 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // migVSubTelemetry: /sub/:token recorded nothing, so no panel could say whether
 // a subscriber's client had ever pulled its configuration. A table and two
 // columns move the digest together.
-const modelSchemaFingerprintPinned = "e783e61eab6ebeb60a5f178dc9dce9717c8823ce30ee16f5f73cd81423b80ac7"
+//
+// user_templates arrived with migVUserTemplates: saved plans, so "the 5 GB
+// monthly trial" is a row rather than something an operator retypes from memory
+// on every new account. It adds a table and touches no existing one, but a
+// database already at the previous version has no such table, and the create-user
+// handler now reads it — so an unmigrated panel would answer every template-backed
+// create with a missing-table error.
+//
+// Both landed in the same batch, so neither branch's digest is the merged one.
+const modelSchemaFingerprintPinned = "a9acd2c5834073fce82f61a1a1831966bdf738e6cc090dbbb0ca7d6da925c52a"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

@@ -158,24 +158,9 @@ func (s *Store) SetUserInbounds(userID uint, ids []uint, allowed map[uint]bool) 
 			return err
 		}
 		// De-duplicate and validate before writing anything.
-		want := make([]uint, 0, len(ids))
-		seen := map[uint]bool{}
-		for _, id := range ids {
-			if id == 0 || seen[id] {
-				continue
-			}
-			if allowed != nil && !allowed[id] {
-				return fmt.Errorf("%w: inbound %d", ErrForbiddenRef, id)
-			}
-			var cnt int64
-			if err := tx.Model(&Inbound{}).Where("id = ?", id).Count(&cnt).Error; err != nil {
-				return err
-			}
-			if cnt == 0 {
-				return fmt.Errorf("store: inbound %d does not exist", id)
-			}
-			seen[id] = true
-			want = append(want, id)
+		want, err := validInboundIDs(tx, ids, allowed)
+		if err != nil {
+			return err
 		}
 		if err := tx.Where("user_id = ?", userID).Delete(&UserInbound{}).Error; err != nil {
 			return err
@@ -187,6 +172,37 @@ func (s *Store) SetUserInbounds(userID uint, ids []uint, allowed map[uint]bool) 
 		}
 		return nil
 	})
+}
+
+// validInboundIDs de-duplicates ids and refuses any that is outside allowed or
+// does not exist, INSIDE the caller's transaction.
+//
+// It is a function rather than a loop inlined in SetUserInbounds because a
+// second writer of user_inbounds now exists (ApplyTemplateToUser). A saved plan
+// that skipped these two checks would be a way to hand a user an inbound the
+// caller could not have assigned by hand — the scope check would be enforced on
+// the manual path and bypassed on the one the operator actually uses.
+func validInboundIDs(tx *gorm.DB, ids []uint, allowed map[uint]bool) ([]uint, error) {
+	want := make([]uint, 0, len(ids))
+	seen := map[uint]bool{}
+	for _, id := range ids {
+		if id == 0 || seen[id] {
+			continue
+		}
+		if allowed != nil && !allowed[id] {
+			return nil, fmt.Errorf("%w: inbound %d", ErrForbiddenRef, id)
+		}
+		var cnt int64
+		if err := tx.Model(&Inbound{}).Where("id = ?", id).Count(&cnt).Error; err != nil {
+			return nil, err
+		}
+		if cnt == 0 {
+			return nil, fmt.Errorf("store: inbound %d does not exist", id)
+		}
+		seen[id] = true
+		want = append(want, id)
+	}
+	return want, nil
 }
 
 // ErrForbiddenRef reports that a request referenced an object outside the
