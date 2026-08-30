@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
+	"sync"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/apierr"
+	"github.com/forgepanel/forgepanel/internal/cdncheck"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
@@ -147,6 +150,52 @@ func wizardPresetPlans() []presetPlan {
 	}
 }
 
+// verifyCDNInbounds asks Cloudflare whether it can actually reach each
+// CDN-fronted inbound, after the engines have been reloaded.
+//
+// It runs the checks concurrently and bounded: this is on the wizard's response
+// path, and a serial walk of several ports with a 20-second ceiling each would
+// make a successful setup look like a hang.
+func (s *Server) verifyCDNInbounds(ctx context.Context, host string, plans []presetPlan) []cdncheck.Result {
+	if strings.TrimSpace(host) == "" {
+		return nil
+	}
+	// The cores were reloaded a moment ago in the background; without a beat to
+	// bind, every check reports 521 and blames the operator for a race this
+	// function started.
+	select {
+	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var (
+		mu   sync.Mutex
+		out  []cdncheck.Result
+		wg   sync.WaitGroup
+	)
+	for i := range plans {
+		p := plans[i]
+		if !p.cdn {
+			continue
+		}
+		wg.Add(1)
+		go func(port int) {
+			defer wg.Done()
+			r := cdncheck.Check(ctx, host, port)
+			mu.Lock()
+			out = append(out, r)
+			mu.Unlock()
+		}(p.port)
+	}
+	wg.Wait()
+	sort.Slice(out, func(i, j int) bool { return out[i].Port < out[j].Port })
+	return out
+}
+
 func cloneReality(r *model.Reality) *model.Reality {
 	c := *r
 	return &c
@@ -253,12 +302,31 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	}
 	s.audit(c, "wizard.preset", fmt.Sprintf("%d inbounds", len(created)))
 
+	// Verify the CDN half instead of announcing it.
+	//
+	// A CDN-fronted inbound fails in a way the operator cannot see from here:
+	// the port answers perfectly when tested directly on the origin, and every
+	// client gets a Cloudflare error page. Measured on a live zone — a
+	// plain-HTTP origin on a proxied port answers 200 locally and 525 through
+	// the edge. The wizard used to create the record, create the inbound, report
+	// success, and have no idea.
+	//
+	// Cloudflare's own 5xx codes say precisely which thing is wrong, so this
+	// asks the edge and passes the answer on with the fix attached.
+	checks := s.verifyCDNInbounds(c.Request.Context(), wctx.cdnHost, plans)
+	for _, ch := range checks {
+		if ch.Problem != "" {
+			warnings = append(warnings, fmt.Sprintf("%s:%d — %s. %s", ch.Host, ch.Port, ch.Problem, ch.Fix))
+		}
+	}
+
 	c.JSON(201, gin.H{
 		"created":     created,
 		"count":       len(created),
 		"server_ipv4": serverIP,
 		"reality":     gin.H{"public_key": kp.PublicKey, "short_id": sid, "server_names": borrowedSNIs},
 		"cdn_host":    wctx.cdnHost,
+		"cdn_checks":  checks,
 		"warnings":    warnings,
 		"note":        "Inbounds created and applied. REALITY dials the IP directly; CDN inbounds front through the Cloudflare sub-domain.",
 	})
