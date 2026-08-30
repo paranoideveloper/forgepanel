@@ -41,7 +41,7 @@ Base: `https://<panel>`. Admin endpoints require `Authorization: Bearer <access>
 | POST | `/api/admin/forgedns/zones/:id/toggle` | enable/disable a zone |
 | GET | `/api/admin/forgedns/zones/:id/{sessions,client}` | live sessions / client config |
 | GET | `/api/admin/forgedns/status` | listener state + served zones |
-| GET/POST | `/api/admin/settings/subscription` | subscription defaults: routing preset, TLS fragment, and the node-naming template (`{FLAG} {NAME} {COUNTRY} {PROTOCOL} {NET} {TLS} {PORT} {HOST} {USER} {NUM} {DATE}`) |
+| GET/POST | `/api/admin/settings/subscription` | subscription defaults: routing preset, TLS fragment (`fragment`, `fragment_level` = light/medium/aggressive, `fragment_cores` = any of `xray, sing-box`), and the node-naming template (`{FLAG} {NAME} {COUNTRY} {PROTOCOL} {NET} {TLS} {PORT} {HOST} {USER} {NUM} {DATE}`) |
 | GET | `/api/admin/geoip?host=<addr>` | resolve a host (or the panel's own IP) to `{country_code, flag}` for the inbound Country field |
 
 ### ForgeEdge (Cloudflare Worker)

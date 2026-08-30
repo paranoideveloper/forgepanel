@@ -37,6 +37,24 @@ func (s *Server) subRoutingPreset() string { return s.knobs().String("sub_routin
 // TLS hello by default (per-request ?fragment= overrides it).
 func (s *Server) subFragmentDefault() bool { return s.knobs().Bool("sub_fragment_default") }
 
+// subFragmentLevel is the severity preset (light|medium|aggressive) the
+// fragment toggle applies; a per-request ?fragment_level= overrides it.
+func (s *Server) subFragmentLevel() string { return s.knobs().String("sub_fragment_level") }
+
+// subFragmentCores is the set of cores that honour the toggle. Clash-Meta is not
+// a legal entry: it has no fragment primitive to honour.
+func (s *Server) subFragmentCores() []string { return s.knobs().List("sub_fragment_cores") }
+
+// fragmentDefaults is the operator's fragment configuration as one value, the
+// base every subscription request starts from before its own query parameters
+// are applied.
+func (s *Server) fragmentDefaults() routing.Fragment {
+	f := routing.FragmentPreset(s.subFragmentLevel())
+	f.Enabled = s.subFragmentDefault()
+	f.Cores = strings.Join(s.subFragmentCores(), ",")
+	return f
+}
+
 // subNameTemplate is the operator's node-naming template, e.g. "{FLAG} {NAME}".
 // Empty (the default) means "leave each node's own remark untouched", so the
 // feature is strictly opt-in and changes nothing until a template is set.
@@ -87,11 +105,18 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"routing_preset": s.subRoutingPreset(),
 		"fragment":       s.subFragmentDefault(),
-		"presets":        settings.Choices("sub_routing_preset"),
-		"name_template":  s.subNameTemplate(),
-		"name_tokens":    []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
-		"pattern":        patternSettingString(s.subPatternDefault()),
-		"pattern_modes":  settings.Choices("sub_pattern_default"),
+		// Fragmentation is three decisions, not one: whether, how hard, and on
+		// which cores. The supported-core list is served rather than hardcoded in
+		// the UI so the panel can never offer a core the renderer ignores.
+		"fragment_level":           s.subFragmentLevel(),
+		"fragment_levels":          settings.Choices("sub_fragment_level"),
+		"fragment_cores":           strings.Join(s.subFragmentCores(), ", "),
+		"fragment_cores_supported": routing.FragmentCores(),
+		"presets":                  settings.Choices("sub_routing_preset"),
+		"name_template":            s.subNameTemplate(),
+		"name_tokens":              []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
+		"pattern":                  patternSettingString(s.subPatternDefault()),
+		"pattern_modes":            settings.Choices("sub_pattern_default"),
 		// Fancy-config wizard: the fronting domain + model + the styled theme
 		// catalogue the UI offers.
 		"front_domain": s.subFrontDomain(),
@@ -117,6 +142,8 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	var req struct {
 		RoutingPreset *string `json:"routing_preset"`
 		Fragment      *bool   `json:"fragment"`
+		FragmentLevel *string `json:"fragment_level"`
+		FragmentCores *string `json:"fragment_cores"`
 		NameTemplate  *string `json:"name_template"`
 		Pattern       *string `json:"pattern"`
 		FrontDomain   *string `json:"front_domain"`
@@ -154,6 +181,12 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	}
 	if req.Fragment != nil {
 		pending["sub_fragment_default"] = strconv.FormatBool(*req.Fragment)
+	}
+	if req.FragmentLevel != nil {
+		pending["sub_fragment_level"] = *req.FragmentLevel
+	}
+	if req.FragmentCores != nil {
+		pending["sub_fragment_cores"] = *req.FragmentCores
 	}
 	if req.NameTemplate != nil {
 		pending["sub_name_template"] = *req.NameTemplate
@@ -206,6 +239,7 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
 	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault(),
+		"fragment_level": s.subFragmentLevel(), "fragment_cores": strings.Join(s.subFragmentCores(), ", "),
 		"name_template": s.subNameTemplate(), "front_domain": s.subFrontDomain(), "front_mode": string(s.subFrontMode()),
 		"expand_sni": s.subExpandSNI(), "front_clean_ip": s.subFrontCleanIP(),
 		"clean_ips": strings.Join(s.subCleanIPs(), ", ")})
@@ -330,10 +364,10 @@ func (s *Server) handleSub(c *gin.Context) {
 	// operator default, overridable per request with ?routing= (and fine-grained
 	// block_ads / bypass_iran / … flags).
 	route := routing.FromQuery(c.Request.URL.Query(), s.subRoutingPreset())
-	frag := routing.FragmentFromQuery(c.Request.URL.Query())
-	if _, explicit := c.Request.URL.Query()["fragment"]; !explicit {
-		frag.Enabled = s.subFragmentDefault()
-	}
+	// TLS-hello fragmentation: the operator's severity + core selection, which a
+	// request can override with ?fragment= / ?fragment_level= / the three tuning
+	// parameters.
+	frag := routing.FragmentFromQuery(c.Request.URL.Query(), s.fragmentDefaults())
 	// The unsafe-uTLS "pattern" variant for the link/v2ray formats.
 	pmode := parsePatternMode(c.Query("patt"), s.subPatternDefault())
 
@@ -350,7 +384,7 @@ func (s *Server) handleSub(c *gin.Context) {
 	case "json":
 		c.JSON(200, nodes)
 	case "sing-box":
-		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes, route))
+		c.Data(200, "application/json; charset=utf-8", singboxSubscription(nodes, route, frag))
 	case "xray":
 		c.Data(200, "application/json; charset=utf-8", xraySubscription(nodes, route, frag))
 	case "surge":
@@ -441,7 +475,7 @@ func xraySubscription(nodes []*model.Node, route routing.Options, frag routing.F
 	}
 	// TLS fragmentation (DPI evasion): route every proxy outbound's TCP dial
 	// through a freedom "fragment" outbound that splits the TLS hello.
-	if frag.Enabled && len(proxyOuts) > 0 {
+	if frag.Enabled && frag.CoreEnabled("xray") && len(proxyOuts) > 0 {
 		for _, o := range proxyOuts {
 			ss, _ := o["streamSettings"].(map[string]any)
 			if ss == nil {
@@ -511,7 +545,7 @@ const (
 	sbDirectTag   = "direct"
 )
 
-func singboxSubscription(nodes []*model.Node, route routing.Options) []byte {
+func singboxSubscription(nodes []*model.Node, route routing.Options, frag routing.Fragment) []byte {
 	outs := make([]any, 0, len(nodes)+2)
 	// Pre-reserve the tags this function emits itself, so no node can claim them.
 	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1}
@@ -545,6 +579,13 @@ func singboxSubscription(nodes []*model.Node, route routing.Options) []byte {
 		for _, o := range rendered {
 			outs = append(outs, o)
 		}
+	}
+	// sing-box fragments natively — a flag on each outbound's tls object, no
+	// detour outbound of its own — so this runs over the NODE outbounds only,
+	// before the selector and direct are appended. Neither of those carries tls,
+	// so it would be a no-op on them; scoping it here says so.
+	if frag.Enabled && frag.CoreEnabled("sing-box") {
+		frag.ApplySingbox(outs)
 	}
 	final := sbDirectTag
 	if len(tags) > 0 {

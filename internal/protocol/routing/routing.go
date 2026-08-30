@@ -10,7 +10,9 @@
 package routing
 
 import (
+	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -79,32 +81,164 @@ func truthy(v string) bool {
 	}
 }
 
-// --- Xray TLS fragment ----------------------------------------------------
+// --- TLS ClientHello fragment ---------------------------------------------
 
-// Fragment configures Xray's TLS-hello fragmentation — the DPI-evasion trick
-// (BPB "Fragment") that splits the ClientHello into small pieces so a censor's
-// SNI filter never sees a whole handshake. Xray-only; sing-box has no equivalent.
+// Fragment configures TLS-hello fragmentation — the DPI-evasion trick (BPB
+// "Fragment") that splits the ClientHello into small pieces so a censor's SNI
+// filter never sees a whole handshake.
+//
+// Two cores can express it and they express it differently: Xray dials every
+// proxy through a freedom outbound that does the splitting (Outbound below),
+// sing-box has a native tls.record_fragment flag (ApplySingbox). Clash-Meta has
+// no fragment primitive at all, which is why FragmentCores lists two names and
+// not three — an operator who asks for it on Clash is told, not ignored.
+//
+// Cores is a comma-joined string rather than a []string on purpose: Fragment is
+// compared with == (in tests and in "is this the zero value?" checks), and a
+// slice field would make the struct non-comparable.
 type Fragment struct {
 	Enabled  bool
+	Level    string // severity preset name: light | medium | aggressive ("" = medium)
+	Cores    string // cores that honour it; empty means every core that can
 	Packets  string // which packets to split; "tlshello" splits only the TLS hello
 	Length   string // per-piece byte range, e.g. "100-200"
 	Interval string // ms between pieces, e.g. "10-20"
 }
 
-// FragmentFromQuery reads fragment settings from subscription query parameters:
-// ?fragment=1 turns it on with sane defaults; fragment_packets / fragment_length
-// / fragment_interval override them.
-func FragmentFromQuery(q url.Values) Fragment {
-	f := Fragment{Packets: "tlshello", Length: "100-200", Interval: "10-20"}
-	f.Enabled = truthy(q.Get("fragment"))
-	if v := q.Get("fragment_packets"); v != "" {
-		f.Packets = v
+// FragmentCores are the cores whose config format can carry fragmentation.
+// Clash-Meta is deliberately absent: mihomo has no equivalent, so listing it
+// would promise something no generated Clash config could deliver.
+func FragmentCores() []string { return []string{"xray", "sing-box"} }
+
+// fragmentPackets are the only packet selectors Xray's freedom fragment accepts.
+var fragmentPackets = []string{"tlshello", "1-1", "1-2", "1-3", "1-5"}
+
+// FragmentPreset resolves a severity level, mirroring Preset: unknown names
+// (including "" and "default") fall back to the middle setting, and
+// "off"/"none" is the zero Fragment.
+//
+// medium is byte-identical to the values this package hardcoded before levels
+// existed, so an operator who never touches the new knob keeps exactly the
+// subscription they already had.
+func FragmentPreset(name string) Fragment {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "off", "none", "disabled", "0", "false":
+		return Fragment{}
+	case "light":
+		// Big slices, short gaps: cheapest to the handshake, enough to break a
+		// censor that only pattern-matches a contiguous SNI.
+		return Fragment{Level: "light", Packets: "tlshello", Length: "40-100", Interval: "5-10"}
+	case "aggressive":
+		// Splits the first packets outright, into small pieces, with long gaps.
+		// Costs handshake latency and trips some middleboxes; it is the setting
+		// that still works when the lighter ones have stopped.
+		return Fragment{Level: "aggressive", Packets: "1-3", Length: "10-40", Interval: "20-40"}
+	default: // "medium", "default", ""
+		return Fragment{Level: "medium", Packets: "tlshello", Length: "100-200", Interval: "10-20"}
 	}
-	if v := q.Get("fragment_length"); v != "" {
-		f.Length = v
+}
+
+// Validate reports whether these values are ones a core will actually start
+// with. Nothing checked them before: ?fragment_length=abc went straight into the
+// emitted JSON and the subscriber got a config that would not run, with no clue
+// where it came from.
+func (f Fragment) Validate() error {
+	if !containsFold(fragmentPackets, f.Packets) {
+		return fmt.Errorf("fragment packets %q is not one of: %s", f.Packets, strings.Join(fragmentPackets, ", "))
 	}
-	if v := q.Get("fragment_interval"); v != "" {
-		f.Interval = v
+	if err := validFragmentRange("length", f.Length); err != nil {
+		return err
+	}
+	return validFragmentRange("interval", f.Interval)
+}
+
+// validFragmentRange accepts "N" or "N-M" (M >= N), the form both cores expect.
+func validFragmentRange(field, v string) error {
+	v = strings.TrimSpace(v)
+	lo, hi, found := strings.Cut(v, "-")
+	n, err := strconv.Atoi(lo)
+	if err != nil || n < 0 {
+		return fmt.Errorf("fragment %s %q is not a number or a number range", field, v)
+	}
+	if !found {
+		return nil
+	}
+	m, err := strconv.Atoi(hi)
+	if err != nil || m < n {
+		return fmt.Errorf("fragment %s %q is not a number or a number range", field, v)
+	}
+	return nil
+}
+
+// CoreEnabled reports whether this core should fragment.
+//
+// An EMPTY Cores means every capable core, not none: a bare
+// Fragment{Enabled: true, …} literal — which is what a per-request ?fragment=1
+// and every caller predating the per-core matrix produces — must keep working.
+func (f Fragment) CoreEnabled(core string) bool {
+	if strings.TrimSpace(f.Cores) == "" {
+		return true
+	}
+	want := canonicalCore(core)
+	for _, c := range strings.Split(f.Cores, ",") {
+		if canonicalCore(c) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalCore folds the spellings an operator plausibly types ("sing-box",
+// "singbox", "Sing-Box") onto one name.
+func canonicalCore(s string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", "")
+}
+
+func containsFold(list []string, v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// FragmentFromQuery reads fragment settings from subscription query parameters,
+// starting from the operator's default: ?fragment=1/0 turns it on or off,
+// ?fragment_level= picks a severity preset, and fragment_packets /
+// fragment_length / fragment_interval tune it further.
+//
+// An individual override that would not validate is DROPPED rather than emitted.
+// A subscriber who mistypes a length gets the operator's working config, not a
+// config the core refuses to start.
+func FragmentFromQuery(q url.Values, def Fragment) Fragment {
+	f := def
+	if v := q.Get("fragment_level"); v != "" {
+		if lvl := FragmentPreset(v); lvl.Level == "" {
+			// "off" is one of the names FragmentPreset answers, and it answers
+			// with the zero Fragment. Carrying Enabled onto that would leave
+			// fragmentation on with three empty strings in it, which is an
+			// outbound the core refuses — so it flips the switch instead.
+			f.Enabled = false
+		} else {
+			// A per-request severity picks how hard to fragment, never which
+			// cores do it — that stays the operator's decision.
+			lvl.Enabled, lvl.Cores = f.Enabled, f.Cores
+			f = lvl
+		}
+	}
+	if v := q.Get("fragment"); v != "" {
+		f.Enabled = truthy(v)
+	}
+	if v := q.Get("fragment_packets"); v != "" && containsFold(fragmentPackets, v) {
+		f.Packets = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := q.Get("fragment_length"); v != "" && validFragmentRange("length", v) == nil {
+		f.Length = strings.TrimSpace(v)
+	}
+	if v := q.Get("fragment_interval"); v != "" && validFragmentRange("interval", v) == nil {
+		f.Interval = strings.TrimSpace(v)
 	}
 	return f
 }
@@ -121,6 +255,31 @@ func (f Fragment) Outbound(tag string) map[string]any {
 			},
 		},
 		"streamSettings": map[string]any{"sockopt": map[string]any{"tcpNoDelay": true}},
+	}
+}
+
+// ApplySingbox marks every TLS-carrying outbound in a sing-box document for
+// record fragmentation. sing-box does this natively — there is no detour
+// outbound to build, only a flag on the tls object — so an outbound without one
+// (selector, direct, plain Shadowsocks) is skipped rather than wrapped.
+//
+// record_fragment is a BOOL: sing-box takes no packet/length/interval, so the
+// severity level reaches Xray only. It still decides whether sing-box fragments
+// at all, because "off" is one of the levels.
+//
+// outs is []any because that is the type of the outbound slice the subscription
+// builder assembles.
+func (f Fragment) ApplySingbox(outs []any) {
+	for _, o := range outs {
+		m, ok := o.(map[string]any)
+		if !ok {
+			continue
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok || tls == nil {
+			continue
+		}
+		tls["record_fragment"] = true
 	}
 }
 

@@ -91,7 +91,7 @@ func TestSingboxSubscription(t *testing.T) {
 		{Protocol: model.ProtoVLESS, Address: "1.2.3.4", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
 			Transport: model.Transport{Network: model.NetWS, Path: "/w"}, Security: model.Security{Type: model.SecTLS, ServerName: "x.com"}, Remark: "a"},
 	}
-	raw := singboxSubscription(nodes, routing.Options{})
+	raw := singboxSubscription(nodes, routing.Options{}, routing.Fragment{})
 	var doc map[string]any
 	if err := jsonUnmarshal(raw, &doc); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, raw)
