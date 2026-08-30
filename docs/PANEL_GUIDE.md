@@ -155,7 +155,13 @@ security combination on one port.
   Loon, Quantumult X, plain links, or JSON.
 - **Subscription defaults** (Users view) apply to every generated config:
   - **Routing preset** (bypass-Iran + block ads/malware, or stricter, or off).
-  - **TLS Fragment** (Xray DPI-evasion).
+  - **TLS Fragment** (DPI-evasion), with a severity — *light*, *medium* (the
+    shipped default) or *aggressive* — and the cores that honour it. Xray dials
+    through a freedom `fragment` outbound and takes the severity's packet/length/
+    interval values; sing-box sets native `tls.record_fragment`, which is a bool,
+    so for it the severity only decides on/off. Clash-Meta has no fragment
+    primitive at all and cannot be listed — a Clash subscriber is never
+    fragmented.
   - **Pattern (unsafe-uTLS)** — the `cs`/`fm`/`fp=unsafe` anti-DPI meta.
   - **Naming template** and the **Fancy config wizard** (emoji/Persian themes +
     SNI/CDN fronting) for styled, camouflaged config names.

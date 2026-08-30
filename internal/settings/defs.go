@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/forgepanel/forgepanel/internal/protocol/routing"
 )
 
 var defaults = buildRegistry()
@@ -53,7 +55,20 @@ func buildRegistry() *Registry {
 	})
 	r.Register(Def{
 		Key: "sub_fragment_default", Kind: KindBool, Scope: ScopeSubscription, Default: "0",
-		Help: "Fragment the TLS hello in generated Xray configs by default. A per-request ?fragment= overrides it.",
+		Help: "Fragment the TLS hello in generated configs by default, on the cores listed below. A per-request ?fragment= overrides it.",
+	})
+	r.Register(Def{
+		Key: "sub_fragment_level", Kind: KindEnum, Scope: ScopeSubscription,
+		Default: "medium", Choices: []string{"light", "medium", "aggressive"},
+		Help: "How hard generated configs fragment the TLS hello. medium is the shipped behaviour; " +
+			"a per-request ?fragment_level= overrides it.",
+	})
+	r.Register(Def{
+		Key: "sub_fragment_cores", Kind: KindStringList, Scope: ScopeSubscription,
+		Default: "xray, sing-box",
+		Help: "Which cores honour the TLS-fragment toggle. Clash-Meta has no fragment primitive " +
+			"and cannot be listed.",
+		Validate: everyEntryIsAFragmentCore,
 	})
 	r.Register(Def{
 		Key: "sub_name_template", Kind: KindString, Scope: ScopeSubscription, Default: "",
@@ -135,6 +150,20 @@ func everyEntryIsAnAddress(v string) error {
 			continue
 		}
 		return fmt.Errorf("%q is neither an IP address nor a hostname", f)
+	}
+	return nil
+}
+
+// everyEntryIsAFragmentCore rejects a core the fragment toggle cannot reach.
+// "clash" is the one an operator actually tries: mihomo has no fragment
+// primitive, so accepting it would store a preference that silently does
+// nothing and leave them believing their Clash subscribers are protected.
+func everyEntryIsAFragmentCore(v string) error {
+	legal := routing.FragmentCores()
+	for _, f := range SplitList(v) {
+		if !contains(legal, strings.ToLower(f)) {
+			return fmt.Errorf("%q cannot fragment the TLS hello; only %s can", f, strings.Join(legal, ", "))
+		}
 	}
 	return nil
 }

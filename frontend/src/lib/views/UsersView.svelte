@@ -67,10 +67,10 @@
   let gIsDefault = $state(false);
   let gInbounds = $state<Set<number>>(new Set());
 
-  // subscription defaults (routing preset + TLS fragment) applied to every
-  // generated sing-box/Xray/Clash config.
+  // subscription defaults applied to every generated config. Routing reaches all
+  // three cores; TLS fragmentation only the two that can express it.
   interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
-  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; expand_sni?: boolean; front_clean_ip?: boolean; clean_ips?: string; }
+  interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; expand_sni?: boolean; front_clean_ip?: boolean; clean_ips?: string; fragment_level?: string; fragment_levels?: string[]; fragment_cores?: string; fragment_cores_supported?: string[]; }
   let subSettings = $state<SubSettings | null>(null);
   // The panel refuses a settings save per KEY now, with a reason for each one.
   // Kept here rather than shown only as a toast: this card writes nine settings
@@ -105,6 +105,25 @@
   // offers buttons the handler refuses — the UI promising something the API
   // will not do.
   let canManageGroups = $derived(role === 'owner' || role === 'admin');
+  // The fragment core list is one comma-joined string on the wire — that is how
+  // the settings registry stores a list — and a checkbox per core here. Only the
+  // cores the server says can fragment are offered: Clash-Meta has no fragment
+  // primitive, so a checkbox for it would promise something no generated Clash
+  // config could deliver.
+  const fragmentCoresSupported = $derived(subSettings?.fragment_cores_supported ?? ['xray', 'sing-box']);
+  const fragmentCores = $derived(
+    (subSettings?.fragment_cores ?? '').split(',').map((c) => c.trim().toLowerCase()).filter(Boolean)
+  );
+  function toggleFragmentCore(core: string) {
+    if (!subSettings) return;
+    const on = new Set(fragmentCores);
+    if (on.has(core)) on.delete(core);
+    else on.add(core);
+    // Rebuilt from the supported list so the stored order is stable whichever
+    // box was clicked first.
+    subSettings.fragment_cores = fragmentCoresSupported.filter((c) => on.has(c)).join(', ');
+  }
+
   const routingLabels: Record<string, string> = {
     iran: 'Iran (bypass Iran + block ads/malware)',
     full: 'Full (bypass Iran + block ads/malware/porn/QUIC)',
@@ -125,6 +144,8 @@
           pattern: subSettings.pattern ?? 'off',
           front_domain: subSettings.front_domain ?? '',
           front_mode: subSettings.front_mode ?? 'none',
+          fragment_level: subSettings.fragment_level ?? 'medium',
+          fragment_cores: subSettings.fragment_cores ?? 'xray, sing-box',
           // Three settings the renderer reads on every request. Two could only
           // be written as a side effect of applying a Preset Wizard theme, and
           // the clean-IP list could not be seen at all.
@@ -533,6 +554,12 @@
         <span>{tr('users.tls_fragment_xray_dpi_evasion')}</span>
       </label>
       <label class="field">
+        <span>{tr('users.fragment_level')}</span>
+        <select bind:value={subSettings.fragment_level} data-testid="fragment-level" disabled={!subSettings.fragment}>
+          {#each (subSettings.fragment_levels ?? ['light','medium','aggressive']) as m}<option value={m}>{m === 'light' ? tr('users.fragment_level_light') : m === 'medium' ? tr('users.fragment_level_medium') : tr('users.fragment_level_aggressive')}</option>{/each}
+        </select>
+      </label>
+      <label class="field">
         <span>{tr('users.pattern_unsafe_utls')}</span>
         <select bind:value={subSettings.pattern} data-testid="pattern-mode" title={tr('users.adds_cs_fm_fp_unsafe_to')}>
           {#each (subSettings.pattern_modes ?? ['off','only','both']) as m}<option value={m}>{m === 'off' ? tr('users.off_normal') : m === 'only' ? tr('users.pattern_only') : tr('users.both_normal_pattern')}</option>{/each}
@@ -540,6 +567,17 @@
       </label>
       <button class="primary" data-testid="save-sub-settings" onclick={saveSubSettings}>{tr('users.save')}</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <span class="hint" style="margin:0;align-self:center">{tr('users.fragment_cores')}</span>
+      {#each fragmentCoresSupported as c}
+        <label class="field checkbox" style="flex:none">
+          <input type="checkbox" data-testid="fragment-core-{c}" disabled={!subSettings.fragment}
+            checked={fragmentCores.includes(c)} onchange={() => toggleFragmentCore(c)} />
+          <span>{c}</span>
+        </label>
+      {/each}
+    </div>
+    <p class="hint">{tr('users.fragment_clash_unsupported')}</p>
     <div class="row" style="margin-top:10px">
       <label class="field checkbox">
         <input type="checkbox" bind:checked={subSettings.expand_sni} data-testid="expand-sni" />

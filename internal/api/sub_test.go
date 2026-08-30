@@ -323,7 +323,7 @@ func TestSingboxSubscriptionHasUniqueTags(t *testing.T) {
 	var doc struct {
 		Outbounds []map[string]any `json:"outbounds"`
 	}
-	if err := json.Unmarshal(singboxSubscription(nodes, routing.Options{}), &doc); err != nil {
+	if err := json.Unmarshal(singboxSubscription(nodes, routing.Options{}, routing.Fragment{}), &doc); err != nil {
 		t.Fatalf("subscription is not valid JSON: %v", err)
 	}
 	seen := map[string]bool{}
@@ -368,7 +368,7 @@ func TestSingboxSubscriptionAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "sub.json")
-	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Options{}), 0o600); err != nil {
+	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Options{}, routing.Fragment{}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput()
@@ -391,7 +391,7 @@ func TestSingboxSubscriptionWithRoutingAcceptedByCore(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "sub-routed.json")
-	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Preset("full")), 0o600); err != nil {
+	if err := os.WriteFile(cfg, singboxSubscription(nodes, routing.Preset("full"), routing.Fragment{}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput()
@@ -473,14 +473,14 @@ func TestXraySubscriptionWithFragmentAcceptedByCore(t *testing.T) {
 
 // TestFragmentFromQuery covers the query parsing + defaults.
 func TestFragmentFromQuery(t *testing.T) {
-	off := routing.FragmentFromQuery(nil)
+	off := routing.FragmentFromQuery(nil, routing.Fragment{})
 	if off.Enabled {
 		t.Fatal("fragment should be off by default")
 	}
 	q := make(map[string][]string)
 	q["fragment"] = []string{"1"}
 	q["fragment_length"] = []string{"40-80"}
-	on := routing.FragmentFromQuery(q)
+	on := routing.FragmentFromQuery(q, routing.FragmentPreset("medium"))
 	if !on.Enabled || on.Length != "40-80" || on.Packets != "tlshello" {
 		t.Fatalf("fragment query parse wrong: %+v", on)
 	}
@@ -780,5 +780,222 @@ func TestAnAbsentOutputSettingIsLeftAlone(t *testing.T) {
 	}
 	if ips := s.subCleanIPs(); len(ips) != 1 || ips[0] != "104.16.0.1" {
 		t.Errorf("clean IPs = %v; a save that never mentioned them cleared them", ips)
+	}
+}
+
+// fragServer builds a DB-backed server whose one node carries REALITY, and
+// returns it with the user's subscription token.
+//
+// It deliberately does NOT reuse subServer: that helper's node has a zero
+// model.Security, so render.SingboxOutbounds emits no tls object at all and a
+// fragmentation assertion would have nothing to bite on. REALITY is what this
+// panel mostly emits, and `sing-box check` accepts record_fragment alongside a
+// reality block.
+func fragServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	s := dbServerT(t)
+	n := &model.Node{
+		Protocol: model.ProtoVLESS, Address: "203.0.113.5", Port: 443,
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Remark: "frag-test",
+		Security: model.Security{Type: model.SecReality, ServerName: "www.datadoghq.com",
+			Reality: &model.Reality{PublicKey: "cGduOK89ZpWRLbUJzusILckHmnkZvxsrNNVReOIV7lA", ShortID: "aabb"}},
+	}
+	in, err := s.db.CreateInbound(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &store.Group{Name: "g1", InboundIDs: []uint{in.ID}}
+	if err := s.db.CreateGroup(g); err != nil {
+		t.Fatal(err)
+	}
+	u := &store.User{Username: "alice", GroupID: g.ID, SubToken: "subtok123456",
+		UUID: n.UUID, Status: store.StatusActive}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.GET("/sub/:token", s.handleSub)
+	r.GET("/sub/:token/*format", s.handleSub)
+	s.router = r
+	return s, u.SubToken
+}
+
+// singboxFragmentCounts fetches a sing-box subscription and reports how many of
+// its outbounds carry a tls object and how many of those are fragmented.
+func singboxFragmentCounts(t *testing.T, s *Server, token string) (tlsOuts, fragged int) {
+	t.Helper()
+	rec := subGet(t, s, "/sub/"+token+"/sing-box", "")
+	if rec.Code != 200 {
+		t.Fatalf("sub returned %d: %s", rec.Code, rec.Body.String())
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("subscription is not valid JSON: %v", err)
+	}
+	for _, o := range doc.Outbounds {
+		tls, ok := o["tls"].(map[string]any)
+		if !ok || tls == nil {
+			continue
+		}
+		tlsOuts++
+		if tls["record_fragment"] == true {
+			fragged++
+		}
+	}
+	if tlsOuts == 0 {
+		t.Fatal("no outbound carries a tls object; the fixture is wrong, not the renderer")
+	}
+	return tlsOuts, fragged
+}
+
+// TestSingboxSubscriptionFragmentsWhenPanelToggleIsOn is the regression for the
+// panel's TLS-fragment toggle lying to sing-box subscribers.
+//
+// The panel presents "TLS Fragment" as a subscription default and the hint under
+// it claimed it applied to every generated sing-box / Xray / Clash config. Only
+// the Xray renderer ever read it: a sing-box subscriber ticked the box, saved,
+// and got a config with no fragmentation whatsoever — no error, no warning, just
+// a DPI-evasion feature that was off while the panel said it was on.
+func TestSingboxSubscriptionFragmentsWhenPanelToggleIsOn(t *testing.T) {
+	s, token := fragServer(t)
+	if err := s.knobs().SetAll(map[string]string{"sub_fragment_default": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	tlsOuts, fragged := singboxFragmentCounts(t, s, token)
+	if fragged != tlsOuts {
+		t.Fatalf("%d of %d TLS outbounds fragmented: the panel's TLS-fragment toggle is on and "+
+			"sing-box subscribers still get an unfragmented config", fragged, tlsOuts)
+	}
+
+	// And the fragmented document must still be one the real core will run.
+	bin := findSingbox()
+	if bin == "" {
+		return
+	}
+	rec := subGet(t, s, "/sub/"+token+"/sing-box", "")
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "sub-frag.json")
+	if err := os.WriteFile(cfg, rec.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(bin, "check", "-c", cfg).CombinedOutput(); err != nil {
+		t.Fatalf("sing-box rejected the fragmented subscription: %v\n%s", err, out)
+	}
+}
+
+// TestFragmentCoreSelectionExcludesTheCoresNotChosen proves the per-core list is
+// enforced by BOTH renderers rather than being a preference the panel stores and
+// nothing reads. A core the operator has excluded must come out unfragmented
+// while the other still fragments — otherwise the checkboxes are decoration.
+func TestFragmentCoreSelectionExcludesTheCoresNotChosen(t *testing.T) {
+	s, token := fragServer(t)
+
+	xrayHasFragment := func() bool {
+		rec := subGet(t, s, "/sub/"+token+"/xray", "")
+		if rec.Code != 200 {
+			t.Fatalf("xray sub returned %d: %s", rec.Code, rec.Body.String())
+		}
+		var doc struct {
+			Outbounds []map[string]any `json:"outbounds"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("xray subscription is not valid JSON: %v", err)
+		}
+		for _, o := range doc.Outbounds {
+			if o["tag"] == "fragment" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if err := s.knobs().SetAll(map[string]string{
+		"sub_fragment_default": "true", "sub_fragment_cores": "xray"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, fragged := singboxFragmentCounts(t, s, token); fragged != 0 {
+		t.Fatalf("sing-box is not in the core list and %d outbounds were fragmented anyway", fragged)
+	}
+	if !xrayHasFragment() {
+		t.Fatal("xray is in the core list and got no fragment outbound")
+	}
+
+	if err := s.knobs().SetAll(map[string]string{"sub_fragment_cores": "sing-box"}); err != nil {
+		t.Fatal(err)
+	}
+	tlsOuts, fragged := singboxFragmentCounts(t, s, token)
+	if fragged != tlsOuts {
+		t.Fatalf("sing-box is the only core listed and only %d of %d TLS outbounds fragmented", fragged, tlsOuts)
+	}
+	if xrayHasFragment() {
+		t.Fatal("xray is not in the core list and got a fragment outbound anyway")
+	}
+}
+
+// TestFragmentSeverityAndCoresRoundTripThroughTheSettingsEndpoint: the severity
+// and the core list are operator settings, so they have to be readable and
+// writable through the same endpoint the card uses — and a core that cannot
+// fragment has to be refused by name rather than stored and ignored.
+func TestFragmentSeverityAndCoresRoundTripThroughTheSettingsEndpoint(t *testing.T) {
+	s, token := adminAPI(t)
+
+	code, body := doGET(t, s, "/api/admin/settings/subscription", token)
+	if code != 200 {
+		t.Fatalf("GET returned %d: %s", code, body)
+	}
+	var got struct {
+		FragmentLevel  *string  `json:"fragment_level"`
+		FragmentLevels []string `json:"fragment_levels"`
+		FragmentCores  *string  `json:"fragment_cores"`
+		Supported      []string `json:"fragment_cores_supported"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.FragmentLevel == nil || got.FragmentCores == nil {
+		t.Fatalf("the settings endpoint does not report the fragment severity or core list: %s", body)
+	}
+	if *got.FragmentLevel != "medium" {
+		t.Errorf("fragment_level defaults to %q; medium is the shipped behaviour", *got.FragmentLevel)
+	}
+	if len(got.FragmentLevels) != 3 {
+		t.Errorf("fragment_levels = %v, want the three the validator accepts", got.FragmentLevels)
+	}
+	// Clash must not be offered: mihomo cannot fragment.
+	if len(got.Supported) != 2 || got.Supported[0] != "xray" || got.Supported[1] != "sing-box" {
+		t.Errorf("fragment_cores_supported = %v, want exactly the cores that can fragment", got.Supported)
+	}
+
+	// Asserting on the renderer's own accessors, not the response: a write to a
+	// key nothing reads would pass the response check.
+	code, body = realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"fragment_level": "aggressive", "fragment_cores": "sing-box"})
+	if code != 200 {
+		t.Fatalf("POST returned %d: %s", code, body)
+	}
+	if s.subFragmentLevel() != "aggressive" {
+		t.Errorf("subFragmentLevel = %q after saving aggressive", s.subFragmentLevel())
+	}
+	if cores := s.subFragmentCores(); len(cores) != 1 || cores[0] != "sing-box" {
+		t.Errorf("subFragmentCores = %v after saving sing-box", cores)
+	}
+	if def := s.fragmentDefaults(); def.Length != routing.FragmentPreset("aggressive").Length {
+		t.Errorf("fragmentDefaults did not pick up the severity: %+v", def)
+	}
+
+	// A core that cannot fragment is refused by name, so the card can mark the
+	// field instead of showing a sentence about a card with a dozen of them.
+	code, body = realPost(t, s, "/api/admin/settings/subscription", token,
+		map[string]any{"fragment_cores": "xray, clash"})
+	if code != 400 {
+		t.Fatalf("POST of an unfragmentable core returned %d: %s", code, body)
+	}
+	if !strings.Contains(body, "sub_fragment_cores") {
+		t.Errorf("the refusal does not name the offending key: %s", body)
+	}
+	if cores := s.subFragmentCores(); len(cores) != 1 || cores[0] != "sing-box" {
+		t.Errorf("a refused save changed the stored core list to %v", cores)
 	}
 }
