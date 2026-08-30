@@ -36,7 +36,7 @@ type UserTrafficDelta struct {
 
 // Scheduler runs the recurring panel jobs.
 type Scheduler struct {
-	db         *store.Store
+	db         store.SchedulerStore
 	pollEvery  time.Duration
 	sweepEvery time.Duration
 	// auditRetention is how long audit entries are kept. Zero disables pruning,
@@ -86,7 +86,7 @@ type Scheduler struct {
 
 // Config configures a Scheduler.
 type Config struct {
-	DB         *store.Store
+	DB         store.SchedulerStore
 	PollEvery  time.Duration
 	SweepEvery time.Duration
 	ReloadHook func()
@@ -162,6 +162,23 @@ func New(cfg Config) *Scheduler {
 		notify:                cfg.Notify,
 		now:                   time.Now,
 	}
+}
+
+// hasDB reports whether the scheduler has usable persistence.
+//
+// db is an interface, so a nil *store.Store handed to Config.DB lands here as a
+// NON-nil interface value: `s.db == nil` is false and every job below would run
+// against a nil receiver and panic inside GORM, from a stack with nothing in it
+// pointing back at the caller that passed the nil. This reports false for both
+// shapes — a genuinely unset field, and a typed nil concrete store.
+func (s *Scheduler) hasDB() bool {
+	if s == nil || s.db == nil {
+		return false
+	}
+	if st, ok := s.db.(*store.Store); ok {
+		return st != nil
+	}
+	return true
 }
 
 // Start launches the scheduler goroutines until Stop is called.
@@ -280,7 +297,7 @@ func (s *Scheduler) runScheduledBackup() error {
 	// Best-effort: a backup must never be skipped because its schema version
 	// could not be read.
 	m := backup.Manifest{PanelVersion: version.Version}
-	if s.db != nil {
+	if s.hasDB() {
 		if v, err := s.db.SchemaVersion(); err == nil {
 			m.SchemaVersion = v
 		}
@@ -310,7 +327,7 @@ func (s *Scheduler) runScheduledBackup() error {
 // as a cutoff of now — read the other way it would erase the history it exists
 // to preserve.
 func (s *Scheduler) pruneRollups() error {
-	if s.db == nil {
+	if !s.hasDB() {
 		return nil
 	}
 	now := s.now()
@@ -340,7 +357,7 @@ func (s *Scheduler) pruneRollups() error {
 // deletion, so a zero or negative window is treated as "keep everything" rather
 // than as a cutoff of now — the reading that would erase the entire trail.
 func (s *Scheduler) pruneAudit() error {
-	if s.db == nil || s.auditRetention <= 0 {
+	if !s.hasDB() || s.auditRetention <= 0 {
 		return nil
 	}
 	cutoff := s.now().Add(-s.auditRetention)
@@ -618,7 +635,7 @@ func recoveredMessage(name string, r any) string {
 // snapshot advances in the SAME transaction as the usage it accounts for, so a
 // crash between the two cannot double-count either.
 func (s *Scheduler) pollAndAccount() error {
-	if s.db == nil || s.pollTraffic == nil {
+	if !s.hasDB() || s.pollTraffic == nil {
 		// Nothing wired up is not a fault: the light constructor has no engine.
 		return nil
 	}
@@ -747,7 +764,7 @@ func (s *Scheduler) sweep() error { return s.sweepAt(s.now()) }
 //     per period via a compare-and-set, catching up after downtime, never
 //     double-resetting, and safe across concurrent panel instances.
 func (s *Scheduler) sweepAt(now time.Time) error {
-	if s.db == nil {
+	if !s.hasDB() {
 		return nil
 	}
 	users, err := s.db.ListUsers(0)

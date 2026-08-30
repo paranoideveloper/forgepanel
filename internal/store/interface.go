@@ -96,3 +96,44 @@ type Interface interface {
 
 // Ensure *Store implements Interface at compile time.
 var _ Interface = (*Store)(nil)
+
+// SchedulerStore is the persistence internal/job needs — exactly the eleven
+// methods the scheduler calls, and nothing else.
+//
+// It is deliberately flat rather than composed from UserRepository: the
+// scheduler uses five of that interface's ten user methods, and an interface
+// that demands five methods its only consumer never calls is one no alternative
+// backend can honestly implement — the fake ends up embedding a nil interface
+// and panicking on the first unstubbed call. wgpeer.Repo
+// (internal/wgpeer/manager.go) is the model followed here: the methods the
+// caller calls, named by the caller's need.
+//
+// The point of this type is internal/job/scheduler.go, whose Scheduler.db and
+// Config.DB are typed as it. Interface above has had a compile assert since the
+// day it was written and not one consumer, which is what an interface no
+// consumer's field names is worth. If this type ever loses its consumer, delete
+// it rather than leave it as decoration.
+type SchedulerStore interface {
+	// Lifecycle sweep: on-hold activation, expiry, periodic usage reset,
+	// IP-limit enforcement.
+	ListUsers(ownerID uint) ([]User, error)
+	UserByID(id uint) (*User, error)
+	SaveUser(u *User) error
+	UpdateUserFields(userID uint, fields map[string]any, ifUnchanged time.Time) error
+	ResetUserUsageCAS(userID uint, periodStart, now time.Time) (bool, error)
+
+	// Traffic accounting against the stored cumulative snapshot.
+	TrafficSnapshots(scope string) (map[string]int64, error)
+	SetTrafficSnapshot(scope, key string, value int64) error
+	ApplyTrafficDeltaAt(scope, key string, userID uint, delta, cumulative int64, split TrafficSplit, at time.Time, stamp func(*User)) (used int64, limited bool, err error)
+
+	// Housekeeping: the backup manifest's schema stamp and the two retention
+	// pruners.
+	SchemaVersion() (uint64, error)
+	PruneRollups(hourlyBefore, dailyBefore time.Time) (int64, error)
+	PruneAuditLogs(before time.Time) (int64, error)
+}
+
+// Ensure *Store implements SchedulerStore at compile time. Unlike the assert
+// above, this one is backed by a consumer whose field names the type.
+var _ SchedulerStore = (*Store)(nil)
