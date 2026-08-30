@@ -14,7 +14,7 @@ import (
 // entry, and an /api miss must stay a JSON 404 rather than leaking the SPA HTML.
 func TestSPAAssetsAreServed(t *testing.T) {
 	s := dbServerT(t)
-	entry := s.assetOr("web/admin.html", "<!doctype html><html><body>spa</body></html>")
+	entry := s.assetOr("web/index.html", "<!doctype html><html><body>spa</body></html>")
 	s.router.NoRoute(s.serveSPA(entry))
 
 	get := func(p string) *httptest.ResponseRecorder {
@@ -40,7 +40,7 @@ func TestSPAAssetsAreServed(t *testing.T) {
 // nothing. Assets must be served by their _app/… suffix regardless of prefix.
 func TestSPAAssetsServedUnderSecretPathPrefix(t *testing.T) {
 	s := dbServerT(t)
-	entry := s.assetOr("web/admin.html", "<!doctype html><html><body>spa</body></html>")
+	entry := s.assetOr("web/index.html", "<!doctype html><html><body>spa</body></html>")
 	s.router.NoRoute(s.serveSPA(entry))
 
 	// Find a real hashed JS asset in the embedded bundle.

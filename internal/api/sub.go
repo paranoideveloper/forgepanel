@@ -721,15 +721,22 @@ func detectFormat(ua string) string {
 	}
 }
 
-// fallbackStudio is served if the embedded studio.html asset is missing. The
-// real, polished Config Studio lives in web/studio.html.
-const fallbackStudio = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+// panelAssetMissing is served when the frontend bundle is not embedded in this
+// build — a `go build` without `bun run build` first.
+//
+// It replaced a fallback that served the Config Studio's own shell in that
+// situation. That was a fallback to another PAGE, and when the studio page was
+// deleted it became a fallback to a fallback: the panel would have served this
+// stub everywhere while reporting nothing wrong. A missing bundle should say it
+// is missing, not quietly hand back a different page.
+const panelAssetMissing = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ForgePanel</title>
 <style>body{background:#0b0f17;color:#e5e7eb;font-family:system-ui;margin:0;padding:2rem}
 a{color:#7dd3fc}code{background:#111827;padding:.2em .4em;border-radius:4px}</style></head>
 <body><h1>⚡ ForgePanel</h1>
-<p>The Config Studio asset was not embedded in this build. The API is live:</p>
+<p>The panel's web assets were not embedded in this build — it was compiled without
+building the frontend first. The API is live:</p>
 <ul><li><code>GET /api/protocols</code></li><li><code>POST /api/studio/preview</code></li>
 <li><code>POST /api/keygen</code></li><li><code>GET /sub/:token</code></li></ul>
 </body></html>`

@@ -449,6 +449,15 @@ func (s *Server) PublicURL() string {
 	return url + p.AdminPath
 }
 
+// studioTabURL is where an old /studio bookmark should land: the panel, whose
+// Config Studio tab is the real one.
+func (s *Server) studioTabURL() string {
+	if p := s.cfg.AdminPath; p != "" && p != "/" {
+		return p + "/"
+	}
+	return "/"
+}
+
 // Handler exposes the underlying http.Handler (for tests and embedding).
 //
 // Behind a platform edge the same handler also fronts the inbounds: they share
@@ -846,14 +855,31 @@ func (s *Server) routes() {
 		r.GET("/api/node/agent/sha256", s.handleNodeAgentDigest)
 	}
 
-	// The full admin panel at root + the randomized admin path; the Config Studio
-	// remains available as a tool at /studio.
-	studio := s.studioHTML()
-	serveStudio := func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", studio) }
-	adminPage := s.assetOr("web/admin.html", string(studio)) // falls back to the studio until the panel asset is present
+	// The panel at root and at the randomized admin path. ONE shell, the panel's
+	// own — web/index.html.
+	//
+	// This read used to name web/admin.html, the shell of a second, reduced panel
+	// that lived at /admin, and that is the line the whole clean-up turns on.
+	// adapter-static emits one shell per prerendered route, so deleting that route
+	// stops admin.html being generated — and assetOr discards the read error and
+	// returns its fallback, which was the Config Studio's shell, itself about to
+	// disappear for the same reason. The panel would have come up serving the stub
+	// "The Config Studio asset was not embedded in this build" at /, at the secret
+	// path, and on every client-side route, with no build error, no failing test
+	// and no log line. A blackout that compiles.
+	//
+	// The fallback is now the panel's own no-asset message rather than another
+	// page, so a bundle built without the frontend says so instead of silently
+	// serving something else.
+	adminPage := s.assetOr("web/index.html", panelAssetMissing)
 	serveAdmin := func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", adminPage) }
 	r.GET("/", serveAdmin)
-	r.GET("/studio", serveStudio)
+	// /studio was a mock page — it built a config client-side and never called
+	// the preview endpoint. The real Config Studio is a tab inside the panel, so
+	// an old bookmark is sent there rather than to a page that no longer exists.
+	r.GET("/studio", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, s.studioTabURL())
+	})
 	if s.cfg.AdminPath != "" && s.cfg.AdminPath != "/" {
 		// Serve the panel at "<path>/" and redirect the bare "<path>" to it. The
 		// SvelteKit shell derives its base from `new URL(".", location)`; opened at
@@ -939,13 +965,6 @@ func contentTypeFor(p string) string {
 	default:
 		return "application/octet-stream"
 	}
-}
-
-func (s *Server) studioHTML() []byte {
-	if b, err := webFS.ReadFile("web/studio.html"); err == nil {
-		return b
-	}
-	return []byte(fallbackStudio)
 }
 
 // --- /api/protocols -------------------------------------------------------
