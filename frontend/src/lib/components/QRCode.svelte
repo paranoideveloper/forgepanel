@@ -13,8 +13,8 @@
   .qr-wrapper {
     display: inline-flex;
     padding: 12px;
-    background: #0F1420;
+    background: var(--bg);
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--ln-4);
   }
 </style>

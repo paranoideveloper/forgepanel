@@ -163,15 +163,15 @@
 
 <style>
   .hosts { margin-top: 12px; }
-  .hint { color: rgba(255,255,255,0.6); font-size: 12px; line-height: 1.6; margin: 6px 0; }
-  .muted { color: rgba(255,255,255,0.5); font-size: 13px; }
+  .hint { color: var(--t-5); font-size: 12px; line-height: 1.6; margin: 6px 0; }
+  .muted { color: var(--t-7); font-size: 13px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-  th, td { text-align: start; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+  th, td { text-align: start; padding: 8px 10px; border-bottom: 1px solid var(--ln-3); font-size: 13px; }
   tr.off td { opacity: 0.45; }
-  .editor { margin-top: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: #0F1420; }
+  .editor { margin-top: 12px; padding: 12px; border: 1px solid var(--ln-4); border-radius: 8px; background: var(--bg); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.75); }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--t-2); }
   label.check { flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; }
-  input, select { padding: 7px 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); background: #0B0F18; color: #fff; font-size: 13px; }
+  input, select { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--ln-5); background: var(--bg-deep); color: var(--fg); font-size: 13px; }
   .row-actions { display: flex; gap: 6px; margin-top: 12px; }
 </style>

@@ -334,27 +334,27 @@
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
   .actions { display: flex; gap: 10px; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: var(--t-3); }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; }
-  input { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; }
-  .btn-primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  .btn-secondary { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-  .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-  .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
+  input { background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 10px; border-radius: 8px; font: inherit; }
+  .btn-primary { background: var(--acc); color: var(--acc-soft); border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+  .btn-secondary { background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .btn-sm { background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .btn-sm.danger { color: var(--bad); border-color: rgba(255,77,77,0.3); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
-  th { color: rgba(255,255,255,0.6); font-weight: 600; }
+  th, td { text-align: start; padding: 12px; border-bottom: 1px solid var(--ln-3); font-size: 14px; }
+  th { color: var(--t-5); font-weight: 600; }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .badge-err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
-  .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
-  .muted { color: rgba(255,255,255,0.6); }
-  pre { background: #0F1420; padding: 14px; border-radius: 8px; overflow-x: auto; color: #FF7A1A; font-family: monospace; }
-  .warn-cell { color: #d99b2b; font-weight: 600; }
-  .badge-warn { background: rgba(217,155,43,0.15); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); }
+  .badge-ok { background: rgba(39,209,124,0.15); color: var(--ok); }
+  .badge-err { background: rgba(255,77,77,0.15); color: var(--bad); }
+  .err-text { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .muted { color: var(--t-5); }
+  pre { background: var(--bg); padding: 14px; border-radius: 8px; overflow-x: auto; color: var(--acc); font-family: monospace; }
+  .warn-cell { color: var(--warn); font-weight: 600; }
+  .badge-warn { background: rgba(217,155,43,0.15); color: var(--warn); border: 1px solid rgba(217,155,43,0.4); }
   /* Deliberately off is not a fault: a disabled node must not wear the same red
      as one that died, or the operator learns to ignore red. */
-  .badge-muted { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.65); }
+  .badge-muted { background: var(--ln-3); color: var(--t-4); }
   .status-msg { display: block; margin-top: 4px; font-size: 11px; max-width: 22rem; }
 </style>

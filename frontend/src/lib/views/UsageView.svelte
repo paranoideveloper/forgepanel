@@ -172,18 +172,18 @@
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; gap: 12px; flex-wrap: wrap; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
   .controls { display: flex; gap: 10px; align-items: center; }
-  .seg { display: flex; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden; }
-  .seg button { background: transparent; color: rgba(255,255,255,0.7); border: 0; padding: 8px 12px; font: inherit; cursor: pointer; }
-  .seg button.active { background: rgba(255,122,26,0.18); color: #FF7A1A; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 14px; font-size: 13px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .seg { display: flex; border: 1px solid var(--ln-5); border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--t-3); border: 0; padding: 8px 12px; font: inherit; cursor: pointer; }
+  .seg button.active { background: rgba(255,122,26,0.18); color: var(--acc); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 14px; font-size: 13px; text-transform: uppercase; color: var(--t-3); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid var(--ln-2); font-size: 13px; }
+  th { color: var(--t-6); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.selected td { background: rgba(255,122,26,0.08); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
-  .err-text { color: #f85149; font-size: 13px; }
-  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
-  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .muted { color: var(--t-6); font-size: 13px; }
+  .err-text { color: var(--bad-2); font-size: 13px; }
+  .btn-primary { background: var(--acc); color: var(--card-deep); padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-sm { background: var(--ln-3); color: var(--fg); padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
 </style>

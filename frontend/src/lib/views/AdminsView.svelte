@@ -334,24 +334,24 @@
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: var(--t-3); }
   .form-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-  .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.7); }
-  input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; }
+  .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--t-3); }
+  input, select { background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 10px; border-radius: 8px; font: inherit; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  th, td { text-align: start; padding: 10px 12px; border-bottom: 1px solid var(--ln-2); font-size: 13px; }
+  th { color: var(--t-6); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.dimmed { opacity: 0.55; }
   .actions-cell { display: flex; gap: 6px; }
-  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.08); }
-  .badge-ok { background: rgba(46,160,67,0.15); color: #3fb950; }
-  .badge-err { background: rgba(248,81,73,0.15); color: #f85149; }
-  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
-  .err-text { color: #f85149; font-size: 13px; }
+  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: var(--ln-3); }
+  .badge-ok { background: rgba(46,160,67,0.15); color: var(--ok-2); }
+  .badge-err { background: rgba(248,81,73,0.15); color: var(--bad-2); }
+  .muted { color: var(--t-6); font-size: 13px; }
+  .err-text { color: var(--bad-2); font-size: 13px; }
   .btn-primary, .btn-secondary, .btn-sm { border-radius: 8px; border: 1px solid transparent; cursor: pointer; font: inherit; }
-  .btn-primary { background: #FF7A1A; color: #10141c; padding: 10px 16px; font-weight: 600; }
-  .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; padding: 10px 16px; }
-  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 5px 10px; font-size: 12px; }
-  .danger { background: rgba(248,81,73,0.15); color: #f85149; border-color: rgba(248,81,73,0.4); }
+  .btn-primary { background: var(--acc); color: var(--card-deep); padding: 10px 16px; font-weight: 600; }
+  .btn-secondary { background: var(--ln-3); color: var(--fg); padding: 10px 16px; }
+  .btn-sm { background: var(--ln-3); color: var(--fg); padding: 5px 10px; font-size: 12px; }
+  .danger { background: rgba(248,81,73,0.15); color: var(--bad-2); border-color: rgba(248,81,73,0.4); }
 </style>

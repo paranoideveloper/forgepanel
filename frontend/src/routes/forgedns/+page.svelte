@@ -67,14 +67,14 @@
 
 <style>
   :global(:root) {
-    --bg: #0B0F16;
-    --panel: #141A24;
-    --line: rgba(255, 255, 255, .08);
-    --text: rgba(255, 255, 255, .92);
-    --muted: rgba(255, 255, 255, .70);
-    --accent: #FF7A1A;
-    --ok: #27D17C;
-    --bad: #FF4D4D;
+    --bg: var(--bg-deep);
+    --panel: var(--card);
+    --line: var(--ln-3);
+    --text: var(--ln-5);
+    --muted: var(--ln-5);
+    --accent: var(--acc);
+    --ok: var(--ok);
+    --bad: var(--bad);
   }
   :global(body) {
     margin: 0;
@@ -84,7 +84,7 @@
   }
   header {
     padding: 18px 24px;
-    background: linear-gradient(90deg, #111a2b, #0b0f17);
+    background: linear-gradient(90deg, var(--card), var(--bg));
     border-bottom: 1px solid var(--line);
     display: flex;
     align-items: center;
@@ -137,12 +137,12 @@
   button {
     background: var(--accent);
     border: 0;
-    color: #1a1204;
+    color: var(--acc-soft);
     cursor: pointer;
     font-weight: 700;
   }
   button.ghost {
-    background: #1A2230;
+    background: var(--raised);
     color: var(--text);
   }
   button:hover {

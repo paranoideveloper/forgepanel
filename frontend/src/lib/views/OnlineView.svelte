@@ -180,21 +180,21 @@
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; gap: 12px; flex-wrap: wrap; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
   .hdr-right { display: flex; align-items: center; gap: 12px; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-inline-end: 8px; }
-  .count { display: inline-block; min-width: 24px; text-align: center; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid var(--ln-2); font-size: 13px; }
+  th { color: var(--t-6); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok-2); margin-inline-end: 8px; }
+  .count { display: inline-block; min-width: 24px; text-align: center; padding: 2px 8px; border-radius: 999px; background: var(--ln-3); font-size: 12px; }
   /* Many simultaneous addresses is the signal worth noticing, so it is marked
      by weight and border as well as colour. */
-  .count.many { background: rgba(217,155,43,0.18); color: #d99b2b; font-weight: 700; border: 1px solid rgba(217,155,43,0.4); }
-  .detail td { background: rgba(255,255,255,0.02); padding-top: 0; }
-  .inner th, .inner td { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(255,255,255,0.75); }
-  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
+  .count.many { background: rgba(217,155,43,0.18); color: var(--warn); font-weight: 700; border: 1px solid rgba(217,155,43,0.4); }
+  .detail td { background: var(--ln-1); padding-top: 0; }
+  .inner th, .inner td { font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--ln-1); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--t-2); }
+  .muted { color: var(--t-6); font-size: 13px; }
   .foot { margin: 14px 0 0; font-size: 12px; }
-  .err-text { color: #f85149; font-size: 13px; }
-  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
-  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .err-text { color: var(--bad-2); font-size: 13px; }
+  .btn-primary { background: var(--acc); color: var(--card-deep); padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-sm { background: var(--ln-3); color: var(--fg); padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
 </style>

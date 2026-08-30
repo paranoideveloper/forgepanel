@@ -224,40 +224,40 @@
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-  .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.7); }
-  input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px; border-radius: 8px; font: inherit; }
+  .fg { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--t-3); }
+  input, select { background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 9px; border-radius: 8px; font: inherit; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(255,255,255,0.75); }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid var(--ln-2); font-size: 13px; }
+  th { color: var(--t-6); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--t-2); }
   .target { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Security-relevant events stand out from routine changes; the left border
      carries the signal so it is not colour alone. */
-  tr.sec td:first-child { border-inline-start: 3px solid #d99b2b; }
-  tr.destructive td:first-child { border-inline-start: 3px solid #f85149; }
-  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.08); }
-  .muted { color: rgba(255,255,255,0.55); font-size: 13px; }
-  .err-text { color: #f85149; font-size: 13px; }
+  tr.sec td:first-child { border-inline-start: 3px solid var(--warn); }
+  tr.destructive td:first-child { border-inline-start: 3px solid var(--bad-2); }
+  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; background: var(--ln-3); }
+  .muted { color: var(--t-6); font-size: 13px; }
+  .err-text { color: var(--bad-2); font-size: 13px; }
   .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
   .btn-primary, .btn-secondary, .btn-sm { border-radius: 8px; border: 1px solid transparent; cursor: pointer; font: inherit; }
-  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; }
-  .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; padding: 9px 16px; }
+  .btn-primary { background: var(--acc); color: var(--card-deep); padding: 9px 16px; font-weight: 600; }
+  .btn-secondary { background: var(--ln-3); color: var(--fg); padding: 9px 16px; }
   .btn-secondary:disabled { opacity: 0.4; cursor: default; }
-  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; }
+  .btn-sm { background: var(--ln-3); color: var(--fg); padding: 4px 10px; font-size: 12px; }
   .row-actions { display: flex; gap: 6px; }
   .diff-row td { padding-top: 0; }
   .diff-row pre {
     margin: 0 0 8px;
     padding: 10px 12px;
-    background: #0F1420;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--bg);
+    border: 1px solid var(--ln-3);
     border-radius: 6px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     line-height: 1.6;
     white-space: pre-wrap;
-    color: rgba(255,255,255,0.8);
+    color: var(--t-2);
   }
 </style>

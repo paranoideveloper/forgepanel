@@ -618,33 +618,33 @@
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0; font-size: 13px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0; font-size: 13px; text-transform: uppercase; color: var(--t-3); }
   .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-  .precedence ol { margin: 10px 0; padding-inline-start: 20px; color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.8; }
+  .precedence ol { margin: 10px 0; padding-inline-start: 20px; color: var(--t-2); font-size: 13px; line-height: 1.8; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid var(--ln-2); font-size: 13px; }
+  th { color: var(--t-6); font-weight: 600; text-transform: uppercase; font-size: 11px; }
   tr.off td { opacity: 0.45; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--ln-2); padding: 2px 6px; border-radius: 4px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .note { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .muted { color: rgba(255,255,255,0.55); font-size: 13px; margin: 0; }
-  .err-text { color: #f85149; font-size: 13px; }
-  .warn { color: #d99b2b; font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
+  .muted { color: var(--t-6); font-size: 13px; margin: 0; }
+  .err-text { color: var(--bad-2); font-size: 13px; }
+  .warn { color: var(--warn); font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
   .acts { display: flex; gap: 6px; }
-  label { display: block; margin-bottom: 12px; font-size: 12px; color: rgba(255,255,255,0.7); }
-  label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.45); font-size: 11px; }
-  input, select, textarea { width: 100%; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px; border-radius: 8px; font: inherit; margin-top: 4px; }
+  label { display: block; margin-bottom: 12px; font-size: 12px; color: var(--t-3); }
+  label small { display: block; margin-top: 4px; color: var(--t-8); font-size: 11px; }
+  input, select, textarea { width: 100%; background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 9px; border-radius: 8px; font: inherit; margin-top: 4px; }
   textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
-  fieldset { border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
-  legend { font-size: 12px; color: rgba(255,255,255,0.7); padding: 0 6px; }
+  fieldset { border: 1px solid var(--ln-5); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+  legend { font-size: 12px; color: var(--t-3); padding: 0 6px; }
   label.check { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   label.check input { width: auto; margin-top: 0; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-  .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-primary { background: var(--acc); color: var(--card-deep); padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
   .btn-primary:disabled { opacity: 0.4; cursor: default; }
-  .btn-sm { background: rgba(255,255,255,0.08); color: #fff; padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-sm { background: var(--ln-3); color: var(--fg); padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
   .btn-sm:disabled { opacity: 0.3; cursor: default; }
-  .btn-sm.danger { background: rgba(248,81,73,0.16); color: #f85149; }
+  .btn-sm.danger { background: rgba(248,81,73,0.16); color: var(--bad-2); }
 </style>

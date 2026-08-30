@@ -208,26 +208,26 @@
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: var(--t-3); }
   .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .form-row input { flex: 1; min-width: 200px; }
   .form-row select { min-width: 160px; }
-  input, select { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; }
-  .btn-primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  .btn-sm { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-  .btn-sm.danger { color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
+  input, select { background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 10px; border-radius: 8px; font: inherit; }
+  .btn-primary { background: var(--acc); color: var(--acc-soft); border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+  .btn-sm { background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .btn-sm.danger { color: var(--bad); border-color: rgba(255,77,77,0.3); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: start; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; word-break: break-all; }
-  th { color: rgba(255,255,255,0.6); font-weight: 600; }
+  th, td { text-align: start; padding: 12px; border-bottom: 1px solid var(--ln-3); font-size: 14px; word-break: break-all; }
+  th { color: var(--t-5); font-weight: 600; }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .badge-err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
+  .badge-ok { background: rgba(39,209,124,0.15); color: var(--ok); }
+  .badge-err { background: rgba(255,77,77,0.15); color: var(--bad); }
   .action-cell { display: flex; gap: 6px; }
-  .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
-  .muted { color: rgba(255,255,255,0.6); }
-  .warn-box { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: #FFC24B; }
-  .config { margin: 0; padding: 12px; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font-size: 12px; color: #cfe; overflow-x: auto; white-space: pre; }
-  .steps { margin: 16px 0 0; padding-inline-start: 20px; font-size: 13px; color: rgba(255,255,255,0.75); }
+  .err-text { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .muted { color: var(--t-5); }
+  .warn-box { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: var(--warn-2); }
+  .config { margin: 0; padding: 12px; background: var(--bg); border: 1px solid var(--ln-5); border-radius: 8px; font-size: 12px; color: #cfe; overflow-x: auto; white-space: pre; }
+  .steps { margin: 16px 0 0; padding-inline-start: 20px; font-size: 13px; color: var(--t-2); }
   .steps li { margin-bottom: 6px; }
 </style>

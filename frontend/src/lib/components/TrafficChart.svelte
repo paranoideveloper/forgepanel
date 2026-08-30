@@ -128,13 +128,13 @@
     align-items: baseline;
     font-size: 12px;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--t-5);
     margin-bottom: 8px;
   }
-  figcaption strong { font-size: 15px; color: #fff; text-transform: none; }
-  .grid { stroke: rgba(255, 255, 255, 0.08); stroke-width: 1; }
-  .tick { fill: rgba(255, 255, 255, 0.45); font-size: 10px; }
-  .bar { fill: #FF7A1A; }
-  .bar:hover { fill: #ffa15c; }
-  .muted { color: rgba(255, 255, 255, 0.55); font-size: 13px; }
+  figcaption strong { font-size: 15px; color: var(--fg); text-transform: none; }
+  .grid { stroke: var(--ln-3); stroke-width: 1; }
+  .tick { fill: var(--t-8); font-size: 10px; }
+  .bar { fill: var(--acc); }
+  .bar:hover { fill: var(--acc-2); }
+  .muted { color: var(--t-6); font-size: 13px; }
 </style>

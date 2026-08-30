@@ -110,16 +110,16 @@
 <style>
   .head { margin-bottom: 20px; }
   .head h2 { margin: 0; font-size: 20px; }
-  .sub { font-size: 13px; color: rgba(255,255,255,0.5); }
+  .sub { font-size: 13px; color: var(--t-7); }
   .layout { display: grid; grid-template-columns: 240px 1fr; gap: 20px; align-items: start; }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 18px; }
-  .card h3 { margin: 0 0 14px; font-size: 12px; text-transform: uppercase; color: rgba(255,255,255,0.6); }
-  .preset { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: start; background: #0F1420; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; color: #fff; cursor: pointer; }
-  .preset:hover, .preset.sel { border-color: #FF7A1A; background: rgba(255,122,26,0.1); }
-  .preset .d { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 18px; }
+  .card h3 { margin: 0 0 14px; font-size: 12px; text-transform: uppercase; color: var(--t-5); }
+  .preset { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: start; background: var(--bg); border: 1px solid var(--ln-3); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; color: var(--fg); cursor: pointer; }
+  .preset:hover, .preset.sel { border-color: var(--acc); background: rgba(255,122,26,0.1); }
+  .preset .d { font-size: 11px; color: var(--t-7); }
   .tags { display: flex; gap: 6px; margin-top: 4px; }
-  .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.65); }
-  .tag.cdn { background: rgba(255,122,26,0.18); color: #FF9D4D; }
-  .err { font-size: 12px; color: #ff6b6b; }
+  .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px; border-radius: 4px; background: var(--ln-3); color: var(--t-4); }
+  .tag.cdn { background: rgba(255,122,26,0.18); color: var(--acc-2); }
+  .err { font-size: 12px; color: var(--bad-3); }
 </style>

@@ -336,32 +336,32 @@
 <style>
   .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .view-header h2 { margin: 0; font-size: 20px; font-weight: 650; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: rgba(255,255,255,0.7); }
-  .hint { font-size: 13px; color: rgba(255,255,255,0.6); margin: 0 0 14px; }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 16px; font-size: 14px; text-transform: uppercase; color: var(--t-3); }
+  .hint { font-size: 13px; color: var(--t-5); margin: 0 0 14px; }
   .banner { border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
-  .banner.ok { background: rgba(39,209,124,0.12); border: 1px solid rgba(39,209,124,0.3); color: #27D17C; }
-  .banner.warn { background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: #FFC24B; }
-  .banner .url { display: inline-block; margin-top: 6px; color: #FF9B4A; font-weight: 700; word-break: break-all; }
+  .banner.ok { background: rgba(39,209,124,0.12); border: 1px solid rgba(39,209,124,0.3); color: var(--ok); }
+  .banner.warn { background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: var(--warn-2); }
+  .banner .url { display: inline-block; margin-top: 6px; color: var(--acc-2); font-weight: 700; word-break: break-all; }
   .form-row { display: flex; gap: 12px; }
   .form-row input { flex: 1; }
   .form-group { margin-bottom: 14px; }
-  .form-group label { display: block; font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 6px; }
-  input, textarea { background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font: inherit; width: 100%; box-sizing: border-box; }
-  .btn-primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  .btn-secondary { background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .form-group label { display: block; font-size: 12px; color: var(--t-3); margin-bottom: 6px; }
+  input, textarea { background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 10px; border-radius: 8px; font: inherit; width: 100%; box-sizing: border-box; }
+  .btn-primary { background: var(--acc); color: var(--acc-soft); border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+  .btn-secondary { background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
   .status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 14px; }
-  .lbl { color: rgba(255,255,255,0.6); }
+  .lbl { color: var(--t-5); }
   .badge { padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .badge-warn { background: rgba(255,176,32,0.15); color: #FFC24B; }
-  .badge-err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
+  .badge-ok { background: rgba(39,209,124,0.15); color: var(--ok); }
+  .badge-warn { background: rgba(255,176,32,0.15); color: var(--warn-2); }
+  .badge-err { background: rgba(255,77,77,0.15); color: var(--bad); }
   .dns-box { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 13px; }
-  .dns-box.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .dns-box.warn { background: rgba(255,176,32,0.12); color: #FFC24B; }
-  .dns-box.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
-  .err-text { color: #FF4D4D; font-size: 13px; margin-top: 8px; }
-  .fl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.6); }
+  .dns-box.ok { background: rgba(39,209,124,0.15); color: var(--ok); }
+  .dns-box.warn { background: rgba(255,176,32,0.12); color: var(--warn-2); }
+  .dns-box.err { background: rgba(255,77,77,0.15); color: var(--bad); }
+  .err-text { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .fl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--t-5); }
   .fl input { min-width: 120px; }
   .chk { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 </style>

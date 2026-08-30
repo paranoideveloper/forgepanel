@@ -233,7 +233,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 0;
-    border-block-end: 1px solid var(--border, #23304a);
+    border-block-end: 1px solid var(--border);
   }
   .wh-main { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
   .wh-main code { overflow-wrap: anywhere; }
@@ -249,7 +249,7 @@
   .wh-secret {
     margin-block-end: 12px;
     padding: 10px 12px;
-    border: 1px solid var(--accent, #4c8dff);
+    border: 1px solid var(--accent);
     border-radius: 6px;
   }
   .wh-secret code { display: block; margin-block: 6px; overflow-wrap: anywhere; }

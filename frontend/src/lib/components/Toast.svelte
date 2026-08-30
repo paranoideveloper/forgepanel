@@ -58,12 +58,12 @@
     border-radius: 10px;
     font-size: 14px;
     font-weight: 500;
-    color: #fff;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    color: var(--fg);
+    box-shadow: 0 8px 24px var(--shadow);
     backdrop-filter: blur(8px);
   }
-  .toast-success { background: rgba(39, 209, 124, 0.9); color: #0B0F16; }
-  .toast-error { background: rgba(255, 77, 77, 0.9); color: #fff; }
-  .toast-info { background: rgba(255, 122, 26, 0.9); color: #1a1204; }
+  .toast-success { background: rgba(39, 209, 124, 0.9); color: var(--bg-deep); }
+  .toast-error { background: rgba(255, 77, 77, 0.9); color: var(--fg); }
+  .toast-info { background: rgba(255, 122, 26, 0.9); color: var(--acc-soft); }
   .icon { font-weight: 700; }
 </style>

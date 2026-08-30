@@ -255,22 +255,22 @@
 </div>
 
 <style>
-  .cfg { margin-top: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; background: #0F1420; }
+  .cfg { margin-top: 12px; padding: 12px; border: 1px solid var(--ln-4); border-radius: 10px; background: var(--bg); }
   .cfg-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .cfg-head h4 { margin: 0; font-size: 14px; }
   .cfg-head-actions { display: flex; gap: 6px; }
-  .hint { color: rgba(255,255,255,0.6); font-size: 12px; line-height: 1.6; margin: 8px 0; }
-  .muted { color: rgba(255,255,255,0.5); font-size: 13px; }
-  .err { color: #f87171; font-size: 13px; }
-  details { border-top: 1px solid rgba(255,255,255,0.07); padding: 8px 0; }
-  summary { cursor: pointer; font-size: 13px; color: rgba(255,255,255,0.85); }
+  .hint { color: var(--t-5); font-size: 12px; line-height: 1.6; margin: 8px 0; }
+  .muted { color: var(--t-7); font-size: 13px; }
+  .err { color: var(--bad-3); font-size: 13px; }
+  details { border-top: 1px solid var(--ln-3); padding: 8px 0; }
+  summary { cursor: pointer; font-size: 13px; color: var(--t-2); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
-  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: rgba(255,255,255,0.75); }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--t-2); }
   label.wide { grid-column: 1 / -1; }
-  .fname { font-family: ui-monospace, monospace; font-size: 11px; color: rgba(255,255,255,0.6); }
-  .sec { color: #d99b2b; font-style: normal; margin-inline-start: 6px; }
-  .fhint { color: rgba(255,255,255,0.45); font-size: 11px; font-style: normal; }
-  input, textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); background: #0B0F18; color: #fff; font-size: 13px; }
+  .fname { font-family: ui-monospace, monospace; font-size: 11px; color: var(--t-5); }
+  .sec { color: var(--warn); font-style: normal; margin-inline-start: 6px; }
+  .fhint { color: var(--t-8); font-size: 11px; font-style: normal; }
+  input, textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--ln-5); background: var(--bg-deep); color: var(--fg); font-size: 13px; }
   input[type='checkbox'] { width: 16px; height: 16px; }
   textarea { font-family: ui-monospace, monospace; font-size: 12px; }
   .raw { width: 100%; margin-bottom: 8px; }

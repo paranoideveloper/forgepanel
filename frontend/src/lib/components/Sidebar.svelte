@@ -1,5 +1,15 @@
 <script lang="ts">
 	import { tr, locale, setLocale, locales } from '$lib/i18n';
+	import { theme, setTheme, type Theme } from '$lib/theme.svelte';
+
+	// Held here rather than in the theme module so the labelKey literals sit in a
+	// .svelte file, which is where the i18n orphan guard looks; a key referenced
+	// only from a .ts module reads to it as a string nothing renders.
+	const themes: { code: Theme; labelKey: string; icon: string }[] = [
+		{ code: 'system', labelKey: 'sidebar.theme.system', icon: '◐' },
+		{ code: 'light', labelKey: 'sidebar.theme.light', icon: '☀' },
+		{ code: 'dark', labelKey: 'sidebar.theme.dark', icon: '☾' }
+	];
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { session, canSeeTab } from '$lib/session.svelte';
@@ -104,6 +114,18 @@
         >{l.nativeName}</button>
       {/each}
     </div>
+    <div class="lang-switch" role="group" aria-label={tr('sidebar.theme')}>
+      {#each themes as t}
+        <button
+          class="lang-btn"
+          class:active={theme() === t.code}
+          title={tr(t.labelKey)}
+          aria-label={tr(t.labelKey)}
+          aria-pressed={theme() === t.code}
+          onclick={() => setTheme(t.code)}
+        >{t.icon}</button>
+      {/each}
+    </div>
     <div class="status-pulse">
       <span class="pulse-dot"></span>
       <span>{tr('sidebar.control_plane_online')}</span>
@@ -170,20 +192,20 @@
     font-size: 12px;
     border-radius: 6px;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--t-5);
+    background: var(--ln-1);
+    border: 1px solid var(--ln-3);
   }
   .lang-btn.active {
-    color: #fff;
+    color: var(--fg);
     background: rgba(255, 122, 26, 0.18);
     border-color: rgba(255, 122, 26, 0.45);
   }
 
   .sidebar {
     width: 260px;
-    background: #0D121F;
-    border-inline-end: 1px solid rgba(255, 255, 255, 0.07);
+    background: var(--card-deep);
+    border-inline-end: 1px solid var(--ln-3);
     padding: 24px 16px;
     display: flex;
     flex-direction: column;
@@ -197,7 +219,7 @@
     align-items: center;
     gap: 12px;
     padding: 4px 8px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--ln-2);
     margin-bottom: 16px;
   }
   .logo-box {
@@ -212,8 +234,8 @@
     box-shadow: 0 4px 12px rgba(255,122,26,0.2);
   }
   .logo { font-size: 18px; }
-  .brand-text h2 { margin: 0; font-size: 17px; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
-  .version-tag { font-size: 10px; color: #FF7A1A; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .brand-text h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--fg); letter-spacing: -0.02em; }
+  .version-tag { font-size: 10px; color: var(--acc); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 
   nav { display: flex; flex-direction: column; gap: 6px; }
   .nav-btn {
@@ -226,7 +248,7 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: 10px;
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--t-4);
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
@@ -235,35 +257,35 @@
     text-align: start;
   }
   .nav-btn:hover {
-    background: rgba(255, 255, 255, 0.04);
-    color: #fff;
+    background: var(--ln-1);
+    color: var(--fg);
     transform: translateX(3px);
   }
   .nav-btn.active {
     background: linear-gradient(90deg, rgba(255, 122, 26, 0.16) 0%, rgba(255, 122, 26, 0.04) 100%);
     border-color: rgba(255, 122, 26, 0.3);
-    color: #FF7A1A;
+    color: var(--acc);
     font-weight: 650;
   }
   .icon { font-size: 16px; }
 
   .sidebar-footer {
     padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--ln-2);
   }
   .status-pulse {
     display: flex;
     align-items: center;
     gap: 10px;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--t-7);
   }
   .pulse-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #27D17C;
-    box-shadow: 0 0 10px #27D17C;
+    background: var(--ok);
+    box-shadow: 0 0 10px var(--ok);
     animation: pulse 2s infinite;
   }
   @keyframes pulse {
@@ -275,15 +297,15 @@
   .mobile-backdrop {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.75);
+    background: var(--scrim);
     backdrop-filter: blur(8px);
     z-index: 1000;
   }
   .mobile-drawer {
     width: 280px;
     height: 100vh;
-    background: #0D121F;
-    border-inline-end: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--card-deep);
+    border-inline-end: 1px solid var(--ln-4);
     padding: 24px 16px;
     box-sizing: border-box;
     display: flex;
@@ -293,7 +315,7 @@
     margin-inline-start: auto;
     background: none;
     border: none;
-    color: rgba(255,255,255,0.6);
+    color: var(--t-5);
     font-size: 18px;
     padding: 4px 8px;
     cursor: pointer;

@@ -98,7 +98,7 @@
     gap: 16px;
   }
   .view-header h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
-  .header-desc { margin: 4px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
+  .header-desc { margin: 4px 0 0; font-size: 13px; color: var(--t-6); }
 
   .metrics-grid {
     display: grid;
@@ -107,9 +107,9 @@
     margin-bottom: 24px;
   }
   .metric-card {
-    background: rgba(20, 26, 36, 0.7);
+    background: var(--card-glass-2);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--ln-3);
     border-radius: 14px;
     padding: 20px;
     display: flex;
@@ -124,30 +124,30 @@
   .card-icon {
     width: 44px; height: 44px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--ln-1);
+    border: 1px solid var(--ln-3);
     display: flex; align-items: center; justify-content: center;
     font-size: 20px;
   }
   .card-info { display: flex; flex-direction: column; }
-  .metric-card .label { font-size: 12px; color: rgba(255, 255, 255, 0.55); font-weight: 500; }
-  .metric-card .value { font-size: 20px; font-weight: 700; color: #fff; margin-top: 2px; }
-  .value.ok { color: #27D17C; }
-  .unit { font-size: 13px; color: rgba(255, 255, 255, 0.6); font-weight: 500; }
+  .metric-card .label { font-size: 12px; color: var(--t-6); font-weight: 500; }
+  .metric-card .value { font-size: 20px; font-weight: 700; color: var(--fg); margin-top: 2px; }
+  .value.ok { color: var(--ok); }
+  .unit { font-size: 13px; color: var(--t-5); font-weight: 500; }
 
   .card {
-    background: rgba(20, 26, 36, 0.7);
+    background: var(--card-glass-2);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--ln-3);
     border-radius: 16px;
     padding: 24px;
   }
-  .nav-hint-card h3 { margin: 0 0 8px; font-size: 14px; text-transform: uppercase; color: #FF7A1A; letter-spacing: 0.05em; }
-  .muted { color: rgba(255, 255, 255, 0.65); font-size: 14px; line-height: 1.6; margin: 0; }
+  .nav-hint-card h3 { margin: 0 0 8px; font-size: 14px; text-transform: uppercase; color: var(--acc); letter-spacing: 0.05em; }
+  .muted { color: var(--t-4); font-size: 14px; line-height: 1.6; margin: 0; }
 
   .btn-primary {
-    background: #FF7A1A;
-    color: #1a1204;
+    background: var(--acc);
+    color: var(--acc-soft);
     border: none;
     font-weight: 700;
     padding: 10px 18px;
@@ -159,5 +159,5 @@
   .btn-primary:active { transform: scale(0.97); }
 
   .skeleton-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-  .skeleton-card { height: 84px; background: rgba(255, 255, 255, 0.04); border-radius: 14px; }
+  .skeleton-card { height: 84px; background: var(--ln-1); border-radius: 14px; }
 </style>

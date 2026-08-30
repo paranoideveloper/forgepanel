@@ -368,32 +368,32 @@
   .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .head h2 { margin: 0; font-size: 20px; }
   .actions { display: flex; gap: 10px; }
-  .card { background: #141A24; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--ln-3); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
   .card h3 { margin: 0 0 16px; font-size: 15px; }
-  .primary { background: #FF7A1A; color: #1a1204; border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
-  .ghost { background: transparent; color: #FF9A4A; border: 1px solid rgba(255,122,26,0.4); padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+  .primary { background: var(--acc); color: var(--acc-soft); border: none; font-weight: 700; padding: 10px 16px; border-radius: 8px; cursor: pointer; }
+  .ghost { background: transparent; color: var(--acc-2); border: 1px solid rgba(255,122,26,0.4); padding: 10px 16px; border-radius: 8px; cursor: pointer; }
   /* On a phone the row is wider than the screen; scroll it inside the card
      instead of pushing the whole page sideways. */
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
   table { width: 100%; min-width: 720px; border-collapse: collapse; }
-  th, td { padding: 11px 10px; text-align: start; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; white-space: nowrap; }
-  th { color: rgba(255,255,255,0.55); font-weight: 600; font-size: 12px; }
-  .proto { background: rgba(255,122,26,0.12); color: #FF9A4A; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
+  th, td { padding: 11px 10px; text-align: start; border-bottom: 1px solid var(--ln-3); font-size: 13px; white-space: nowrap; }
+  th { color: var(--t-6); font-weight: 600; font-size: 12px; }
+  .proto { background: rgba(255,122,26,0.12); color: var(--acc-2); padding: 2px 8px; border-radius: 6px; font-size: 12px; }
   .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge.ok { background: rgba(39,209,124,0.15); color: #27D17C; }
-  .badge.off { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
-  .badge.err { background: rgba(255,77,77,0.15); color: #FF4D4D; }
-  .badge.neutral { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.65); }
+  .badge.ok { background: rgba(39,209,124,0.15); color: var(--ok); }
+  .badge.off { background: var(--ln-4); color: var(--t-5); }
+  .badge.err { background: rgba(255,77,77,0.15); color: var(--bad); }
+  .badge.neutral { background: var(--ln-4); color: var(--t-4); }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; background: #1A2230; color: #fff; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
-  .sm.danger { background: rgba(255,77,77,0.15); color: #FF4D4D; border-color: rgba(255,77,77,0.3); }
-  .muted { color: rgba(255,255,255,0.45); }
+  .sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); cursor: pointer; }
+  .sm.danger { background: rgba(255,77,77,0.15); color: var(--bad); border-color: rgba(255,77,77,0.3); }
+  .muted { color: var(--t-8); }
   .bulkbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 12px; background: rgba(255,122,26,0.1); border: 1px solid rgba(255,122,26,0.3); border-radius: 8px; font-size: 13px; }
   .cfg { display: flex; flex-direction: column; gap: 10px; }
-  .cfg .lbl { font-size: 12px; color: rgba(255,255,255,0.6); }
-  textarea { width: 100%; box-sizing: border-box; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-bottom: 10px; }
+  .cfg .lbl { font-size: 12px; color: var(--t-5); }
+  textarea { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--ln-5); color: var(--fg); padding: 10px; border-radius: 8px; font-family: monospace; font-size: 12px; margin-bottom: 10px; }
   .uri-row { display: flex; gap: 8px; align-items: center; }
-  .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
+  .uri-row code { flex: 1; background: var(--bg); padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: var(--ok); }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
-  pre { background: #0F1420; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; color: #27D17C; white-space: pre-wrap; word-break: break-all; }
+  pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; color: var(--ok); white-space: pre-wrap; word-break: break-all; }
 </style>

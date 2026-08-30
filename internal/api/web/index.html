@@ -6,52 +6,173 @@
 		<meta name="theme-color" content="#0B0F16" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-		<link href="./_app/immutable/entry/start.CQXEJ-QG.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/CsC2qGTE.js" rel="modulepreload">
+		<style>
+			/*
+			 * Design tokens.
+			 *
+			 * Before this the palette was 531 colour literals restated across 29
+			 * files — 309 hex values and 222 rgba(255,255,255,a). The alpha-white
+			 * ones are what made a light theme impossible rather than merely
+			 * tedious: muted text written as rgba(255,255,255,.55) is invisible on
+			 * a light background by construction, so no amount of swapping the
+			 * page background would have produced a readable page.
+			 *
+			 * Dark is defined on :root and light is the override, because dark is
+			 * what every one of those literals already encoded — so the dark theme
+			 * renders byte-identically to before and only light is new.
+			 */
+			:root {
+				--bg: #0F1420;
+				--bg-deep: #090D16;
+				--card: #141A24;
+				--card-deep: #10141C;
+				--raised: #1A2230;
+
+				--fg: #ffffff;
+				/* Text, by emphasis. The names are the old alphas' jobs, not their
+				   numbers, so a light theme can pick different alphas for the same
+				   role without every call site changing. */
+				--t-1: rgba(255, 255, 255, 0.92);
+				--t-2: rgba(255, 255, 255, 0.75);
+				--t-3: rgba(255, 255, 255, 0.7);
+				--t-4: rgba(255, 255, 255, 0.65);
+				--t-5: rgba(255, 255, 255, 0.6);
+				--t-6: rgba(255, 255, 255, 0.55);
+				--t-7: rgba(255, 255, 255, 0.5);
+				--t-8: rgba(255, 255, 255, 0.45);
+				--mut: #8A97B8;
+
+				/* Hairlines and tinted surfaces. */
+				--ln-1: rgba(255, 255, 255, 0.04);
+				--ln-2: rgba(255, 255, 255, 0.06);
+				--ln-3: rgba(255, 255, 255, 0.08);
+				--ln-4: rgba(255, 255, 255, 0.1);
+				--ln-5: rgba(255, 255, 255, 0.12);
+
+				--acc: #FF7A1A;
+				--acc-2: #ffa15c;
+				--acc-soft: #1A1204;
+				/* Foreground ON the accent. Stays dark in BOTH themes: the accent is
+				   a light orange either way, so this is not a colour that flips. */
+				--on-acc: #10141C;
+
+				--ok: #27D17C;
+				--ok-2: #3FB950;
+				--warn: #D99B2B;
+				--warn-2: #FFC24B;
+				--bad: #FF4D4D;
+				--bad-2: #F85149;
+				--bad-3: #FF6B6B;
+
+				--scrim: rgba(0, 0, 0, 0.65);
+				--shadow: rgba(0, 0, 0, 0.6);
+				/* A card over a gradient. Translucent on purpose, so it cannot be
+				   --card and has to flip on its own. */
+				--card-glass: rgba(20, 26, 36, 0.85);
+				--card-glass-2: rgba(20, 26, 36, 0.7);
+				/* Aliases: several components already write var(--border, #23304a)
+				   and friends. The fallback fired every time because the name was
+				   never defined, which is a hardcoded colour wearing a var(). */
+				--border: var(--ln-4);
+				--accent: var(--acc);
+				--bg-input: var(--card-deep);
+				--text: var(--t-1);
+				color-scheme: dark;
+			}
+
+			:root[data-theme='light'] {
+				--bg: #F4F6F9;
+				--bg-deep: #E9ECF1;
+				--card: #FFFFFF;
+				--card-deep: #F7F8FA;
+				--raised: #EDF0F4;
+
+				--fg: #0F1420;
+				--t-1: rgba(15, 20, 32, 0.92);
+				--t-2: rgba(15, 20, 32, 0.78);
+				--t-3: rgba(15, 20, 32, 0.72);
+				--t-4: rgba(15, 20, 32, 0.66);
+				--t-5: rgba(15, 20, 32, 0.6);
+				--t-6: rgba(15, 20, 32, 0.56);
+				--t-7: rgba(15, 20, 32, 0.5);
+				--t-8: rgba(15, 20, 32, 0.46);
+				--mut: #5B6880;
+
+				--ln-1: rgba(15, 20, 32, 0.04);
+				--ln-2: rgba(15, 20, 32, 0.07);
+				--ln-3: rgba(15, 20, 32, 0.1);
+				--ln-4: rgba(15, 20, 32, 0.13);
+				--ln-5: rgba(15, 20, 32, 0.16);
+
+				/* Darkened so they carry on white; the dark-theme values are chosen
+				   to glow on near-black and fail contrast on paper. */
+				--acc: #D45E00;
+				--acc-2: #B84F00;
+				--acc-soft: #FFF1E4;
+				--on-acc: #FFFFFF;
+
+				--ok: #0A7F4F;
+				--ok-2: #087045;
+				--warn: #8A5A00;
+				--warn-2: #7A4F00;
+				--bad: #C42B21;
+				--bad-2: #B0241B;
+				--bad-3: #CC3A30;
+
+				--scrim: rgba(15, 20, 32, 0.45);
+				--shadow: rgba(15, 20, 32, 0.18);
+				--card-glass: rgba(255, 255, 255, 0.92);
+				--card-glass-2: rgba(255, 255, 255, 0.82);
+				color-scheme: light;
+			}
+		</style>
+		<link href="./_app/immutable/entry/start.AIEd9vXP.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Bhr10ABR.js" rel="modulepreload">
 		<link href="./_app/immutable/chunks/Bc3zeq-X.js" rel="modulepreload">
 		<link href="./_app/immutable/chunks/DBYramzH.js" rel="modulepreload">
-		<link href="./_app/immutable/entry/app.BBtGQLw7.js" rel="modulepreload">
+		<link href="./_app/immutable/entry/app.BLWksY_s.js" rel="modulepreload">
 		<link href="./_app/immutable/chunks/HclGiUj8.js" rel="modulepreload">
 		<link href="./_app/immutable/chunks/xihTtKlq.js" rel="modulepreload">
-		<link href="./_app/immutable/nodes/0.ClvhxdrQ.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/BYgpSpui.js" rel="modulepreload">
-		<link href="./_app/immutable/nodes/2.BvVilYAk.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/hC0xfBXJ.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/0.B9D2Gz2y.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/CsxzHaFa.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/B-LgGiKH.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/2.56hVANtq.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Dbtt4bhF.js" rel="modulepreload">
 		
-		<link href="./_app/immutable/assets/Toast.oKWQfG8W.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/2.C8kk1Vrn.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/OverviewView.CmOOdD-a.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/QRCode.DaqONctq.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/SetupWizardView.WEnbq8Be.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/Modal.5a-EFcxw.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/InboundForm.DFIWRzHH.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/InboundsView.CTU_AEFe.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/UsersView.DA15BRUf.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/AdminsView.BWGIu4DX.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/RoutingView.ByUwoxnR.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/OnlineView.B5GqV8SX.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/UsageView.Bx0HqVqq.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/AuditView.D_fpG5ph.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/NodesView.CS1U23k5.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/StudioView.DEf5mZ9i.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/DomainsView.BOHg6ud_.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/ForgeEdgeView.FJfEjic1.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/CertificatesView.Dh8b0-7A.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/SystemHealthView.F_cRxatB.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/Toast.B6IA_a-9.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/2.BFxr-vDA.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/OverviewView.KxXWOAii.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/QRCode.1IixHOwd.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/SetupWizardView.RKEH1E9z.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/Modal.CiKG17Au.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/InboundForm.BrYD-e1i.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/InboundsView.DpBlfevm.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/UsersView.DDG23KZb.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/AdminsView.CssrBpOd.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/RoutingView.IpPcxUmR.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/OnlineView.BXD4pZ_-.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/UsageView.D3u3n9QL.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/AuditView.W7sdo1gp.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/NodesView.C0N65NGh.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/StudioView.Bi4-bETw.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/DomainsView.DSXCBPMk.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/ForgeEdgeView.BghWP6lk.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/CertificatesView.BGNd8FJW.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/SystemHealthView.D4rIPJQ3.css" rel="stylesheet">
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_13rufqz = {
+					__sveltekit_1dx2z3n = {
 						base: new URL(".", location).pathname.slice(0, -1)
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("./_app/immutable/entry/start.CQXEJ-QG.js"),
-						import("./_app/immutable/entry/app.BBtGQLw7.js")
+						import("./_app/immutable/entry/start.AIEd9vXP.js"),
+						import("./_app/immutable/entry/app.BLWksY_s.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

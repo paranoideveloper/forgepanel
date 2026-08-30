@@ -198,14 +198,14 @@
   .domains-view { padding: 1rem; max-width: 900px; }
   h2 { margin-bottom: 1rem; }
   .banner.warn {
-    border: 1px solid #e8a33d; background: rgba(232, 163, 61, 0.1);
+    border: 1px solid var(--warn-2); background: var(--ln-2);
     border-radius: 10px; padding: 1rem; margin-bottom: 1.5rem;
   }
   .banner-title { font-weight: 700; margin-bottom: 0.4rem; }
   .fa { opacity: 0.85; font-size: 0.9rem; }
   .free-list { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.75rem 0; }
   .free-item { display: flex; flex-direction: column; padding: 0.5rem 0.7rem; border-radius: 8px; background: rgba(127,127,127,0.08); }
-  .free-item.recommended { border: 1px solid #27d17c; }
+  .free-item.recommended { border: 1px solid var(--ok); }
   .free-item span { font-size: 0.85rem; opacity: 0.8; }
   .add-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
   .add-row input, .add-row select { padding: 0.5rem; border-radius: 6px; }
@@ -213,11 +213,11 @@
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
   th, td { text-align: start; padding: 0.5rem; border-bottom: 1px solid rgba(127,127,127,0.2); }
   .name { font-weight: 600; }
-  .badge { background: #27d17c; color: #04140a; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; }
-  .btn-primary { background: #ff7a1a; color: #1a1204; border: none; padding: 0.5rem 0.9rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  .badge { background: var(--ok); color: var(--on-acc); padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; }
+  .btn-primary { background: var(--acc); color: var(--acc-soft); border: none; padding: 0.5rem 0.9rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-danger { background: transparent; color: #e5484d; border: 1px solid #e5484d; padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer; }
-  .btn-link { background: none; border: none; color: #7dd3fc; cursor: pointer; text-decoration: underline; }
+  .btn-danger { background: transparent; color: var(--bad-2); border: 1px solid var(--bad-2); padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer; }
+  .btn-link { background: none; border: none; color: var(--acc); cursor: pointer; text-decoration: underline; }
   section { margin-bottom: 1.5rem; }
   .empty { opacity: 0.7; }
 </style>
