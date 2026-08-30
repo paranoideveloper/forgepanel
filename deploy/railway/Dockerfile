@@ -39,7 +39,9 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
       go build -trimpath -ldflags="${LD}" -o /out/forgepanel ./cmd/forgepanel && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-      go build -trimpath -ldflags="${LD}" -o /out/forgectl ./cmd/forgectl
+      go build -trimpath -ldflags="${LD}" -o /out/forgectl ./cmd/forgectl && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+      go build -trimpath -ldflags="${LD}" -o /out/forgenode ./cmd/forgenode
 
 # ---- cores -------------------------------------------------------------------
 # Staged under /opt/forgepanel-cores in the exact layout binmgr expects, so the
@@ -80,6 +82,10 @@ RUN apk add --no-cache ca-certificates tzdata gcompat
 
 COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
 COPY --from=build /out/forgectl   /usr/local/bin/forgectl
+# The panel serves this to a node being enrolled, reading it off its own
+# filesystem — see agentBinaryPath. Without it every enrolment against a PaaS
+# deploy gets a 503 naming paths the operator cannot create.
+COPY --from=build /out/forgenode  /usr/local/bin/forgenode
 COPY --from=cores /opt/forgepanel-cores /opt/forgepanel-cores
 COPY deploy/railway/entrypoint.sh /usr/local/bin/forgepanel-paas-entrypoint
 RUN chmod +x /usr/local/bin/forgepanel-paas-entrypoint
