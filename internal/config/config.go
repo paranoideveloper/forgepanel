@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 )
 
 // ACMESettings is the automatic-certificate configuration persisted in
@@ -52,6 +54,16 @@ type PanelSettings struct {
 	// optional extra: the tokens those nodes still hold are exactly the
 	// permanent bearer credentials mTLS exists to replace.
 	RequireNodeMTLS bool `json:"require_node_mtls"`
+
+	// EgressProxy routes the panel's OWN outbound requests — the update check,
+	// Telegram, the DNS provider APIs, GeoIP — through a proxy. Empty means
+	// direct, which falls back to HTTP_PROXY and friends.
+	//
+	// It matters most exactly where the panel is most useful: on a censored
+	// network the panel is usually the one machine that can already reach the
+	// outside, because it is running the tunnels, and yet its own calls went
+	// direct and failed.
+	EgressProxy string `json:"egress_proxy,omitempty"`
 
 	// extra preserves any unknown/forward-compat keys so a rewrite by an older
 	// binary never silently drops fields written by a newer one.
@@ -222,6 +234,12 @@ func load(dataDir string, bootstrapFromEnv bool) (*Config, error) {
 	if err := savePanel(panelPath, panel); err != nil {
 		return nil, err
 	}
+
+	// The proxy must be live before anything makes an outbound call. Applying it
+	// only when the settings page saves would leave the first update check, the
+	// first Telegram alert and every call made before an operator visits that
+	// page going direct.
+	_ = netegress.Set(panel.EgressProxy)
 
 	// bootstrapFromEnv is false for the local administration tools, which must
 	// keep reporting panel.json as written rather than a view coloured by

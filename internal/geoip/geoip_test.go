@@ -16,7 +16,15 @@ func withProviders(t *testing.T, ps []Provider) {
 	old, oldc := Providers, HTTPClient
 	Providers = ps
 	HTTPClient = &http.Client{Timeout: 3 * time.Second}
-	t.Cleanup(func() { Providers, HTTPClient = old, oldc })
+	// Answers are cached per host, and these tests reuse hosts like 8.8.8.8. A
+	// code cached by an earlier test would be returned without the provider
+	// being called at all, so a test asserting that a bad code is REJECTED would
+	// pass on a good one cached moments before.
+	ResetCache()
+	t.Cleanup(func() {
+		Providers, HTTPClient = old, oldc
+		ResetCache()
+	})
 }
 
 func TestLookupJSONProvider(t *testing.T) {

@@ -11,6 +11,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"os"
 	"os/exec"
@@ -95,7 +97,7 @@ func (o *OAuth) httpClient() *http.Client {
 	if o.HTTP != nil {
 		return o.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return netegress.Client(30 * time.Second)
 }
 
 func (o *OAuth) out() io.Writer {

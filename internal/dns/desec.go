@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +54,7 @@ func (d *Desec) httpClient() *http.Client {
 	if d.HTTP != nil {
 		return d.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return netegress.Client(30 * time.Second)
 }
 
 func (d *Desec) base() string {

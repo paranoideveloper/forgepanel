@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strconv"
 	"strings"
@@ -50,7 +52,7 @@ func (a *Arvan) httpClient() *http.Client {
 	if a.HTTP != nil {
 		return a.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return netegress.Client(30 * time.Second)
 }
 
 func (a *Arvan) base() string {

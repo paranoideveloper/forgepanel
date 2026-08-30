@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strconv"
 	"strings"
@@ -71,7 +73,7 @@ func (c *Cloudflare) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return netegress.Client(30 * time.Second)
 }
 
 func (c *Cloudflare) base() string {

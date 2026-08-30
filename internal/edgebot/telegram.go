@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strconv"
 	"time"
@@ -30,8 +32,8 @@ func newTGClient(token string) *tgClient {
 	return &tgClient{
 		token: token,
 		base:  defaultTGBase,
-		poll:  &http.Client{Timeout: 65 * time.Second},
-		send:  &http.Client{Timeout: 20 * time.Second},
+		poll:  netegress.Client(65 * time.Second),
+		send:  netegress.Client(20 * time.Second),
 	}
 }
 

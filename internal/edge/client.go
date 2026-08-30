@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strings"
 	"time"
@@ -134,7 +136,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return netegress.Client(60 * time.Second)
 }
 
 func (c *Client) base() string {

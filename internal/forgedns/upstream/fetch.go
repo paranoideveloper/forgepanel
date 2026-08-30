@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,7 +32,7 @@ import (
 // the cache key is <adapter>/<tag> rather than <engine>-<const>.
 
 // httpClient bounds download time so a zone sync can never hang forever.
-var httpClient = &http.Client{Timeout: 5 * time.Minute}
+var httpClient = netegress.Client(5 * time.Minute)
 
 // maxArchiveBytes caps what the installer will read from a release asset. The
 // verified server archives are 1.7–4 MB (§0); 64 MB is a generous ceiling that

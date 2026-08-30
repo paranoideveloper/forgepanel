@@ -12,7 +12,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,7 +26,7 @@ import (
 // point them at a mock.
 var (
 	// HTTPClient is the client used for lookups (overridable in tests).
-	HTTPClient = &http.Client{Timeout: 6 * time.Second}
+	HTTPClient = netegress.Client(6 * time.Second)
 	// Providers: {url-with-%s-for-ip, json-field-or-"" for plain-text body}.
 	Providers = []Provider{
 		{"https://ipwho.is/%s", "country_code"},
@@ -32,6 +35,9 @@ var (
 	}
 )
 
+// timeNow is a variable so a test can age the cache without sleeping.
+var timeNow = time.Now
+
 // Provider is a keyless geoip endpoint. URLTmpl has a single %s for the IP; Field
 // is the JSON field to read, or "" when the whole (trimmed) body is the code.
 type Provider struct {
@@ -39,11 +45,66 @@ type Provider struct {
 	Field   string
 }
 
+// cacheTTL is how long a country code is trusted. A server does not change
+// country, so this is long; it is bounded at all only so a corrected answer is
+// eventually picked up.
+const cacheTTL = 24 * time.Hour
+
+// cacheMax bounds the map. Country lookups are keyed by host, and an importer
+// pulling in a large subscription would otherwise grow this without limit for
+// the life of the process.
+const cacheMax = 4096
+
+type cacheEntry struct {
+	code string
+	at   time.Time
+}
+
+var cache = struct {
+	sync.Mutex
+	m map[string]cacheEntry
+}{m: map[string]cacheEntry{}}
+
+// ResetCache clears the cache. Tests use it; nothing in the panel does.
+func ResetCache() {
+	cache.Lock()
+	cache.m = map[string]cacheEntry{}
+	cache.Unlock()
+}
+
+func cacheGet(host string, now time.Time) (string, bool) {
+	cache.Lock()
+	defer cache.Unlock()
+	e, ok := cache.m[host]
+	if !ok || now.Sub(e.at) > cacheTTL {
+		return "", false
+	}
+	return e.code, true
+}
+
+func cachePut(host, code string, now time.Time) {
+	cache.Lock()
+	defer cache.Unlock()
+	if len(cache.m) >= cacheMax {
+		cache.m = map[string]cacheEntry{}
+	}
+	cache.m[host] = cacheEntry{code: code, at: now}
+}
+
 // LookupCountry resolves host (an IP or a domain) to an alpha-2 country code.
+//
+// Answers are cached. Without it every call reached three third-party services
+// over the network — on a panel listing inbounds, once per inbound per render —
+// which is slow everywhere and fails outright on the censored networks where
+// this panel is most used.
 func LookupCountry(ctx context.Context, host string) (string, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return "", fmt.Errorf("no host to look up")
+	}
+	now := timeNow()
+	if cc, ok := cacheGet(host, now); ok {
+		return cc, nil
 	}
 	ip := resolvePublicIP(ctx, host)
 	// ip == "" → let the provider geolocate the panel's own egress IP.
@@ -56,7 +117,9 @@ func LookupCountry(ctx context.Context, host string) (string, error) {
 			continue
 		}
 		if isAlpha2(cc) {
-			return strings.ToUpper(cc), nil
+			out := strings.ToUpper(cc)
+			cachePut(host, out, now)
+			return out, nil
 		}
 	}
 	if lastErr == nil {

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strconv"
 	"strings"
@@ -65,7 +67,7 @@ func New(token string, adminIDs []int64, data PanelData) *Bot {
 	for _, id := range adminIDs {
 		m[id] = true
 	}
-	b := &Bot{token: token, adminIDs: m, data: data, client: &http.Client{Timeout: 65 * time.Second}, sendClient: &http.Client{Timeout: 10 * time.Second}}
+	b := &Bot{token: token, adminIDs: m, data: data, client: netegress.Client(65 * time.Second), sendClient: netegress.Client(10 * time.Second)}
 	b.sender = b // default: real transport
 	return b
 }

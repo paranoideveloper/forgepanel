@@ -12,7 +12,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,7 @@ const (
 )
 
 // httpClient bounds download time so a boot never hangs forever.
-var httpClient = &http.Client{Timeout: 5 * time.Minute}
+var httpClient = netegress.Client(5 * time.Minute)
 
 // Manager resolves and caches core binaries under BinDir.
 type Manager struct {

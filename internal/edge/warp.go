@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 )
 
@@ -108,7 +109,7 @@ func registerOneWarp(ctx context.Context, hc *http.Client) (WarpAccount, error) 
 // registrations from one IP, so there is a short pause between the two.
 func RegisterWarpAccounts(ctx context.Context, hc *http.Client) ([]WarpAccount, error) {
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = netegress.Client(30 * time.Second)
 	}
 	out := make([]WarpAccount, 0, 2)
 	for i := 0; i < 2; i++ {

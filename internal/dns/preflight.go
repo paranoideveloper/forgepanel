@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"sort"
 	"strings"
 	"time"
@@ -141,7 +143,7 @@ func (p Preflight) httpClient() *http.Client {
 	if p.HTTP != nil {
 		return p.HTTP
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	return netegress.Client(15 * time.Second)
 }
 
 func (p Preflight) resolver() Resolver {

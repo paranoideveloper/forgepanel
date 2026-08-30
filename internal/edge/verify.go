@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"strings"
 	"time"
 )
@@ -71,7 +73,7 @@ func (o *VerifyOptions) withDefaults() {
 		o.Interval = 3 * time.Second
 	}
 	if o.HTTP == nil {
-		o.HTTP = &http.Client{Timeout: 20 * time.Second}
+		o.HTTP = netegress.Client(20 * time.Second)
 	}
 	if o.Sleep == nil {
 		o.Sleep = time.Sleep

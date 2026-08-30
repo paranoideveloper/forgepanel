@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/dns"
+	"github.com/forgepanel/forgepanel/internal/netegress"
 )
 
 // provisionIPEchoURL reports this host's public address. Cloudflare's trace
@@ -299,7 +300,7 @@ func provisionResolveIP(ctx context.Context, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := netegress.Client(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("could not detect this host's public IP (%v).\nPass it explicitly with --ip <address>", err)

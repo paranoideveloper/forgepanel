@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,7 +57,7 @@ func (i *Installer) httpClient() *http.Client {
 	if i.HTTP != nil {
 		return i.HTTP
 	}
-	return &http.Client{Timeout: 5 * time.Minute}
+	return netegress.Client(5 * time.Minute)
 }
 
 func (i *Installer) dir(b Backend) string {

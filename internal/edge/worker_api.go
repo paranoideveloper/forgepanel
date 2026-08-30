@@ -9,6 +9,8 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"net/url"
 	"strings"
 	"time"
@@ -85,7 +87,7 @@ func (w *WorkerClient) httpClient() *http.Client {
 	if w.HTTP != nil {
 		return w.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return netegress.Client(30 * time.Second)
 }
 
 // URL builds an absolute URL under the Worker's secure path.
@@ -408,7 +410,7 @@ func PushFeed(ctx context.Context, client *http.Client, feedURL, token string, d
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = netegress.Client(30 * time.Second)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -470,7 +472,7 @@ func CheckForUpdate(ctx context.Context, client *http.Client, repo, current stri
 	req.Header.Set("User-Agent", "ForgePanel")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = netegress.Client(15 * time.Second)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
