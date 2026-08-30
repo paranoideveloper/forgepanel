@@ -258,6 +258,11 @@ func (c *ForgeDNSController) Status() map[string]any {
 	out := map[string]any{
 		"listening": c.started, "addr": c.addr, "zones": zones,
 		"last_error": c.lastErr, "upstream_error": c.upErr,
+		// Folded into the existing status rather than given its own route: the
+		// front router is not a separate subsystem to an operator, it is how
+		// this one is serving the port, and a panel that shows the zones but not
+		// the thing multiplexing them explains nothing.
+		"front_router": c.frontRouterStatusLocked(),
 	}
 	up := c.up
 	c.mu.Unlock()

@@ -33,6 +33,35 @@ const (
 	ModeTCP    = "tcp"
 )
 
+// Public TLS ports for a DNS tunnel. Not negotiable from the client side: a DoT
+// client goes to 853 and a DoH client to 443, which is exactly why two zones
+// that both serve them collide, and why the panel offers a private port instead.
+const (
+	DefaultDoTPort = 853
+	DefaultDoHPort = 443
+)
+
+// tlsListenHost decides where a zone's TLS listener binds.
+//
+// Loopback whenever the port is private. A private PORT alone does not isolate
+// the backend: bound to a public interface it is still reachable directly, so a
+// client that knows the number bypasses the router and the isolation the port
+// move exists to create is silently gone.
+func tlsListenHost(bindHost string, port, public int) string {
+	if port > 0 && port != public {
+		return tlsFrontHost
+	}
+	return bindHost
+}
+
+// tlsFrontHost is where a front-routed TLS listener binds.
+//
+// Loopback, always. A private PORT alone does not isolate the backend: bound to
+// a public interface it is still reachable directly, so a client that knows the
+// number bypasses the router, and the isolation the port move exists to create
+// is silently gone. CottenRouter's own installer enforces the same rule.
+const tlsFrontHost = "127.0.0.1"
+
 // ZoneConfig is the panel's view of one upstream tunnel zone — the input to
 // both the server and client renderers. It is a plain value so the API layer
 // can build it from a store row and tests can build it literally.
@@ -53,9 +82,15 @@ type ZoneConfig struct {
 
 	// CottenDNS extras (§3). Ignored by adapters whose descriptor does not
 	// advertise the capability.
-	TCPListener     bool
-	DoTListener     bool
-	DoHListener     bool
+	TCPListener bool
+	DoTListener bool
+	DoHListener bool
+	// DoTPort / DoHPort move a zone's TLS listeners off the public ports so the
+	// front router can own 853 and 443 and fan them out by SNI. Zero keeps the
+	// upstream default, which is the public port — correct for a single zone and
+	// a guaranteed collision for the second one.
+	DoTPort         int
+	DoHPort         int
 	AutoDetect      bool
 	ARecordDelivery bool
 	QueryTypes      []string // client-side rotation list
@@ -80,6 +115,17 @@ type ZoneConfig struct {
 // Normalize fills defaults and canonicalises the zone. Call it before Validate,
 // Render* or Signature so equality and output are well-defined.
 func (z *ZoneConfig) Normalize(d Descriptor) {
+	// Default the TLS ports rather than leaving them zero: the renderer always
+	// writes them, and a zero would tell the backend to bind port 0 — a random
+	// high port that nothing knows to reach.
+	if d.HasListenerToggles {
+		if z.DoTPort <= 0 {
+			z.DoTPort = DefaultDoTPort
+		}
+		if z.DoHPort <= 0 {
+			z.DoHPort = DefaultDoHPort
+		}
+	}
 	z.Adapter = Canonical(z.Adapter)
 	z.Zone = normDomain(z.Zone)
 	z.Domains = dedupeDomains(append([]string{z.Zone}, z.Domains...))
@@ -194,8 +240,12 @@ func RenderServer(d Descriptor, z ZoneConfig) (string, error) {
 
 	if d.HasListenerToggles {
 		fmt.Fprintf(&b, "TCP_LISTENER_ENABLED = %t\n", z.TCPListener)
-		fmt.Fprintf(&b, "DOT_LISTENER_ENABLED = %t   # :853\n", z.DoTListener)
-		fmt.Fprintf(&b, "DOH_LISTENER_ENABLED = %t   # :443\n", z.DoHListener)
+		fmt.Fprintf(&b, "DOT_LISTENER_ENABLED = %t\n", z.DoTListener)
+		fmt.Fprintf(&b, "DOT_LISTEN_HOST = %q\n", tlsListenHost(z.BindHost, z.DoTPort, DefaultDoTPort))
+		fmt.Fprintf(&b, "DOT_LISTEN_PORT = %d\n", z.DoTPort)
+		fmt.Fprintf(&b, "DOH_LISTENER_ENABLED = %t\n", z.DoHListener)
+		fmt.Fprintf(&b, "DOH_LISTEN_HOST = %q\n", tlsListenHost(z.BindHost, z.DoHPort, DefaultDoHPort))
+		fmt.Fprintf(&b, "DOH_LISTEN_PORT = %d\n", z.DoHPort)
 	}
 
 	fmt.Fprintf(&b, "USE_EXTERNAL_SOCKS5 = %t\n", z.ExternalSocks5)

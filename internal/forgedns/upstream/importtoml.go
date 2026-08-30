@@ -130,6 +130,8 @@ func (im Managed) ApplyTo(z *ZoneConfig) {
 	setBool(im.Values, "USE_EXTERNAL_SOCKS5", &z.ExternalSocks5)
 	setBool(im.Values, "TCP_LISTENER_ENABLED", &z.TCPListener)
 	setBool(im.Values, "DOT_LISTENER_ENABLED", &z.DoTListener)
+	setInt(im.Values, "DOT_LISTEN_PORT", &z.DoTPort)
+	setInt(im.Values, "DOH_LISTEN_PORT", &z.DoHPort)
 	setBool(im.Values, "DOH_LISTENER_ENABLED", &z.DoHListener)
 	setBool(im.Values, "ENCRYPTION_AUTO_DETECT", &z.AutoDetect)
 	setBool(im.Values, "A_RECORD_DATA_DELIVERY", &z.ARecordDelivery)

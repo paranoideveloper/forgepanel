@@ -34,6 +34,29 @@ type Options struct {
 	// OnError observes per-query failures. It must not block: it is called on
 	// the serving path. Nil disables reporting.
 	OnError func(stage string, err error)
+	// TLSHandshakeTimeout bounds how long a peer may take to send a whole
+	// ClientHello on the TLS ports. Zero uses defaultHandshakeTimeout.
+	TLSHandshakeTimeout time.Duration
+	// TLSStreamIdle reaps a spliced TLS connection idle in both directions.
+	// Zero uses defaultStreamIdle, which is generous: DoT connections are
+	// long-lived and idle by design.
+	TLSStreamIdle time.Duration
+}
+
+// HandshakeTimeout is the effective ClientHello deadline.
+func (o Options) HandshakeTimeout() time.Duration {
+	if o.TLSHandshakeTimeout <= 0 {
+		return defaultHandshakeTimeout
+	}
+	return o.TLSHandshakeTimeout
+}
+
+// StreamIdle is the effective idle deadline for a spliced TLS connection.
+func (o Options) StreamIdle() time.Duration {
+	if o.TLSStreamIdle <= 0 {
+		return defaultStreamIdle
+	}
+	return o.TLSStreamIdle
 }
 
 func (o Options) withDefaults() Options {

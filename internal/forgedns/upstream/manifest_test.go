@@ -166,8 +166,24 @@ func TestManifestSecretsAndRuntime(t *testing.T) {
 		if got := m.SecretKeys(ScopeClient); len(got) == 0 || got[0] != "ENCRYPTION_KEY" {
 			t.Errorf("%s: client ENCRYPTION_KEY must be marked secret, got %v", adapter, got)
 		}
+		// The runtime set is pinned so a key cannot quietly become panel-owned:
+		// an override that sets one is parsed, preserved and then IGNORED, which
+		// is exactly the behaviour an operator would not expect to be given by
+		// accident.
+		//
+		// DOT_LISTEN_HOST and DOH_LISTEN_HOST were added to it deliberately. The
+		// panel pins them to 127.0.0.1 whenever the matching port is private,
+		// because a private port on a public interface is still reachable from
+		// the internet — a client that knows the number bypasses the front
+		// router entirely. Leaving that key operator-editable would let an
+		// override silently undo the isolation the port move exists to create.
+		// CottenDNS-only, hence the adapter split below.
+		serverRuntime := []string{"CONFIG_VERSION", "ENCRYPTION_KEY_FILE"}
+		if d, err := Lookup(adapter); err == nil && d.HasListenerToggles {
+			serverRuntime = []string{"CONFIG_VERSION", "DOH_LISTEN_HOST", "DOT_LISTEN_HOST", "ENCRYPTION_KEY_FILE"}
+		}
 		for scope, want := range map[Scope][]string{
-			ScopeServer: {"CONFIG_VERSION", "ENCRYPTION_KEY_FILE"},
+			ScopeServer: serverRuntime,
 			ScopeClient: {"CONFIG_VERSION", "ENCRYPTION_KEY"},
 		} {
 			got := m.RuntimeKeys(scope)

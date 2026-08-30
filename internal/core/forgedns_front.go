@@ -33,9 +33,13 @@ import (
 
 // frontRunner owns the router's sockets and the context that stops it.
 type frontRunner struct {
-	srv    *frontrouter.Server
-	udp    net.PacketConn
-	tcp    net.Listener
+	srv *frontrouter.Server
+	udp net.PacketConn
+	tcp net.Listener
+	// dot and doh are the public TLS ports, bound only when more than one zone
+	// actually serves that protocol. Nil is the normal case.
+	dot    net.Listener
+	doh    net.Listener
 	cancel context.CancelFunc
 }
 
@@ -50,6 +54,71 @@ func (r *frontRunner) stop() {
 	if r.tcp != nil {
 		_ = r.tcp.Close()
 	}
+	if r.dot != nil {
+		_ = r.dot.Close()
+	}
+	if r.doh != nil {
+		_ = r.doh.Close()
+	}
+}
+
+// Public TLS ports. Not configurable: a DoT client goes to 853 and a DoH client
+// to 443 or nowhere, which is the whole reason zones collide on them.
+const (
+	publicDoTPort = 853
+	publicDoHPort = 443
+)
+
+// privateTLSAddr validates one zone's TLS listener as a routable backend.
+//
+// It returns the address to route to, or a note saying why it cannot be routed.
+// An empty listener is not an error — the zone simply does not serve that
+// protocol — but one still sitting on the public port is worth saying out loud,
+// because from the panel it looks configured and from the internet only one
+// zone answers.
+func privateTLSAddr(zone, proto, listen string, public int) (string, string) {
+	listen = strings.TrimSpace(listen)
+	if listen == "" {
+		return "", ""
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", fmt.Sprintf("%s: %s listener %q is not an address", zone, proto, listen)
+	}
+	if p, err := strconv.Atoi(port); err == nil && p == public {
+		return "", fmt.Sprintf("%s: %s is still on the public port %d, so it cannot be routed behind one",
+			zone, proto, public)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return net.JoinHostPort("127.0.0.1", port), ""
+	}
+	return listen, ""
+}
+
+// countTLS counts backends that actually serve one of the TLS protocols.
+//
+// One is not worth a router: that zone can hold the public port itself, exactly
+// as a single DNS zone holds 53, and a hop that adds nothing is a hop that can
+// still fail.
+func countTLS(backends []frontrouter.Backend, pick func(frontrouter.Backend) string) int {
+	n := 0
+	for _, b := range backends {
+		if strings.TrimSpace(pick(b)) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// tlsFrontAddr puts the public TLS port on the same interface the DNS port uses,
+// so an operator who bound ForgeDNS to one address does not silently get a TLS
+// listener on all of them.
+func tlsFrontAddr(dnsAddr string, port int) string {
+	host, _, err := net.SplitHostPort(dnsAddr)
+	if err != nil {
+		host = ""
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // frontBackends turns supervised zone statuses into router backends.
@@ -78,10 +147,24 @@ func frontBackends(statuses []upstream.ZoneStatus) ([]frontrouter.Backend, []str
 				udp = net.JoinHostPort("127.0.0.1", port)
 			}
 		}
+		// The TLS listeners are carried only when the zone actually moved them
+		// off the public ports. A zone still on :853 is not a backend — it is
+		// the thing occupying the port the router wants — and offering it would
+		// have the router dial itself.
+		dot, dotSkip := privateTLSAddr(st.Zone, "DoT", st.DoTListen, publicDoTPort)
+		doh, dohSkip := privateTLSAddr(st.Zone, "DoH", st.DoHListen, publicDoHPort)
+		if dotSkip != "" {
+			skipped = append(skipped, dotSkip)
+		}
+		if dohSkip != "" {
+			skipped = append(skipped, dohSkip)
+		}
 		out = append(out, frontrouter.Backend{
-			Name:     st.Zone,
-			Suffixes: st.Domains,
-			UDPAddr:  udp,
+			Name:      st.Zone,
+			Suffixes:  st.Domains,
+			UDPAddr:   udp,
+			TLSAddr:   dot,
+			HTTPSAddr: doh,
 			// The upstream adapters expose DNS-over-TCP on the same port when
 			// they support it at all; an adapter that does not will simply
 			// refuse the connection, which the router reports rather than
@@ -186,6 +269,27 @@ func (c *ForgeDNSController) syncFrontRouter(nativeZones int) string {
 	go func() { _ = srv.ServeUDP(ctx, udp) }()
 	go func() { _ = srv.ServeTCP(ctx, tcp) }()
 
+	// The TLS ports are bound only when more than one zone serves that
+	// protocol, and their failure is NOT fatal to the router: DNS on 53 is the
+	// service, and losing 853 because something else on the host holds it must
+	// not take the tunnel down with it. The reason is reported instead.
+	if n := countTLS(backends, func(b frontrouter.Backend) string { return b.TLSAddr }); n > 1 {
+		if ln, err := net.Listen("tcp", tlsFrontAddr(c.addr, publicDoTPort)); err != nil {
+			skipped = append(skipped, fmt.Sprintf("DoT not multiplexed: %v", err))
+		} else {
+			run.dot = ln
+			go func() { _ = srv.ServeTLS(ctx, ln, func(b frontrouter.Backend) string { return b.TLSAddr }) }()
+		}
+	}
+	if n := countTLS(backends, func(b frontrouter.Backend) string { return b.HTTPSAddr }); n > 1 {
+		if ln, err := net.Listen("tcp", tlsFrontAddr(c.addr, publicDoHPort)); err != nil {
+			skipped = append(skipped, fmt.Sprintf("DoH not multiplexed: %v", err))
+		} else {
+			run.doh = ln
+			go func() { _ = srv.ServeTLS(ctx, ln, func(b frontrouter.Backend) string { return b.HTTPSAddr }) }()
+		}
+	}
+
 	c.front = run
 	c.frontSig = sig
 	return c.frontStatusLocked(len(backends), skipped)
@@ -230,6 +334,13 @@ func (c *ForgeDNSController) lastFrontErr() string {
 func (c *ForgeDNSController) FrontRouterStatus() map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.frontRouterStatusLocked()
+}
+
+// frontRouterStatusLocked builds the same map for a caller that already holds
+// the lock — which Status() does, and which is why this was never simply called
+// from there.
+func (c *ForgeDNSController) frontRouterStatusLocked() map[string]any {
 	out := map[string]any{"running": c.front != nil, "note": c.frontNote}
 	if e := c.lastFrontErr(); e != "" {
 		out["last_error"] = e

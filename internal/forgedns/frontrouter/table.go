@@ -22,6 +22,12 @@ type Backend struct {
 	Suffixes []string
 	UDPAddr  string
 	TCPAddr  string
+	// TLSAddr and HTTPSAddr are the backend's private DNS-over-TLS and
+	// DNS-over-HTTPS listeners. Empty means the zone does not serve that
+	// protocol, and the router refuses the stream rather than dialling nothing
+	// — an empty dial target produces a hang, which reads as a broken backend.
+	TLSAddr   string
+	HTTPSAddr string
 }
 
 // route is one flattened suffix -> backend pair.

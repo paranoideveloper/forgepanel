@@ -61,6 +61,12 @@ type ZoneStatus struct {
 	ConfigPath string   `json:"config_path,omitempty"`
 	Domains    []string `json:"domains,omitempty"`
 	Listen     string   `json:"listen,omitempty"`
+	// DoTListen / DoHListen are the zone's private TLS listeners, empty when the
+	// zone serves neither. The front router needs them to fan 853 and 443 out by
+	// SNI; empty means "this zone does not serve that protocol", which the
+	// router refuses explicitly rather than dialling nothing.
+	DoTListen  string   `json:"dot_listen,omitempty"`
+	DoHListen  string   `json:"doh_listen,omitempty"`
 	HealthURL  string   `json:"health_url,omitempty"`
 	Restarts   int      `json:"restarts"`
 	LastError  string   `json:"last_error,omitempty"`
@@ -114,7 +120,11 @@ type proc struct {
 	cfgPath       string
 	domains       []string
 	listen        string
-	healthURL     string
+	// dotListen / dohListen are the zone's private TLS listeners, empty unless
+	// the operator moved them off the public ports for front routing.
+	dotListen string
+	dohListen string
+	healthURL string
 
 	mu       sync.Mutex
 	cancel   context.CancelFunc
@@ -271,9 +281,23 @@ func (m *Manager) apply(pl plan) error {
 	}
 
 	listen := net.JoinHostPort(z.BindHost, strconv.Itoa(z.BindPort))
+	// Only a zone whose TLS listener was actually moved to a private port is
+	// offered to the front router. One left on the public port is not a backend
+	// — it IS the thing on 853 — and routing to it would have the router dial
+	// itself.
+	dotListen, dohListen := "", ""
+	if d.HasListenerToggles {
+		if z.DoTListener && z.DoTPort > 0 {
+			dotListen = net.JoinHostPort(tlsFrontHost, strconv.Itoa(z.DoTPort))
+		}
+		if z.DoHListener && z.DoHPort > 0 {
+			dohListen = net.JoinHostPort(tlsFrontHost, strconv.Itoa(z.DoHPort))
+		}
+	}
 	p := &proc{
 		zone: z.Zone, adapter: d.Adapter, sig: sig, tag: install.Tag, exe: install.Exe,
 		cfgPath: cfgPath, domains: z.Domains, listen: listen, healthURL: d.HealthURL,
+		dotListen: dotListen, dohListen: dohListen,
 		state: StateStopped, logs: newRing(200),
 	}
 	m.procs[z.Zone] = p

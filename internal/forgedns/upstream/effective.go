@@ -30,7 +30,11 @@ func ServerManagedDocument(d Descriptor, z ZoneConfig) Document {
 	if d.HasListenerToggles {
 		doc["TCP_LISTENER_ENABLED"] = z.TCPListener
 		doc["DOT_LISTENER_ENABLED"] = z.DoTListener
+		doc["DOT_LISTEN_HOST"] = tlsListenHost(z.BindHost, z.DoTPort, DefaultDoTPort)
+		doc["DOT_LISTEN_PORT"] = z.DoTPort
 		doc["DOH_LISTENER_ENABLED"] = z.DoHListener
+		doc["DOH_LISTEN_HOST"] = tlsListenHost(z.BindHost, z.DoHPort, DefaultDoHPort)
+		doc["DOH_LISTEN_PORT"] = z.DoHPort
 	}
 	doc["USE_EXTERNAL_SOCKS5"] = z.ExternalSocks5
 	doc["FORWARD_IP"] = z.ForwardIP

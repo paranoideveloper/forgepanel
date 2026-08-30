@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -217,4 +218,82 @@ func startRouter(t *testing.T, backends []frontrouter.Backend) string {
 	t.Cleanup(func() { cancel(); _ = pc.Close() })
 	go func() { _ = srv.ServeUDP(ctx, pc) }()
 	return pc.LocalAddr().String()
+}
+
+// The DNS half of the front router let many zones share :53. The TLS half is
+// the same problem one port over: a zone can also expose DNS-over-TLS on 853
+// and DNS-over-HTTPS on 443, and those are no more negotiable than 53 — a DoT
+// client goes to 853 or nowhere. Two zones with DoT enabled therefore collided
+// exactly as two zones on 53 collided, and the panel offered the toggle that
+// caused it.
+func TestBackendsCarryTheZonesPrivateTLSListeners(t *testing.T) {
+	a := zoneStatus("a", "127.0.0.1:5301", "a.example.com")
+	a.DoTListen, a.DoHListen = "127.0.0.1:8853", "127.0.0.1:8443"
+	b := zoneStatus("b", "127.0.0.1:5302", "b.example.com")
+	b.DoTListen = "127.0.0.1:8854" // DoT only; no DoH on this zone
+
+	got, skipped := frontBackends([]upstream.ZoneStatus{a, b})
+	if len(got) != 2 || len(skipped) != 0 {
+		t.Fatalf("got %d backends, %d skipped", len(got), len(skipped))
+	}
+	if got[0].TLSAddr != "127.0.0.1:8853" || got[0].HTTPSAddr != "127.0.0.1:8443" {
+		t.Fatalf("zone a TLS addresses not carried: %+v", got[0])
+	}
+	if got[1].TLSAddr != "127.0.0.1:8854" {
+		t.Fatalf("zone b DoT address not carried: %+v", got[1])
+	}
+	// Not guessed at from the DNS port. A zone with no DoH listener must reach
+	// the router as "no DoH", so the stream is refused with a reason instead of
+	// being dialled into a DNS socket that will never speak TLS.
+	if got[1].HTTPSAddr != "" {
+		t.Fatalf("zone b invented a DoH listener: %q", got[1].HTTPSAddr)
+	}
+}
+
+// A zone whose TLS listeners are on the PUBLIC port cannot be front-routed:
+// the router needs that port itself. Reported, not silently dropped.
+func TestZonesHoldingThePublicTLSPortAreReported(t *testing.T) {
+	a := zoneStatus("a", "127.0.0.1:5301", "a.example.com")
+	a.DoTListen = "0.0.0.0:853"
+
+	got, skipped := frontBackends([]upstream.ZoneStatus{a})
+	if len(got) != 1 {
+		t.Fatalf("the zone must still route DNS: %+v", got)
+	}
+	if got[0].TLSAddr != "" {
+		t.Fatalf("a zone on the public DoT port was offered as a backend: %+v", got[0])
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "853") {
+		t.Fatalf("skipped = %v, want a note naming the port", skipped)
+	}
+}
+
+// FrontRouterStatus and frontNote both carried the comment "for the API" and
+// had zero callers: the router multiplexed the port correctly and no operator
+// could see that it was running, which backend a query went to, or why a zone
+// had been skipped. The panel's own headline defect, in the panel's own code.
+func TestForgeDNSStatusCarriesTheFrontRouter(t *testing.T) {
+	c := &ForgeDNSController{addr: "0.0.0.0:53"}
+	c.frontNote = "front router idle: only one upstream zone"
+
+	st := c.Status()
+	front, ok := st["front_router"].(map[string]any)
+	if !ok {
+		t.Fatalf("status has no front_router: %v", keysOf(st))
+	}
+	if front["running"] != false {
+		t.Fatalf("running = %v, want false", front["running"])
+	}
+	if front["note"] != "front router idle: only one upstream zone" {
+		t.Fatalf("note = %v, want the controller's own note", front["note"])
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

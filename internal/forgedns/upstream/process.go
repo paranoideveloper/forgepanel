@@ -270,7 +270,8 @@ func (p *proc) status() ZoneStatus {
 	st := ZoneStatus{
 		Zone: p.zone, Adapter: p.adapter, State: p.state, PID: p.pid,
 		Tag: p.tag, Exe: p.exe, ConfigPath: p.cfgPath, Domains: p.domains,
-		Listen: p.listen, HealthURL: p.healthURL, Restarts: p.restarts,
+		Listen: p.listen, DoTListen: p.dotListen, DoHListen: p.dohListen,
+		HealthURL: p.healthURL, Restarts: p.restarts,
 		LastError: p.lastErr,
 	}
 	if p.logs != nil {

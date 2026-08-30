@@ -82,8 +82,29 @@ func serverOptions(d Descriptor) []Option {
 				Help: "DNS-over-TLS listener on :853. Needs the port free and reachable.",
 			}),
 			serverOpt(Option{
+				Key: "DOT_LISTEN_PORT", Type: TypeInt, Default: DefaultDoTPort, Min: intPtr(1), Max: intPtr(65535),
+				Managed: true, Verified: true,
+				Help: "Port for this zone's DoT listener. Leave it at 853 if this is the only zone serving DoT; " +
+					"give each zone its own private port to share the public 853 behind the front router.",
+			}),
+			serverOpt(Option{
+				Key: "DOT_LISTEN_HOST", Type: TypeString, Default: "", Managed: true, Runtime: true, Verified: true,
+				Help: "Panel-owned. Pinned to 127.0.0.1 whenever DOT_LISTEN_PORT is private, because a private " +
+					"port on a public interface is still reachable directly and silently bypasses the router.",
+			}),
+			serverOpt(Option{
 				Key: "DOH_LISTENER_ENABLED", Type: TypeBool, Default: false, Managed: true, Verified: true,
 				Help: "DNS-over-HTTPS listener on :443. Conflicts with any web server or proxy already on that port.",
+			}),
+			serverOpt(Option{
+				Key: "DOH_LISTEN_PORT", Type: TypeInt, Default: DefaultDoHPort, Min: intPtr(1), Max: intPtr(65535),
+				Managed: true, Verified: true,
+				Help: "Port for this zone's DoH listener. Leave it at 443 if this is the only zone serving DoH; " +
+					"give each zone its own private port to share the public 443 behind the front router.",
+			}),
+			serverOpt(Option{
+				Key: "DOH_LISTEN_HOST", Type: TypeString, Default: "", Managed: true, Runtime: true, Verified: true,
+				Help: "Panel-owned. Pinned to 127.0.0.1 whenever DOH_LISTEN_PORT is private.",
 			}),
 		)
 	}
