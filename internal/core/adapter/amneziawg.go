@@ -28,6 +28,11 @@ type awgAdapter struct {
 	last Plan
 }
 
+// awgAdapter deliberately does not implement Provisionable. There is nothing to
+// fetch: the data plane is the host's kernel module and awg-quick comes from the
+// distribution. That ABSENCE is now the signal ensureBinariesFor reads — it used
+// to read binmgr.Managed(EngineAmneziaWG) == false, in another package.
+
 // NewAmneziaWG returns the AmneziaWG adapter driving the given reconciler.
 func NewAmneziaWG(run InterfaceRunner) CoreAdapter { return &awgAdapter{run: run} }
 

@@ -54,6 +54,21 @@ func (a *brookAdapter) Detect() (bool, string, error) {
 	return detectBinary(a.bins.Path(binmgr.EngineBrook))
 }
 
+// Provisioned / Provision: Brook is a single downloaded binary, the same one
+// BrookManager runs per inbound. Fetching it here means the reload has it before
+// any inbound is started, rather than each process discovering it is missing.
+func (a *brookAdapter) Provisioned() bool { return a.bins.Present(binmgr.EngineBrook) }
+
+func (a *brookAdapter) Provision(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := a.bins.Ensure(binmgr.EngineBrook); err != nil {
+		return fmt.Errorf("brook binary: %w", err)
+	}
+	return nil
+}
+
 // BrookInbound describes one Brook server process. It is what GenerateConfig
 // emits, and it deliberately reports only WHETHER a password is set: this
 // document is surfaced in the panel's generated-config drawer, and Brook's

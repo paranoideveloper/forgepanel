@@ -292,7 +292,7 @@ func (r *Registry) ValidateBundle(b *engine.Bundle) error {
 		if len(cfg) == 0 {
 			continue
 		}
-		if v, ok := a.(interface{ BinaryPresent() bool }); ok && !v.BinaryPresent() {
+		if p, ok := a.(Provisionable); ok && !p.Provisioned() {
 			// The core has not been downloaded yet. Validating would trigger a
 			// ~60MB fetch inside what the caller thinks is a cheap check, and
 			// the reload path validates before applying anyway.
