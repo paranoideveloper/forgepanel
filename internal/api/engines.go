@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -169,7 +170,8 @@ func (s *Server) specsForBuild() ([]engine.InboundSpec, []paasRoute, []engine.Sk
 	if s.cfg != nil && s.paas().Enabled {
 		return s.paasSpecs()
 	}
-	return s.localInboundSpecs(), nil, nil
+	specs, skipped := s.localInboundSpecs()
+	return specs, nil, skipped
 }
 
 // candidateSpecs is specsForBuild without the reload's side effects, for the
@@ -304,25 +306,40 @@ func (s *Server) handleEngineValidate(c *gin.Context) {
 // its address is empty, a wildcard, a loopback, or an address this host actually
 // holds. That covers node addresses and imported foreign ones with one rule, and
 // it is the same question the core is about to ask the kernel.
-func (s *Server) localInboundSpecs() []engine.InboundSpec {
+func (s *Server) localInboundSpecs() ([]engine.InboundSpec, []engine.SkippedInbound) {
 	all := s.enabledInboundSpecs()
 	local := localAddresses()
 	if len(local) == 0 {
 		// The interface list could not be read. Filtering on a set we do not
 		// have would silently stop serving everything; leave the list alone and
 		// let the core report what it cannot bind.
-		return all
+		return all, nil
 	}
 	out := make([]engine.InboundSpec, 0, len(all))
+	var skipped []engine.SkippedInbound
 	for _, sp := range all {
 		if sp.Node == nil {
 			continue
 		}
 		if boundHere(sp.Node.Address, local) {
 			out = append(out, sp)
+			continue
 		}
+		// Dropping it is right — xray refuses the WHOLE config over one address
+		// it cannot bind, so serving it would take every other inbound down with
+		// it. Saying so is the part that was missing: without a reason the panel
+		// showed the inbound enabled, reachable, and serving nothing, with
+		// nothing in the engine log and nothing listening, which is
+		// indistinguishable from a broken core.
+		skipped = append(skipped, engine.SkippedInbound{
+			Remark: sp.Node.Remark,
+			Reason: fmt.Sprintf("address %q is not an address this server can bind, so it is left "+
+				"out rather than taking the whole config down with it. Use one of this host's own "+
+				"addresses (or 0.0.0.0), and put the public hostname clients dial in the link instead.",
+				sp.Node.Address),
+		})
 	}
-	return out
+	return out, skipped
 }
 
 // boundHere reports whether this host can bind addr.

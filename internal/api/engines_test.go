@@ -37,7 +37,7 @@ func TestThePanelDoesNotTryToServeANodesInbounds(t *testing.T) {
 		}
 	}
 
-	local := s.localInboundSpecs()
+	local, _ := s.localInboundSpecs()
 	var remarks []string
 	for _, sp := range local {
 		if sp.Node != nil {
@@ -83,8 +83,8 @@ func TestASingleBoxPanelServesEverything(t *testing.T) {
 	}); code != 201 && code != 200 {
 		t.Fatalf("create: %d %s", code, b)
 	}
-	if got := len(s.localInboundSpecs()); got != 1 {
-		t.Fatalf("a panel with no nodes serves %d inbound(s), want 1", got)
+	if got, _ := s.localInboundSpecs(); len(got) != 1 {
+		t.Fatalf("a panel with no nodes serves %d inbound(s), want 1", len(got))
 	}
 }
 
@@ -179,7 +179,8 @@ func TestImportedForeignConfigsAreNotServedLocally(t *testing.T) {
 	}
 
 	var served []string
-	for _, sp := range s.localInboundSpecs() {
+	localSpecs, _ := s.localInboundSpecs()
+	for _, sp := range localSpecs {
 		if sp.Node != nil {
 			served = append(served, sp.Node.Remark)
 		}
@@ -224,5 +225,66 @@ func TestBoundHereAcceptsOnlyWhatThisHostCanBind(t *testing.T) {
 		if got := boundHere(c.addr, local); got != c.want {
 			t.Errorf("boundHere(%q) = %v, want %v — %s", c.addr, got, c.want, c.why)
 		}
+	}
+}
+
+// Filtering an unbindable inbound is right. Doing it SILENTLY is the bug.
+//
+// An inbound whose address this host cannot bind is dropped from the generated
+// config — correctly, because the core would refuse the whole config over it.
+// But nothing recorded why: the panel reported the inbound enabled, reachable,
+// and not-serving-for-no-reason, with nothing in the engine log and nothing
+// listening. That is the exact "configured, enabled, carries nothing" failure
+// the not-serving-reason mechanism exists to end, and it cost real debugging
+// time on a live panel before it was traced back to this line.
+func TestAnUnbindableInboundIsReportedRatherThanVanishing(t *testing.T) {
+	s, token := adminAPI(t)
+	for _, in := range []map[string]any{
+		{"protocol": "vless", "address": "0.0.0.0", "port": 28010, "remark": "ours",
+			"transport": map[string]any{"network": "tcp"}, "security": map[string]any{"type": "reality"}, "enabled": true},
+		// A hostname this machine does not own. It resolves — the shape an
+		// operator actually produces when they paste a CDN or relay hostname
+		// into the address field, which is how this was found.
+		{"protocol": "vless", "address": "example.com", "port": 28011, "remark": "not-ours",
+			"transport": map[string]any{"network": "tcp"}, "security": map[string]any{"type": "reality"}, "enabled": true},
+	} {
+		if code, b := realPost(t, s, "/api/admin/inbounds", token, in); code != 201 && code != 200 {
+			t.Fatalf("create %v: %d %s", in["remark"], code, b)
+		}
+	}
+
+	specs, skipped := s.reloadSpecs()
+
+	var served []string
+	for _, sp := range specs {
+		if sp.Node != nil {
+			served = append(served, sp.Node.Remark)
+		}
+	}
+	for _, r := range served {
+		if r == "not-ours" {
+			t.Fatal("an inbound on an address this host cannot bind was handed to the core; " +
+				"xray refuses the whole config over one bad bind, taking every other inbound down")
+		}
+	}
+	if len(served) == 0 {
+		t.Fatal("the panel's own inbound went with it")
+	}
+
+	// The load-bearing assertion: it was REPORTED, not just removed.
+	var reason string
+	for _, sk := range skipped {
+		if sk.Remark == "not-ours" {
+			reason = sk.Reason
+		}
+	}
+	if reason == "" {
+		t.Fatal("the inbound was dropped with no reason recorded — the panel shows it " +
+			"enabled and serving nothing, which is indistinguishable from a bug in the core")
+	}
+	// And the reason has to name the cause, or it sends the operator looking in
+	// the wrong place.
+	if !strings.Contains(reason, "example.com") {
+		t.Errorf("reason %q does not name the address that cannot be bound", reason)
 	}
 }
