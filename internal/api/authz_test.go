@@ -122,6 +122,7 @@ func TestAuthzSensitiveReadsAreRestricted(t *testing.T) {
 		{http.MethodGet, "/api/admin/forgedns/zones/:id/config"},
 		{http.MethodGet, "/api/admin/edge/feed-token"},
 		{http.MethodGet, "/api/admin/dns/credentials"},
+		{http.MethodGet, "/api/admin/openapi.json"},
 	}
 	for _, s := range sensitive {
 		roles := rolesForRoute(s.method, s.path)

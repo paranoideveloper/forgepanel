@@ -124,6 +124,11 @@ var adminAuthzRules = []authzRule{
 	{methods: get, path: "/api/admin/forgedns/zones/:id/config", exact: true, roles: ownerAdmin},
 	{path: "/api/admin/edge/feed-token", roles: ownerAdmin},
 	{path: "/api/admin/dns/credentials", roles: ownerAdmin},
+	// The endpoint inventory plus x-forgepanel-roles is the panel's own
+	// authorization map — a precise list of what each role may reach, and by
+	// omission what it may not. That is reconnaissance, not a dashboard, so it
+	// does not go to a viewer or a reseller the way /api/admin/metrics does.
+	{methods: get, path: "/api/admin/openapi.json", exact: true, roles: ownerAdmin},
 
 	// --- backup: owner only -------------------------------------------------
 	//

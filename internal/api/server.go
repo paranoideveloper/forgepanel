@@ -922,6 +922,12 @@ func (s *Server) routes() {
 			// What this panel can be told, described by the panel. Without it the
 			// UI has to carry its own copy of every enum and default.
 			admin.GET("/settings/registry", s.handleSettingsRegistry)
+			// And what this panel can be ASKED, described by the panel: the
+			// endpoint surface itself, generated from this router at request
+			// time. It must be built per request, not here — routes() registers
+			// top to bottom, so a document snapshotted at this line would omit
+			// every route below it.
+			admin.GET("/openapi.json", s.handleOpenAPI)
 			admin.GET("/settings/subscription", s.handleGetSubSettings)
 			admin.POST("/settings/subscription", s.handleSetSubSettings)
 			admin.GET("/settings/nettune", s.handleGetNetTune)
