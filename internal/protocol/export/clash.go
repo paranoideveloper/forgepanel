@@ -243,7 +243,52 @@ func ClashProxy(n *model.Node) (map[string]any, error) {
 // document routes to. Exported so routing presets can target it in their rules.
 const ClashProxySelector = "PROXY"
 
+// ClashAutoSelect is the name of the latency-tested group. It is the FIRST
+// member of the selector and the selector's default, so a subscription works
+// without the user picking anything — which is the whole point: most people
+// never open the group list, and the one node the selector happened to list
+// first is not the one that is up.
+const ClashAutoSelect = "Best Ping"
+
+// AutoSelect configures the latency-tested group.
+type AutoSelect struct {
+	// Interval in seconds between tests. Zero takes DefaultURLTestInterval.
+	Interval int
+	// URL fetched to measure. Zero-value takes DefaultURLTestURL.
+	URL string
+	// Tolerance in ms: how much better a node must be before the group switches.
+	// Without it a group flaps between two nodes a few milliseconds apart, and
+	// every switch drops the connections on the old one.
+	Tolerance int
+}
+
+const (
+	DefaultURLTestInterval = 60
+	// A 204 endpoint, because it is the smallest possible successful response
+	// and every captive-portal detector already uses it.
+	DefaultURLTestURL   = "http://www.gstatic.com/generate_204"
+	DefaultURLTolerance = 50
+)
+
+func (a AutoSelect) withDefaults() AutoSelect {
+	if a.Interval <= 0 {
+		a.Interval = DefaultURLTestInterval
+	}
+	if strings.TrimSpace(a.URL) == "" {
+		a.URL = DefaultURLTestURL
+	}
+	if a.Tolerance <= 0 {
+		a.Tolerance = DefaultURLTolerance
+	}
+	return a
+}
+
 func ClashYAML(nodes []*model.Node) (string, error) {
+	return ClashYAMLAuto(nodes, AutoSelect{})
+}
+
+// ClashYAMLAuto is ClashYAML with the latency test configured.
+func ClashYAMLAuto(nodes []*model.Node, auto AutoSelect) (string, error) {
 	proxies := make([]any, 0, len(nodes))
 	names := make([]any, 0, len(nodes))
 	seen := make(map[string]int, len(nodes))
@@ -270,14 +315,33 @@ func ClashYAML(nodes []*model.Node) (string, error) {
 		names = append(names, "DIRECT")
 	}
 
+	auto = auto.withDefaults()
+	groups := []any{}
+	// The selector lists the auto group first and defaults to it, so a client
+	// that has never been touched picks the fastest node rather than whichever
+	// one happened to be generated first.
+	selectorMembers := names
+	if len(nodes) > 1 && len(names) > 1 {
+		groups = append(groups, map[string]any{
+			"name":      ClashAutoSelect,
+			"type":      "url-test",
+			"proxies":   names,
+			"url":       auto.URL,
+			"interval":  auto.Interval,
+			"tolerance": auto.Tolerance,
+		})
+		selectorMembers = append([]any{ClashAutoSelect}, names...)
+	}
+	groups = append(groups, map[string]any{
+		"name":    ClashProxySelector,
+		"type":    "select",
+		"proxies": selectorMembers,
+	})
+
 	doc := map[string]any{
-		"proxies": proxies,
-		"proxy-groups": []any{map[string]any{
-			"name":    ClashProxySelector,
-			"type":    "select",
-			"proxies": names,
-		}},
-		"rules": []any{"MATCH," + ClashProxySelector},
+		"proxies":      proxies,
+		"proxy-groups": groups,
+		"rules":        []any{"MATCH," + ClashProxySelector},
 	}
 
 	var b strings.Builder

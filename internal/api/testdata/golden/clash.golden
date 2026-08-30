@@ -40,9 +40,21 @@ proxies:
     password: hp
     username: hu
 proxy-groups:
+  - name: Best Ping
+    type: url-test
+    interval: 60
+    proxies:
+      - vmess-ws
+      - trojan
+      - ss
+      - socks
+      - http
+    tolerance: 50
+    url: "http://www.gstatic.com/generate_204"
   - name: PROXY
     type: select
     proxies:
+      - Best Ping
       - vmess-ws
       - trojan
       - ss

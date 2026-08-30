@@ -582,12 +582,16 @@ func xraySubscription(nodes []*model.Node, route routing.Options, frag routing.F
 const (
 	sbSelectorTag = "proxy"
 	sbDirectTag   = "direct"
+	// sbAutoTag is the latency-tested group. Reserved alongside the other two:
+	// sing-box refuses a config with two outbounds sharing a tag, and a node
+	// that claimed this one would take the whole subscription down.
+	sbAutoTag = "auto"
 )
 
 func singboxSubscription(nodes []*model.Node, route routing.Options, frag routing.Fragment) []byte {
 	outs := make([]any, 0, len(nodes)+2)
 	// Pre-reserve the tags this function emits itself, so no node can claim them.
-	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1}
+	seen := map[string]int{sbSelectorTag: 1, sbDirectTag: 1, sbAutoTag: 1}
 	var tags []string
 	for i, n := range nodes {
 		// Outbounds, plural: ShadowTLS is a PAIR — an inner Shadowsocks that
@@ -628,7 +632,25 @@ func singboxSubscription(nodes []*model.Node, route routing.Options, frag routin
 	}
 	final := sbDirectTag
 	if len(tags) > 0 {
-		outs = append(outs, map[string]any{"type": "selector", "tag": sbSelectorTag, "outbounds": append(append([]string{}, tags...), sbDirectTag), "default": tags[0]})
+		// The latency-tested group, and the selector's default, so a client that
+		// has never been opened uses the fastest node rather than whichever one
+		// was generated first. Only worth emitting for more than one node: a
+		// urltest over a single outbound measures it and then picks it.
+		members := append([]string{}, tags...)
+		if len(tags) > 1 {
+			outs = append(outs, map[string]any{
+				"type": "urltest", "tag": sbAutoTag,
+				"outbounds": append([]string{}, tags...),
+				"url":       export.DefaultURLTestURL,
+				// sing-box wants a duration string, not a number; a bare integer
+				// is rejected at parse time and takes the whole config with it.
+				"interval":  fmt.Sprintf("%ds", export.DefaultURLTestInterval),
+				"tolerance": export.DefaultURLTolerance,
+			})
+			members = append([]string{sbAutoTag}, members...)
+		}
+		outs = append(outs, map[string]any{"type": "selector", "tag": sbSelectorTag,
+			"outbounds": append(members, sbDirectTag), "default": members[0]})
 		final = sbSelectorTag
 	}
 	outs = append(outs, map[string]any{"type": "direct", "tag": sbDirectTag})

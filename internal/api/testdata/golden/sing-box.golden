@@ -68,8 +68,23 @@
       "username": "hu"
     },
     {
-      "default": "proxy-2",
+      "interval": "60s",
       "outbounds": [
+        "proxy-2",
+        "proxy-3",
+        "proxy-4",
+        "proxy-5",
+        "proxy-6"
+      ],
+      "tag": "auto",
+      "tolerance": 50,
+      "type": "urltest",
+      "url": "http://www.gstatic.com/generate_204"
+    },
+    {
+      "default": "auto",
+      "outbounds": [
+        "auto",
         "proxy-2",
         "proxy-3",
         "proxy-4",
