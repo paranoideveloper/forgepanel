@@ -65,8 +65,12 @@ func (s *Server) handleTestEgress(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
+	// 502 is the handler's own diagnosis — "the proxy could not reach it". A
+	// target the egress guard REFUSED is typed, so it keeps its own 400 and
+	// remediation instead: the operator typed an address the panel will not
+	// fetch, and telling them their proxy is broken sends them the wrong way.
 	if err := netegress.Probe(ctx, req.Target); err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": err.Error()})
+		failErr(c, http.StatusBadGateway, err)
 		return
 	}
 	c.JSON(200, gin.H{"ok": true, "via": netegress.Current()})

@@ -8,6 +8,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/edge"
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 )
 
@@ -16,10 +17,12 @@ import (
 // This function is the reason the package is worth having. Without it the HTTP
 // layer needs a switch per typed-error package, which is exactly how internal/dns
 // and internal/edge each ended up with their own copy of the same kind->status
-// table. Adding a fourth typed error means adding a case here and nowhere else.
+// table. Adding another typed error means adding a case here and nowhere else.
 //
-// apierr imports dns, edge and telegram; none of the three imports internal/api,
-// so the dependency runs one way and there is no cycle to design around.
+// apierr imports dns, edge, telegram and netegress; none of the four imports
+// internal/api, so the dependency runs one way and there is no cycle to design
+// around. netegress is already a transitive dependency here (through dns),
+// which is also why netegress must not import this package back.
 func From(err error) *Error {
 	if err == nil {
 		return nil
@@ -47,6 +50,7 @@ func From(err error) *Error {
 			return Unspecified()
 		}
 	case *backup.S3Error:
+	case *netegress.BlockedError:
 		if v == nil {
 			return Unspecified()
 		}
@@ -95,6 +99,22 @@ func From(err error) *Error {
 	var s3e *backup.S3Error
 	if errors.As(err, &s3e) && s3e != nil {
 		return fromS3(s3e, err)
+	}
+	// The egress guard refused a target the OPERATOR typed, so it is their
+	// input that is wrong, not the panel — without this it arrives as a 500,
+	// or as the 502 the egress test button uses for "your proxy is broken",
+	// and the operator goes off to fix a proxy that is working fine.
+	var be *netegress.BlockedError
+	if errors.As(err, &be) && be != nil {
+		return &Error{
+			Op:      "egress-guard",
+			Kind:    KindValidation,
+			Message: be.Error(),
+			Remediation: "Point this at a public address. The panel refuses to fetch its own host, " +
+				"a private network, or the cloud instance-metadata endpoint.",
+			Details: map[string]any{"address": be.Addr},
+			Cause:   err,
+		}
 	}
 	// An untyped error is our fault until a handler says otherwise; handlers
 	// that already know better pass a fallback through Coerce.
@@ -193,6 +213,7 @@ func IsTyped(err error) bool {
 	case *telegram.SendError:
 		return v != nil
 	case *backup.S3Error:
+	case *netegress.BlockedError:
 		return v != nil
 	}
 	if e, ok := As(err); ok && e != nil {
@@ -209,7 +230,14 @@ func IsTyped(err error) bool {
 		return true
 	}
 	var s3e *backup.S3Error
-	return errors.As(err, &s3e) && s3e != nil
+	if errors.As(err, &s3e) && s3e != nil {
+		return true
+	}
+	// Both halves matter: registering *BlockedError in From alone still lets
+	// Coerce flatten a guard refusal back onto the caller's fallback status,
+	// and the classification above becomes cosmetic.
+	var be *netegress.BlockedError
+	return errors.As(err, &be) && be != nil
 }
 
 // Coerce is From for a handler that has already chosen a status.

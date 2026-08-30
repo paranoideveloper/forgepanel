@@ -522,3 +522,27 @@ func TestTheSubscribableEventsAreExactlyTheOnesThePanelRaises(t *testing.T) {
 			"enabled, green and permanently silent:\n  %s", strings.Join(unraised, "\n  "))
 	}
 }
+
+// Owning the panel does not imply owning the hosting account. 169.254.169.254
+// hands instance credentials to anything on the box, and a stored webhook is
+// retried by a background goroutine with no operator watching — so the refusal
+// has to happen at save time, not only at delivery time.
+func TestAWebhookPointedAtTheMetadataServiceIsRefusedOnSave(t *testing.T) {
+	s, token := adminAPI(t)
+
+	code, body := realPost(t, s, "/api/admin/settings/webhooks", token, map[string]any{
+		"url": "http://169.254.169.254/hook", "events": "node-down", "enabled": true,
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("a webhook aimed at the cloud metadata service was accepted with %d: %s", code, body)
+	}
+
+	// The other half of the policy: an internal receiver is the DOCUMENTED case
+	// for a webhook (internal/webhook/transport.go), so loopback must still save.
+	code, body = realPost(t, s, "/api/admin/settings/webhooks", token, map[string]any{
+		"url": "http://127.0.0.1:2053/hook", "events": "node-down", "enabled": true,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("a webhook aimed at an internal receiver was refused with %d: %s", code, body)
+	}
+}

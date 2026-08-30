@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/forgepanel/forgepanel/internal/apierr"
+	"github.com/forgepanel/forgepanel/internal/netegress"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -129,23 +129,21 @@ func normalizeEvents(raw string) (string, error) {
 	return strings.Join(out, ","), nil
 }
 
-// validateWebhookURL refuses anything the delivery client could not POST to.
-func validateWebhookURL(raw string) error {
+// validateWebhookURL refuses anything the delivery client could not, or must
+// not, POST to.
+//
+// It refuses at SAVE time as well as at delivery time on purpose: a stored
+// endpoint is retried by a background goroutine, so a target that only fails on
+// delivery fails where nobody is looking. PolicyNoMetadata rather than
+// PolicyStrict — an internal receiver is the documented case for a webhook
+// (internal/webhook/transport.go), the cloud metadata endpoint never is.
+func validateWebhookURL(ctx context.Context, raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return fmt.Errorf("a webhook needs a URL to post to")
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("%q is not a URL: %w", raw, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("a webhook URL must be http or https, not %q", u.Scheme)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("%q has no host", raw)
-	}
-	return nil
+	_, err := netegress.GuardTarget(ctx, netegress.PolicyNoMetadata, raw)
+	return err
 }
 
 type webhookRequest struct {
@@ -195,7 +193,7 @@ func (s *Server) handleCreateWebhook(c *gin.Context) {
 	if req.URL != nil {
 		row.URL = strings.TrimSpace(*req.URL)
 	}
-	if err := validateWebhookURL(row.URL); err != nil {
+	if err := validateWebhookURL(c.Request.Context(), row.URL); err != nil {
 		failErr(c, http.StatusBadRequest, err)
 		return
 	}
@@ -262,7 +260,7 @@ func (s *Server) handleUpdateWebhook(c *gin.Context) {
 		return
 	}
 	if req.URL != nil {
-		if err := validateWebhookURL(*req.URL); err != nil {
+		if err := validateWebhookURL(c.Request.Context(), *req.URL); err != nil {
 			failErr(c, http.StatusBadRequest, err)
 			return
 		}

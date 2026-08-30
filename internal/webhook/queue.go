@@ -19,6 +19,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/netegress"
 	"github.com/forgepanel/forgepanel/internal/version"
 )
 
@@ -239,6 +240,15 @@ func send(ctx context.Context, ep Endpoint, eventType, id string, body []byte) R
 	res := Result{At: now.UTC()}
 	client, err := newClient(ep.ProxyURL, attemptTimeout)
 	if err != nil {
+		res.Err = err.Error()
+		return res
+	}
+	// Re-checked per attempt rather than trusted from save time: the dial-time
+	// hook inside the client cannot cover this path on its own, because a proxy
+	// override makes the transport dial the proxy instead. Status stays 0 so
+	// retryable() keeps this retryable — an operator who fixes the URL should
+	// not have to restart the panel to make deliveries resume.
+	if _, err := netegress.GuardTarget(ctx, netegress.PolicyNoMetadata, ep.URL); err != nil {
 		res.Err = err.Error()
 		return res
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -361,5 +362,49 @@ func TestAnAlertThatIsStillActiveIsReSentAfterTheRepeatWindow(t *testing.T) {
 	defer mu.Unlock()
 	if count != 2 {
 		t.Fatalf("deliveries after the window reopened = %d, want 2", count)
+	}
+}
+
+// A receiver behind HTTP basic auth is configured as user:pass@host — there is
+// no header field on a webhook endpoint, and the panel's own UI offers none. The
+// SSRF guard rejected embedded credentials at DELIVERY time, which runs against
+// every row already in the table, so an upgrade turned working endpoints into
+// permanent failures: retryable, six attempts, then given up, with a remediation
+// naming a feature the product does not have.
+//
+// Userinfo is not an SSRF control. What stops an internal fetch is the resolved
+// IP, which is checked either way.
+func TestAReceiverWithEmbeddedCredentialsStillGetsItsDelivery(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, _ := r.BasicAuth()
+		got = user + ":" + pass
+	}))
+	defer srv.Close()
+
+	// The shape an operator stores: credentials in the URL, which is the only
+	// place this product lets them put one.
+	withCreds := strings.Replace(srv.URL, "http://", "http://hookuser:hookpass@", 1)
+
+	var mu sync.Mutex
+	var results []Result
+	d := testDispatcher(t, []Endpoint{{ID: 1, URL: withCreds}}, func(_ uint, res Result) {
+		mu.Lock()
+		results = append(results, res)
+		mu.Unlock()
+	})
+	d.Dispatch(Event{Type: "node-down", Subject: "edge-1"})
+	drainT(t, d)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(results) != 1 {
+		t.Fatalf("attempts = %d, want 1 — a working endpoint entered the retry ladder: %+v", len(results), results)
+	}
+	if !results[0].OK() {
+		t.Fatalf("delivery refused: %+v", results[0])
+	}
+	if got != "hookuser:hookpass" {
+		t.Fatalf("receiver saw basic-auth %q, want hookuser:hookpass", got)
 	}
 }
