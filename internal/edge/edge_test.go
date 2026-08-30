@@ -87,6 +87,63 @@ func TestDeploy_HappyPath(t *testing.T) {
 	}
 }
 
+// TestDeploy_SelfManageBindsCloudflareCredential covers the one append every
+// other path in this feature flows through.
+//
+// The Worker's own Deployment panel reads env.CF_API_TOKEN + env.CF_ACCOUNT_ID
+// and reports "no Cloudflare credential bound" without them. Nothing has ever
+// sent them, so that branch has been permanently starved.
+func TestDeploy_SelfManageBindsCloudflareCredential(t *testing.T) {
+	deploy := func(t *testing.T, selfManage bool) *uploadMetadata {
+		t.Helper()
+		m := newCFMock(t)
+		if _, err := Deploy(ctx(t), m.client(), DeploySpec{
+			Name: "w", SecurePath: "qrs7tuvwxy23456789abcdef",
+			Bundle: []byte("export default {}"), SelfManage: selfManage, SkipVerify: true,
+		}); err != nil {
+			t.Fatalf("Deploy: %v", err)
+		}
+		up := m.snapshot().LastUpload
+		if up == nil {
+			t.Fatal("nothing was uploaded")
+		}
+		return up
+	}
+
+	t.Run("binds both when asked", func(t *testing.T) {
+		up := deploy(t, true)
+		var sawToken, sawAccount bool
+		for _, b := range up.Bindings {
+			// secret_text, not plain_text: same shape on the wire, but
+			// Cloudflare redacts it from the dashboard and the API. This is the
+			// one binding whose value is a credential.
+			if b.Name == "CF_API_TOKEN" && b.Type == "secret_text" && b.Text == "test-token" {
+				sawToken = true
+			}
+			if b.Name == "CF_ACCOUNT_ID" && b.Type == "plain_text" && b.Text == "acct-1" {
+				sawAccount = true
+			}
+		}
+		if !sawToken {
+			t.Errorf("no CF_API_TOKEN secret_text binding in %+v", up.Bindings)
+		}
+		// Both or neither: the Worker hands back no credentials unless it has
+		// both, so binding one alone looks exactly like binding nothing.
+		if !sawAccount {
+			t.Errorf("no CF_ACCOUNT_ID plain_text binding in %+v", up.Bindings)
+		}
+	})
+
+	t.Run("never by default", func(t *testing.T) {
+		up := deploy(t, false)
+		for _, b := range up.Bindings {
+			if b.Name == "CF_API_TOKEN" || b.Name == "CF_ACCOUNT_ID" {
+				t.Errorf("a plain deploy wrote a credential into the Worker: %+v", b)
+			}
+		}
+	})
+}
+
 func TestDeploy_RefusesToClobber(t *testing.T) {
 	m := newCFMock(t)
 	m.Scripts["taken"] = ScriptInfo{ID: "taken"}

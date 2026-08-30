@@ -1,8 +1,10 @@
 /**
- * Cloudflare API operations the panel exposes: deploy, update, delete, status —
- * for both Workers and Pages.
+ * Cloudflare API operations the panel exposes: reporting where this Worker (or
+ * Pages project) is deployed and whether a newer release exists. Read-only, on
+ * purpose — every write stays on the panel host, where `forgectl edge` and the
+ * panel's own deploy routes use a token for one invocation and never store it.
  *
- * CREDENTIAL POLICY. There are two ways to authorise these, and they are NOT
+ * CREDENTIAL POLICY. There are two ways to authorise a deploy, and they are NOT
  * equivalent:
  *
  *   OAuth (preferred) — `forgectl edge deploy` runs a PKCE flow against
@@ -10,13 +12,14 @@
  *     machine. Nothing is ever written into the Worker. This is the default and
  *     the only flow that needs no long-lived secret anywhere.
  *
- *   Token fallback — an API token can be supplied as the `CF_API_TOKEN` binding
- *     for operators who want the panel itself to self-update or self-delete. A
- *     token stored in a Worker binding is readable by anyone who can deploy to
- *     that account, so this is opt-in and the panel says so.
+ *   Self-manage — `--self-manage` (or the panel's own checkbox) binds the
+ *     account credential into the Worker as `CF_API_TOKEN` + `CF_ACCOUNT_ID`,
+ *     which is what the functions below read. A token stored in a Worker binding
+ *     is readable by anyone who can deploy to that account, so it is opt-in, off
+ *     by default, and both call sites say what it costs.
  *
- * When neither is present the panel still works completely; only the
- * self-management buttons are unavailable, and they report exactly why.
+ * Without the binding the panel still works completely; only the Deployment
+ * section is blank, and it reports exactly why.
  */
 
 import { safeError } from '../common/http';
@@ -58,80 +61,18 @@ async function cfFetch<T>(
 
 // --- Workers ---------------------------------------------------------------
 
-export async function deployWorker(
-  creds: CfCredentials, name: string, script: string, kvNamespaceID?: string,
-): Promise<void> {
-  const bindings = kvNamespaceID
-    ? [{ type: 'kv_namespace', name: 'KV', namespace_id: kvNamespaceID }]
-    : undefined;
-  const metadata = {
-    main_module: 'worker.js',
-    compatibility_date: new Date().toISOString().split('T')[0],
-    compatibility_flags: ['nodejs_compat'],
-    // Without keep_bindings an update would silently detach KV and every
-    // subscriber's config would vanish on the next request.
-    keep_bindings: ['kv_namespace', 'd1'],
-    ...(bindings ? { bindings } : {}),
-  };
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  form.append('worker.js', new Blob([script], { type: 'application/javascript+module' }), 'worker.js');
-  await cfFetch(creds, `/accounts/${creds.accountID}/workers/scripts/${name}`, { method: 'PUT', body: form });
-}
-
-export async function deleteWorker(creds: CfCredentials, name: string): Promise<void> {
-  await cfFetch(creds, `/accounts/${creds.accountID}/workers/scripts/${name}`, { method: 'DELETE' });
-}
-
 export async function workerDomains(creds: CfCredentials, name: string): Promise<string[]> {
   const result = await cfFetch<{ hostname: string }[]>(
     creds, `/accounts/${creds.accountID}/workers/domains?service=${encodeURIComponent(name)}`);
   return result.map((r) => r.hostname);
 }
 
-export async function setWorkerDomain(
-  creds: CfCredentials, name: string, hostname: string, zoneID: string,
-): Promise<void> {
-  await cfFetch(creds, `/accounts/${creds.accountID}/workers/domains`, {
-    method: 'PUT',
-    body: JSON.stringify({ hostname, service: name, environment: 'production', zone_id: zoneID }),
-  });
-}
-
 // --- Pages -----------------------------------------------------------------
-
-export async function deployPages(creds: CfCredentials, project: string, script: string): Promise<void> {
-  const form = new FormData();
-  form.append('manifest', '{}');
-  form.append('_worker.js', new Blob([script], { type: 'application/javascript' }), '_worker.js');
-  await cfFetch(creds, `/accounts/${creds.accountID}/pages/projects/${project}/deployments`, {
-    method: 'POST', body: form,
-  });
-}
-
-export async function deletePagesProject(creds: CfCredentials, project: string): Promise<void> {
-  await cfFetch(creds, `/accounts/${creds.accountID}/pages/projects/${project}`, { method: 'DELETE' });
-}
 
 export async function pagesDomains(creds: CfCredentials, project: string): Promise<string[]> {
   const result = await cfFetch<{ name: string }[]>(
     creds, `/accounts/${creds.accountID}/pages/projects/${project}/domains`);
   return result.map((r) => r.name);
-}
-
-// --- DNS -------------------------------------------------------------------
-
-export async function listZones(creds: CfCredentials): Promise<{ id: string; name: string }[]> {
-  return cfFetch<{ id: string; name: string }[]>(creds, '/zones');
-}
-
-export async function createProxiedCNAME(
-  creds: CfCredentials, zoneID: string, name: string, content: string,
-): Promise<void> {
-  await cfFetch(creds, `/zones/${zoneID}/dns_records`, {
-    method: 'POST',
-    body: JSON.stringify({ type: 'CNAME', name, content, ttl: 1, proxied: true, comment: 'ForgeEdge' }),
-  });
 }
 
 // --- Status ----------------------------------------------------------------

@@ -314,6 +314,11 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		// could not reach Cloudflare-hosted sites. It is applied to the freshly
 		// deployed Worker's config below.
 		ProxyIP string `json:"proxy_ip"`
+		// SelfManage binds this account's Cloudflare credential into the Worker
+		// so its own Deployment panel can report the script name and hostnames
+		// it is serving on. Opt-in, and the form says what it costs: a token in
+		// a binding is readable by anyone who can deploy to this account.
+		SelfManage bool `json:"self_manage"`
 	}
 	_ = c.ShouldBindJSON(&req)
 	if strings.TrimSpace(req.APIToken) == "" {
@@ -358,6 +363,7 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 	out, err := edge.Deploy(ctx, cl, edge.DeploySpec{
 		Name: req.Name, Target: req.Target, SecurePath: req.SecurePath,
 		Bundle: []byte(req.Bundle), Force: req.Force, SkipVerify: req.SkipVerify,
+		SelfManage: req.SelfManage,
 	})
 	if err == nil && strings.TrimSpace(req.ProxyIP) != "" {
 		// Best effort, and reported rather than fatal: the Worker IS deployed at
@@ -375,7 +381,28 @@ func (s *Server) handleEdgeDeploy(c *gin.Context) {
 		return
 	}
 	d := &store.EdgeDeployment{Name: out.Name, Target: out.Target, Origin: out.Origin,
-		SecurePath: out.SecurePath, PushToken: out.FeedPushToken, AccountID: cl.AccountID}
+		SecurePath: out.SecurePath, PushToken: out.FeedPushToken, AccountID: cl.AccountID,
+		SelfManage: out.SelfManage}
+	// A force redeploy over a Worker the panel already knows would collide with
+	// the unique name index, and the handler used to answer registered:false and
+	// leave the old row untouched. That row is what `forgectl edge update` reads
+	// its bindings back from, so a stale one is the whole bug returning: tick
+	// self-manage on a redeploy, get a working Deployment panel, and the next
+	// update silently strips the credential. Update in place, as the CLI does.
+	if existing, lerr := s.db.EdgeDeploymentByName(out.Name); lerr == nil {
+		existing.Origin, existing.SecurePath, existing.AccountID = out.Origin, out.SecurePath, cl.AccountID
+		existing.SelfManage = out.SelfManage
+		if out.FeedPushToken != "" {
+			existing.PushToken = out.FeedPushToken
+		}
+		if serr := s.db.SaveEdgeDeployment(existing); serr != nil {
+			c.JSON(http.StatusOK, gin.H{"deployment": out, "registered": false, "register_error": serr.Error()})
+			return
+		}
+		s.audit(c, "edge.deploy", out.Name)
+		c.JSON(http.StatusOK, gin.H{"deployment": out, "registered": true, "id": existing.ID})
+		return
+	}
 	if err := s.db.CreateEdgeDeployment(d); err != nil {
 		// The Worker is live even though the row failed; say so rather than
 		// reporting a failure that would send the operator hunting for nothing.

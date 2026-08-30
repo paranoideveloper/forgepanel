@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,7 +28,11 @@ type cfEdgeMock struct {
 	scripts map[string]bool
 	kv      map[string]string // id -> title
 	deleted []string
-	srv     *httptest.Server
+	// lastBindings is the bindings array of the most recent script upload.
+	// The upload used to be copied to io.Discard, which made every binding the
+	// CLI sends — or fails to re-send — invisible to these tests.
+	lastBindings []map[string]any
+	srv          *httptest.Server
 }
 
 func newCFEdgeMock(t *testing.T) *cfEdgeMock {
@@ -101,7 +107,11 @@ func (m *cfEdgeMock) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			m.ok(w, map[string]string{"id": name})
 		case http.MethodPut:
-			_, _ = io.Copy(io.Discard, r.Body)
+			// sub == "" is the script upload; the deploy also PUTs
+			// .../schedules, which carries no bindings and must not clear them.
+			if sub == "" {
+				m.lastBindings = uploadBindings(r)
+			}
 			m.scripts[name] = true
 			m.ok(w, map[string]string{"id": name})
 		case http.MethodDelete:
@@ -124,6 +134,50 @@ func (m *cfEdgeMock) hasScript(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.scripts[name]
+}
+
+// bindings returns the last upload's bindings array.
+func (m *cfEdgeMock) bindings() []map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastBindings
+}
+
+// binding returns the uploaded binding with this name, or nil.
+func (m *cfEdgeMock) binding(name string) map[string]any {
+	for _, b := range m.bindings() {
+		if b["name"] == name {
+			return b
+		}
+	}
+	return nil
+}
+
+// uploadBindings pulls the bindings array out of the multipart `metadata` part
+// of a script upload. A parse failure returns nil, which reads as "no bindings"
+// and fails the assertions rather than passing them silently.
+func uploadBindings(r *http.Request) []map[string]any {
+	_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return nil
+	}
+	mr := multipart.NewReader(r.Body, params["boundary"])
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			return nil
+		}
+		if part.FormName() != "metadata" {
+			continue
+		}
+		var meta struct {
+			Bindings []map[string]any `json:"bindings"`
+		}
+		if err := json.NewDecoder(part).Decode(&meta); err != nil {
+			return nil
+		}
+		return meta.Bindings
+	}
 }
 
 func (m *cfEdgeMock) wasDeleted(what string) bool {
@@ -405,6 +459,66 @@ func TestEdgeUpdate_ReUploadsRegisteredWorkers(t *testing.T) {
 	if !cf.hasScript("w") {
 		t.Fatal("the update never uploaded a script")
 	}
+}
+
+// TestEdgeUpdate_ResendsTheSelfManageBinding pins the half of this feature that
+// is easiest to leave out and impossible to see from the panel host.
+//
+// keep_bindings is ["kv_namespace","d1"], so every upload resends a CLOSED list
+// of text bindings: anything not in the new upload is gone. An operator who
+// ticks "let this worker manage itself" gets a working Deployment panel, and the
+// next `forgectl edge update --all` silently strips the credential — with no
+// error anywhere, because nothing on the Go side ever reads a binding back.
+func TestEdgeUpdate_ResendsTheSelfManageBinding(t *testing.T) {
+	update := func(t *testing.T, selfManage bool) *cfEdgeMock {
+		t.Helper()
+		cf := newCFEdgeMock(t)
+		data := edgeDataDir(t, &store.EdgeDeployment{
+			Name: "w", Origin: "https://w.acme.workers.dev",
+			SecurePath: "path23456789abcdefghijkl", SelfManage: selfManage,
+		})
+		bundle := writeBundle(t, "export default {v:2}")
+		if err := cmdEdgeUpdate([]string{
+			"--name", "w", "--api-token", "cf-token", "--account", "acct-1",
+			"--bundle", bundle, "--api-base", cf.base(), "--data", data, "--skip-verify",
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		return cf
+	}
+
+	t.Run("re-sends both bindings", func(t *testing.T) {
+		cf := update(t, true)
+		tok := cf.binding("CF_API_TOKEN")
+		if tok == nil {
+			t.Fatalf("the update dropped CF_API_TOKEN; bindings were %+v", cf.bindings())
+		}
+		if tok["type"] != "secret_text" {
+			t.Errorf("CF_API_TOKEN type = %v, want secret_text", tok["type"])
+		}
+		if tok["text"] != "cf-token" {
+			t.Errorf("CF_API_TOKEN text = %v, want the token this invocation used", tok["text"])
+		}
+		acct := cf.binding("CF_ACCOUNT_ID")
+		if acct == nil {
+			t.Fatalf("the update dropped CF_ACCOUNT_ID; bindings were %+v", cf.bindings())
+		}
+		// Both or neither: the Worker returns no credentials unless it has both,
+		// so a half-bound Worker is indistinguishable from an unbound one.
+		if acct["type"] != "plain_text" || acct["text"] != "acct-1" {
+			t.Errorf("CF_ACCOUNT_ID = %+v, want plain_text acct-1", acct)
+		}
+	})
+
+	t.Run("not when the deployment did not ask for it", func(t *testing.T) {
+		cf := update(t, false)
+		if b := cf.binding("CF_API_TOKEN"); b != nil {
+			t.Errorf("an unrequested deploy bound the API token: %+v", b)
+		}
+		if b := cf.binding("CF_ACCOUNT_ID"); b != nil {
+			t.Errorf("an unrequested deploy bound the account id: %+v", b)
+		}
+	})
 }
 
 func TestEdgeUpdate_CheckOnly(t *testing.T) {

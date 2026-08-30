@@ -169,6 +169,16 @@ mints the secure path and logs the panel URL. The optional bindings in
 `CF_API_TOKEN`, `CF_ACCOUNT_ID`) are escape hatches, not requirements. D1 is
 optional and never on the read path.
 
+`CF_API_TOKEN` + `CF_ACCOUNT_ID` are the pair that fills in the panel's
+**Deployment** section (script name and hostnames); without both it reads
+"no Cloudflare credential bound". ForgePanel sets them for you when you deploy
+with `forgectl edge deploy --self-manage`, or tick "let this worker manage
+itself" in the panel — it records the choice and re-sends the pair on every
+update. A pair you set BY HAND (wrangler or the dashboard) survives only until
+the next `forgectl edge update`: every upload sends a closed list of text
+bindings, and `keep_bindings` covers `kv_namespace` and `d1` only. Set them
+through ForgePanel, or expect to re-set them after each update.
+
 ## Prior art
 
 `third_party/BPB-Worker-Panel`, `third_party/BPB-Wizard` (Mozilla Public

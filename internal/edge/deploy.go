@@ -40,6 +40,17 @@ type DeploySpec struct {
 	// somebody a dead panel link. Set it only where a probe is impossible —
 	// an air-gapped test, or a deploy from a host with no route to the edge.
 	SkipVerify bool
+	// SelfManage binds this account's Cloudflare credential into the Worker
+	// (CF_ACCOUNT_ID + CF_API_TOKEN), which is the only thing that lights up the
+	// Worker's own Deployment panel — its script name, its workers.dev hostname
+	// and any custom ones.
+	//
+	// Off by default and never implied. A token written INTO a Worker is
+	// readable by anyone who can deploy to that account, so the operator has to
+	// ask for it and has to be told what it costs — see the credential policy at
+	// the head of cmd/forgectl/edge.go, and FORGECTL_EDGE_SPEC.md's
+	// "--api-token — the fallback".
+	SelfManage bool
 	// Verify overrides the probe's timing. Zero values take the defaults.
 	Verify VerifyOptions
 }
@@ -61,6 +72,9 @@ type DeployResult struct {
 	D1DatabaseID  string  `json:"d1_database_id,omitempty"`
 	Hostname      string  `json:"hostname,omitempty"`
 	Updated       bool    `json:"updated"`
+	// SelfManage echoes the spec, so a caller that registers the deployment
+	// afterwards can persist the flag without being handed the spec as well.
+	SelfManage bool `json:"self_manage"`
 	// Warnings carry things that did not take even though the Worker itself
 	// deployed. Failing the whole request for these would send an operator
 	// hunting for something that is actually running; swallowing them would let
@@ -136,6 +150,14 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 		// whose secrets already live in KV keeps the token it minted.
 		PlainTextBinding("FEED_PUSH_TOKEN", spec.FeedPushToken),
 	}
+	if spec.SelfManage {
+		// Both or neither: the Worker's credentials(env) returns null unless it
+		// has BOTH, so binding one alone is indistinguishable from binding
+		// nothing and reads to the operator as "the feature does not work".
+		bindings = append(bindings,
+			PlainTextBinding("CF_ACCOUNT_ID", c.AccountID),
+			SecretTextBinding("CF_API_TOKEN", c.Token))
+	}
 	var d1ID string
 	if spec.D1 {
 		db, err := c.CreateD1(ctx, spec.Name)
@@ -176,7 +198,7 @@ func Deploy(ctx context.Context, c *Client, spec DeploySpec) (*DeployResult, err
 		Name: spec.Name, Target: spec.Target, Origin: WorkerOrigin(spec.Name, sub),
 		SecurePath: spec.SecurePath, FeedPushToken: spec.FeedPushToken,
 		KVNamespaceID: kvID, D1DatabaseID: d1ID,
-		Updated: spec.Update,
+		Updated: spec.Update, SelfManage: spec.SelfManage,
 	}
 	workersDevOrigin := res.Origin
 

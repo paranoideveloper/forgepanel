@@ -40,6 +40,10 @@
   // the default — silently overwriting somebody else's worker is worse than the
   // 409.
   let force = $state(false);
+  // Binds this account's Cloudflare credential into the worker, which is the
+  // only thing that lights up the worker's own Deployment panel. Opt-in: a
+  // token in a binding is readable by anyone who can deploy to the account.
+  let selfManage = $state(false);
   // The message from a 409, kept so the retry offer can be shown next to the
   // form rather than living only in a toast that has already faded.
   let conflict = $state('');
@@ -85,7 +89,7 @@
         body: JSON.stringify({
           api_token: apiToken.trim(), account_id: accountId.trim(),
           name: workerName.trim() || undefined, proxy_ip: proxyIP.trim() || undefined,
-          force: overwrite,
+          force: overwrite, self_manage: selfManage,
         }),
       });
       lastResult = res.deployment;
@@ -200,6 +204,7 @@
         <label>{tr('forgeedge.proxy_ip')} <span class="opt">{tr('forgeedge.optional_relay_for_cloudflare_hosted_sites')}</span><input type="text" bind:value={proxyIP} placeholder={tr('forgeedge.host_port')} /></label>
       </div>
       <label class="check"><input type="checkbox" data-testid="edge-force" bind:checked={force} /> {tr('forgeedge.overwrite_an_existing_worker')} <span class="opt">{tr('forgeedge.only_needed_when_the_name_is')}</span></label>
+      <label class="check"><input type="checkbox" data-testid="edge-self-manage" bind:checked={selfManage} /> {tr('forgeedge.let_this_worker_manage_itself')} <span class="opt">{tr('forgeedge.binds_your_api_token_into_the')}</span></label>
       <button class="btn primary" data-testid="edge-deploy" onclick={() => deploy()} disabled={deploying}>{deploying ? tr('forgeedge.deploying') : tr('forgeedge.deploy_to_cloudflare')}</button>
       <p class="note">{tr('forgeedge.the_token_is_used_only_for')}</p>
 

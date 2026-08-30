@@ -441,7 +441,12 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // stamps every existing row with one default, so an established fleet would come
 // out of the migration claiming every node — including ones long dead — is in
 // the same state.
-const modelSchemaFingerprintPinned = "80db10ca072ad78a1d6bfecd7a70fbef621a8c472a886ee1890afb3df3f597d7"
+//
+// edge_deployments gained self_manage: the Worker's own Deployment panel reads
+// CF_API_TOKEN/CF_ACCOUNT_ID bindings, and an update re-sends a closed bindings
+// list. Without a record of which Workers were deployed with that credential,
+// the next `forgectl edge update` strips it back out and nothing reports it.
+const modelSchemaFingerprintPinned = "9452298194e44e38eefeff27305f9dc16c7bdb83eece222e00bce2c23fdaa168"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

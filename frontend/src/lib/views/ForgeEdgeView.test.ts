@@ -71,6 +71,34 @@ describe('ForgeEdgeView deploy', () => {
     expect(sent[0].force).toBe(false);
   });
 
+  it('sends self_manage:true when the box is ticked', async () => {
+    // The worker's own Deployment panel reads CF_API_TOKEN/CF_ACCOUNT_ID and
+    // reports "no Cloudflare credential bound" without them. Nothing ever bound
+    // them, so that panel has always been dark.
+    const sent = mockEdge(() => okDeploy);
+    render(ForgeEdgeView);
+    await fillCredentials();
+
+    await fireEvent.click(screen.getByTestId('edge-self-manage'));
+    await fireEvent.click(screen.getByTestId('edge-deploy'));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0].self_manage).toBe(true);
+  });
+
+  it('does not self-manage by default', async () => {
+    // A token written into a worker is readable by anyone who can deploy to the
+    // account, so it has to be asked for — never implied.
+    const sent = mockEdge(() => okDeploy);
+    render(ForgeEdgeView);
+    await fillCredentials();
+
+    await fireEvent.click(screen.getByTestId('edge-deploy'));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0].self_manage).toBe(false);
+  });
+
   it('offers an overwrite retry after a 409 and retries with force:true', async () => {
     // The dead end: 409 "a Worker named X already exists", a toast, and no
     // control anywhere in the view that could get past it.

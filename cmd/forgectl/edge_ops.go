@@ -31,6 +31,10 @@ type edgeTarget struct {
 	Origin     string
 	SecurePath string
 	PushToken  string
+	// SelfManage is carried so `edge update` can re-send the Cloudflare
+	// credential binding. Every upload sends a closed bindings list, so a
+	// binding this projection forgets is a binding the update strips.
+	SelfManage bool
 }
 
 // openEdgeDeployment reads one registered edge from the panel DB.
@@ -75,7 +79,8 @@ func edgeTargets(data, name string, all bool) ([]edgeTarget, error) {
 	for i := range rows {
 		r := &rows[i]
 		out = append(out, edgeTarget{ID: r.ID, Name: r.Name, Target: r.Target,
-			Origin: r.Origin, SecurePath: r.SecurePath, PushToken: r.PushToken})
+			Origin: r.Origin, SecurePath: r.SecurePath, PushToken: r.PushToken,
+			SelfManage: r.SelfManage})
 	}
 	return out, nil
 }

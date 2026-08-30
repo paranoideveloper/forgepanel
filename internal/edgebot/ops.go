@@ -130,6 +130,11 @@ func (o *liveOps) Update(ctx context.Context, token, account string, d Deploymen
 	if err != nil {
 		return err
 	}
+	// No SelfManage here: the bot only ever updates Workers its own Deploy
+	// created, and that never binds the credential. A future /selfmanage command
+	// MUST carry the flag through Deployment and into this spec, or the next
+	// /update strips the binding — every upload sends a closed bindings list and
+	// keep_bindings covers only KV and D1.
 	_, err = edge.Deploy(ctx, c, edge.DeploySpec{
 		Name: d.Name, Target: "workers", SecurePath: d.SecurePath,
 		Bundle: edge.Bundle(), Update: true, Force: true,
