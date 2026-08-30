@@ -5,6 +5,7 @@
   import type { HealthDetail, TwoFASetup } from '$lib/types';
   import Modal from '$lib/components/Modal.svelte';
   import QRCode from '$lib/components/QRCode.svelte';
+  import WebhooksCard from '$lib/components/WebhooksCard.svelte';
   import { showToast } from '$lib/components/Toast.svelte';
 
   let healthDetail = $state<HealthDetail | null>(null);
@@ -467,6 +468,8 @@
     </p>
   {/if}
 </div>
+
+<WebhooksCard />
 
 <div class="card" data-testid="nettune-card">
   <h3>{tr('systemhealth.nettune_title')}</h3>
