@@ -53,6 +53,8 @@ type UserRepository interface {
 	UserAssignments(userID uint) (*Assignments, error)
 	SetUserInbounds(userID uint, ids []uint, allowed map[uint]bool) error
 	InboundsForUser(userID uint) ([]uint, error)
+	RecordSubRequest(r *SubRequest) error
+	ListSubRequests(userID uint, limit, offset int) ([]SubRequest, int64, error)
 }
 
 // NodeRepository defines node agent persistence operations.

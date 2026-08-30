@@ -261,7 +261,15 @@ describe('UsersView subscription formats', () => {
         '/api/admin/users': [user],
         '/api/admin/groups': [],
         '/api/admin/inbounds': [],
-        '/api/admin/settings/subscription': settings
+        '/api/admin/settings/subscription': settings,
+        '/api/admin/users/7/sub-requests': {
+          items: [{ created_at: '2026-08-30T10:00:00Z', format: 'sing-box', user_agent: 'sing-box 1.9.0', ip: '203.0.113.9' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+          last_fetch_at: '2026-08-30T10:00:00Z',
+          last_user_agent: 'sing-box 1.9.0'
+        }
       };
       return { ok: true, json: async () => table[String(url)] ?? {} } as Response;
     };
@@ -288,6 +296,19 @@ describe('UsersView subscription formats', () => {
     await fireEvent.change(sel, { target: { value: 'surge' } });
     const link = await screen.findByTestId('sub-url');
     expect(link.textContent).toContain('/sub/tok7/surge');
+  });
+
+  // The dialog is also where an operator finds out whether the link has ever been
+  // pulled. The endpoint existed with nothing calling it once already; a GET with
+  // no body is invisible to the uicontract guard, so this test is the only thing
+  // that keeps the fetch wired.
+  it('shows the subscription fetch history', async () => {
+    await openSubDialog();
+    const rows = await screen.findAllByTestId('sub-request-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('sing-box 1.9.0');
+    expect(rows[0].textContent).toContain('203.0.113.9');
+    expect(screen.getByTestId('sub-last-fetch').textContent).toContain('sing-box 1.9.0');
   });
 
   // A server that predates the formats field must not leave the operator with an
