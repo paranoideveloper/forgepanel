@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/core/supervisor"
 	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -244,13 +245,40 @@ func (s *Server) healthEngine() Subsystem {
 		sub.Detail = "Inbounds are served by remote nodes."
 		return sub
 	}
-	st := s.engine.Status()
-	running, failed := 0, 0
+	es := engineHealthFrom(s.engine.Status())
+	sub.State, sub.Summary, sub.Detail = es.State, es.Summary, es.Detail
+	if s.engine.MalformedStatsTotal() > 0 && sub.State == HealthOK {
+		sub.State = HealthWarning
+		sub.Summary = "Running, but some traffic counters could not be parsed."
+		sub.Detail = fmt.Sprintf("%d malformed stat entries since start; per-user "+
+			"accounting may be incomplete.", s.engine.MalformedStatsTotal())
+	}
+	return sub
+}
+
+// engineHealthFrom classifies the supervised cores. Split out from healthEngine
+// so the classification can be driven directly: reaching it through a live
+// Controller means the "engine is wedged" case can only be tested by wedging a
+// real core.
+func engineHealthFrom(st []supervisor.Status) Subsystem {
+	var sub Subsystem
+	running, failed, wedged := 0, 0, 0
 	var detail string
 	for _, e := range st {
 		switch e.State {
 		case "running":
 			running++
+		case "unresponsive":
+			// Up, and answering nothing. This used to match NEITHER bucket, so
+			// a box whose only engine was wedged left running==0 and failed==0
+			// and fell through to the reassuring "no engine is running yet —
+			// add an inbound" below. The one condition an operator most needs
+			// told was reported as its own opposite.
+			failed++
+			wedged++
+			if e.LastError != "" && detail == "" {
+				detail = e.Engine + ": " + e.LastError
+			}
 		case "crashed", "error":
 			failed++
 			if e.LastError != "" && detail == "" {
@@ -261,7 +289,13 @@ func (s *Server) healthEngine() Subsystem {
 	switch {
 	case failed > 0:
 		sub.State = HealthCritical
-		sub.Summary = fmt.Sprintf("%d engine process(es) not running.", failed)
+		// Worded from the operator's seat: "not running" sends them to the
+		// process table, where a wedged core is present and looks fine.
+		if wedged == failed {
+			sub.Summary = fmt.Sprintf("%d engine process(es) running but not answering.", wedged)
+		} else {
+			sub.Summary = fmt.Sprintf("%d engine process(es) not running.", failed)
+		}
 		sub.Detail = detail
 	case running == 0:
 		// Nothing to run is normal on a fresh panel with no inbounds yet.
@@ -270,12 +304,6 @@ func (s *Server) healthEngine() Subsystem {
 	default:
 		sub.State = HealthOK
 		sub.Summary = fmt.Sprintf("%d engine process(es) running.", running)
-	}
-	if s.engine.MalformedStatsTotal() > 0 && sub.State == HealthOK {
-		sub.State = HealthWarning
-		sub.Summary = "Running, but some traffic counters could not be parsed."
-		sub.Detail = fmt.Sprintf("%d malformed stat entries since start; per-user "+
-			"accounting may be incomplete.", s.engine.MalformedStatsTotal())
 	}
 	return sub
 }

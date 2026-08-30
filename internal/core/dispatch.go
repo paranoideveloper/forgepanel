@@ -79,6 +79,14 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 		HotApply: map[string]func(old, next []byte) (bool, error){
 			model.EngineXray: c.xrayHotApply,
 		},
+		// Both supervised cores, because a supervisor that watches only the
+		// process table cannot tell a working core from a wedged one — and a
+		// wedged one is reported green, restarts nothing, and serves nobody
+		// until a human notices. See internal/core/probe.go.
+		Probe: map[string]func(context.Context) error{
+			model.EngineXray:    c.probeXrayAPI,
+			model.EngineSingBox: c.probeSingboxAPI,
+		},
 		// The geodata that ships in Xray's own archive was being discarded by
 		// the installer, so every geosite:/geoip: rule failed with "code not
 		// found in geosite.dat" — taking the whole config, and therefore every
@@ -210,6 +218,11 @@ func (c *Controller) adapterStatuses(active map[string]bool) []supervisor.Status
 			Restarts:   h.Restarts,
 			LastError:  h.LastError,
 			RecentLogs: h.RecentLogs,
+			// Forwarded so the probe's verdict reaches /api/admin/engines/status
+			// too. Without this the only place a wedged core showed up would be
+			// the state string, with no reason attached.
+			Responsive:     h.Responsive,
+			LastProbeError: h.LastProbeError,
 		})
 	}
 	return out

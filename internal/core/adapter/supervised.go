@@ -134,6 +134,7 @@ func (a *supervised) spec() supervisor.EngineSpec {
 		ConfigPath: a.configPath(),
 		OnLine:     a.opts.OnEngineLine,
 		HotApply:   a.opts.HotApply[a.name],
+		Probe:      a.opts.Probe[a.name],
 		Env:        a.opts.EngineEnv[a.name],
 	}
 }
@@ -176,6 +177,12 @@ func (a *supervised) GenerateMultiUser(specs []engine.InboundSpec, certPath, key
 	cfg, n := a.pick(b)
 	return cfg, n, b.Skipped, nil
 }
+
+// HasLivenessProbe reports whether this adapter was given a probe. It exists so
+// the wiring can be asserted from outside this package: a probe that is built
+// but never handed to the registry is dead code that ships green, which is the
+// exact shape of the bug this feature was added to fix.
+func (a *supervised) HasLivenessProbe() bool { return a.opts.Probe[a.name] != nil }
 
 // BinaryPresent reports whether this core's binary is already installed. It lets
 // a caller skip validation rather than pay for a download inside a check.
@@ -294,6 +301,10 @@ func (a *supervised) HealthCheck(context.Context) (Health, error) {
 		Restarts:   st.Restarts,
 		LastError:  st.LastError,
 		RecentLogs: st.RecentLogs,
+		// Carried across the seam rather than recomputed: the supervisor is the
+		// only thing that ever ran the probe.
+		Responsive:     st.Responsive,
+		LastProbeError: st.LastProbeError,
 	}, nil
 }
 
@@ -312,6 +323,8 @@ func mapSupervisorState(s supervisor.State) State {
 		return StateInvalid
 	case supervisor.StateStopped:
 		return StateStopped
+	case supervisor.StateUnresponsive:
+		return StateUnresponsive
 	}
 	return StateUnavailable
 }

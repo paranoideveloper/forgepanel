@@ -185,6 +185,11 @@ const (
 	// AmneziaWG kernel module is missing, the tools are not installed. It is
 	// distinct from StateCrashed: nothing died, the capability is absent.
 	StateUnavailable State = "unavailable"
+	// StateUnresponsive means the core is RUNNING and not answering its own
+	// API. It is neither StateRunning (it is serving nobody) nor StateCrashed
+	// (nothing exited) — and it is the state a wedged core sat in, reported as
+	// healthy, until the supervisor learned to ask.
+	StateUnresponsive State = "unresponsive"
 )
 
 // Health is what a core reports about itself.
@@ -196,6 +201,12 @@ type Health struct {
 	Restarts   int      `json:"restarts,omitempty"`
 	LastError  string   `json:"last_error,omitempty"`
 	RecentLogs []string `json:"recent_logs,omitempty"`
+
+	// Responsive is the last liveness verdict; nil means this core has no probe
+	// or none has run yet. LastProbeError is why it said no — an operator
+	// looking at a restarting core needs the reason, not just the label.
+	Responsive     *bool  `json:"responsive,omitempty"`
+	LastProbeError string `json:"last_probe_error,omitempty"`
 
 	// Details carries the engine-specific facts that do not fit the shared
 	// shape: Brook's per-port process table, AmneziaWG's kernel readiness.
@@ -260,6 +271,14 @@ type Options struct {
 	// equivalent handler API in the builds the panel ships, and claiming
 	// otherwise would leave its users out of sync with its config.
 	HotApply map[string]func(oldCfg, newCfg []byte) (bool, error)
+	// Probe, keyed by engine name, is asked whether that core is actually
+	// answering. A core with no entry is supervised exactly as before: alive
+	// means healthy.
+	//
+	// Keyed by engine for the same reason HotApply is — what "answering" means
+	// differs per core, and for sing-box the API may not exist in the installed
+	// build at all, in which case the probe must skip rather than fail.
+	Probe map[string]func(ctx context.Context) error
 	// EngineEnv adds environment entries to a supervised core, keyed by engine
 	// name. Used for XRAY_LOCATION_ASSET so the core reads the panel's geodata
 	// rather than an unrelated system-wide install's.

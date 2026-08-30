@@ -353,10 +353,11 @@ func TestConfigPathsAreUnchanged(t *testing.T) {
 // reads like a missing kernel module rather than a new lifecycle state.
 func TestEverySupervisorStateMaps(t *testing.T) {
 	want := map[supervisor.State]State{
-		supervisor.StateStopped: StateStopped,
-		supervisor.StateRunning: StateRunning,
-		supervisor.StateCrashed: StateCrashed,
-		supervisor.StateInvalid: StateInvalid,
+		supervisor.StateStopped:      StateStopped,
+		supervisor.StateRunning:      StateRunning,
+		supervisor.StateCrashed:      StateCrashed,
+		supervisor.StateInvalid:      StateInvalid,
+		supervisor.StateUnresponsive: StateUnresponsive,
 	}
 	for from, to := range want {
 		if got := mapSupervisorState(from); got != to {

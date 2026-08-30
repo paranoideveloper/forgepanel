@@ -26,6 +26,23 @@ const (
 	StateRunning State = "running"
 	StateCrashed State = "crashed"
 	StateInvalid State = "invalid_config"
+	// StateUnresponsive means the process is ALIVE and no longer answering its
+	// own API. Deliberately not StateCrashed: nothing exited, which is exactly
+	// why the condition went unseen — every signal the supervisor had was
+	// derived from the process table, and a wedged core keeps that happy while
+	// it serves nobody.
+	StateUnresponsive State = "unresponsive"
+)
+
+// Liveness-probe defaults, used when an EngineSpec leaves them at zero.
+//
+// 30s/5s/3 is chosen to be quiet: a probe is a question asked of a core that is
+// carrying traffic, and three consecutive misses over a minute and a half is a
+// wedged core, where one miss is a busy one.
+const (
+	probeDefaultEvery    = 30 * time.Second
+	probeDefaultTimeout  = 5 * time.Second
+	probeDefaultFailures = 3
 )
 
 // EngineSpec describes how to validate and run one core.
@@ -60,6 +77,35 @@ type EngineSpec struct {
 	// change it does not understand can safely decline.
 	HotApply func(oldCfg, newCfg []byte) (bool, error)
 
+	// Probe, if set, is asked whether the RUNNING core is actually answering.
+	//
+	// Nil means no probe, which is precisely the behaviour this supervisor had
+	// before: a core was healthy for as long as its process existed. That is not
+	// the same question. A core with a wedged event loop, or one that came up
+	// and never finished starting, never exits — so cmd.Wait() never returns,
+	// the state stays "running", and the panel reports green for a box serving
+	// nobody until an operator notices by hand.
+	//
+	// It is supplied by the caller rather than built here because only the
+	// caller knows what "answering" means for its core: for Xray it is the local
+	// gRPC stats API, for sing-box it is an API that may not exist in the
+	// installed build at all. It runs on its own goroutine, under ProbeTimeout,
+	// and a panic in it is contained.
+	Probe func(ctx context.Context) error
+
+	// ProbeEvery is the interval between probes (0 => probeDefaultEvery), and
+	// ProbeTimeout how long one may take (0 => probeDefaultTimeout). The cadence
+	// is INDEPENDENT of cmd.Wait(): the failure being watched for is a core that
+	// never exits.
+	ProbeEvery   time.Duration
+	ProbeTimeout time.Duration
+
+	// ProbeFailures is how many CONSECUTIVE probes must fail before the core is
+	// declared unresponsive and restarted (0 => probeDefaultFailures). More than
+	// one is required because the cost of a false positive is dropping every
+	// live connection on the box.
+	ProbeFailures int
+
 	// Env is added to the engine process's environment.
 	//
 	// This is how XRAY_LOCATION_ASSET reaches the core. Without it, Xray falls
@@ -81,7 +127,18 @@ type Process struct {
 	restarts int
 	logs     *ring
 	cancel   context.CancelFunc
-	done     chan struct{} // closed when the current supervise goroutine exits
+
+	// Liveness-probe state, all under p.mu. probed distinguishes "never asked"
+	// from "asked and it said no", which is the difference between a core with
+	// no probe configured and a core that is failing one.
+	probed       bool
+	responsive   bool
+	lastProbeErr string
+	// probeKill records that the probe, not the core, ended the last run — so
+	// the exit is reported as what it is rather than as a crash.
+	probeKill bool
+
+	done chan struct{} // closed when the current supervise goroutine exits
 
 	// observerDead is set when the OnLine hook panics, retiring it for the life
 	// of this Process rather than letting it panic on every subsequent line.
@@ -237,8 +294,16 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		wg.Add(2)
 		go func() { defer wg.Done(); p.pump(stderr) }()
 		go func() { defer wg.Done(); p.pump(stdout) }()
+		// procDone bounds the probe to THIS launch. Deliberately not part of wg:
+		// wg is drained before the loop may iterate, and the probe loop is what
+		// waits on the process rather than the other way round. Without a
+		// per-launch signal every restart would leave a probe goroutine behind,
+		// each of them signalling a process it no longer owns.
+		procDone := make(chan struct{})
+		go p.probeLoop(ctx, cmd, procDone)
 
 		err := cmd.Wait()
+		close(procDone)
 		wg.Wait() // drain log pipes before looping/returning
 		if ctx.Err() != nil {
 			p.setState(StateStopped, "")
@@ -248,7 +313,21 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		if err != nil {
 			msg = err.Error() + logHint(p.logs)
 		}
-		p.setState(StateCrashed, msg)
+		next := StateCrashed
+		p.mu.Lock()
+		if p.probeKill {
+			// The core did not fall over — the probe killed it because it had
+			// stopped answering. Reporting "crashed: signal: terminated" here
+			// would bury the actual fault under the supervisor's own signal, and
+			// leave an operator chasing a crash that never happened. It also
+			// keeps the state truthful across the backoff sleep below: the box
+			// IS unresponsive until the replacement is up.
+			next = StateUnresponsive
+			msg = "not answering its API, restarted: " + p.lastProbeErr
+			p.probeKill = false
+		}
+		p.mu.Unlock()
+		p.setState(next, msg)
 		if !p.sleep(ctx, backoff) {
 			return
 		}
@@ -316,6 +395,110 @@ func (p *Process) observe(line string) {
 	p.spec.OnLine(line)
 }
 
+// probeLoop asks, on its own cadence, whether the running core is still
+// answering — and restarts it when it is not.
+//
+// This is the half of "health" the supervisor never had. Everything else here
+// keys off cmd.Wait(): the process died, so the core failed. A core that wedges
+// does not die, so that signal never fires and the panel reports green forever.
+//
+// It SIGNALS rather than calling restart(). Letting the existing Wait + backoff
+// loop reap and relaunch keeps process lifetime in exactly one place — the place
+// that guarantees Stop() blocks until the sockets are released, which is what
+// makes reloads reliable. A second restart path would race it.
+func (p *Process) probeLoop(ctx context.Context, cmd *exec.Cmd, procDone <-chan struct{}) {
+	if p.spec.Probe == nil {
+		return // no probe configured: exactly the behaviour that was here before
+	}
+	every, timeout, failures := p.spec.ProbeEvery, p.spec.ProbeTimeout, p.spec.ProbeFailures
+	if every <= 0 {
+		every = probeDefaultEvery
+	}
+	if timeout <= 0 {
+		timeout = probeDefaultTimeout
+	}
+	if failures <= 0 {
+		failures = probeDefaultFailures
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	// Counted per LAUNCH rather than per Process: a relaunched core starts with
+	// a clean slate, or the first missed probe after a restart would kill it
+	// again immediately and the box would never come back.
+	consecutive := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-procDone:
+			return // this process is gone; the next launch gets its own loop
+		case <-t.C:
+		}
+		err := p.probe(ctx, timeout)
+		select {
+		case <-procDone:
+			// The process went away while the probe was in flight, so whatever
+			// the probe concluded is about a process that no longer exists.
+			// Acting on it would stamp this launch's verdict onto the next one.
+			return
+		default:
+		}
+		if err != nil {
+			p.recordProbe(false, err.Error())
+			consecutive++
+			if consecutive < failures {
+				continue
+			}
+			p.mu.Lock()
+			p.probeKill = true
+			p.mu.Unlock()
+			p.setState(StateUnresponsive, "not answering its API: "+err.Error())
+			p.logs.add(fmt.Sprintf("[forgepanel] %s is running but failed %d liveness probes, restarting it: %v",
+				p.spec.Name, consecutive, err))
+			if cmd.Process != nil {
+				// The error is ignored on purpose: the only one reachable is
+				// "process already finished", which means the supervise loop is
+				// restarting it anyway. Go marks a Process done when Wait
+				// returns, so this can never signal a recycled PID.
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
+			return
+		}
+		p.recordProbe(true, "")
+		consecutive = 0
+	}
+}
+
+// probe runs the hook under a timeout, containing any panic.
+//
+// Same reasoning as observe: the hook belongs to another subsystem, and a panic
+// on this goroutine would silently retire liveness checking for this core — the
+// feature would look installed and watch nothing.
+func (p *Process) probe(ctx context.Context, timeout time.Duration) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("liveness probe panicked: %v", r)
+		}
+	}()
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return p.spec.Probe(pctx)
+}
+
+func (p *Process) recordProbe(ok bool, errMsg string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.probed = true
+	p.responsive = ok
+	p.lastProbeErr = errMsg
+	// A core that starts answering again is running, not unresponsive. Without
+	// this the label would survive its own cause and stick until the next
+	// restart, which is how a recovered engine keeps paging an operator.
+	if ok && p.state == StateUnresponsive {
+		p.state = StateRunning
+	}
+}
+
 func (p *Process) sleep(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -377,6 +560,14 @@ func (p *Process) Status() Status {
 	if d, ok := Diagnose(p.logs.snapshotN(60)); ok {
 		st.Diagnosis = &d
 	}
+	// Nil rather than false when nothing has probed yet: "we never asked" and
+	// "we asked and it said no" are different facts, and collapsing them would
+	// make every core with no probe configured look unhealthy.
+	if p.probed {
+		r := p.responsive
+		st.Responsive = &r
+		st.LastProbeError = p.lastProbeErr
+	}
 	return st
 }
 
@@ -394,6 +585,10 @@ type Status struct {
 	// this is what it means. Replacing one with the other would lose the exact
 	// text an operator needs to search for when the diagnosis is not enough.
 	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	// Responsive is the verdict of the last liveness probe. Nil means no probe
+	// is configured for this core, or none has run yet.
+	Responsive     *bool  `json:"responsive,omitempty"`
+	LastProbeError string `json:"last_probe_error,omitempty"`
 }
 
 func (p *Process) setState(s State, err string) {

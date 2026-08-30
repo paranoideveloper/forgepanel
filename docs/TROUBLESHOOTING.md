@@ -27,6 +27,17 @@ rejects. Open `GET /api/admin/engines/config` to see the generated config and th
 core's rejection reason. Common causes: a REALITY inbound on a non-443 port
 (warning only), a port already in use, or a missing SNI.
 
+**An engine shows `unresponsive`.** The process is alive but stopped answering
+its own local API, which the panel probes every 30s and acts on after three
+consecutive failures — a core that wedges never exits, so before this it was
+reported as `running` while it served nobody. `last_probe_error` in
+`GET /api/admin/engines/status` carries the reason: `connection refused` means
+the core never bound its API port (it accepted the config and then failed to
+finish starting), while a timeout means it is up and stuck, usually on a box
+under memory pressure. sing-box is only probed when the installed binary was
+built with `with_v2ray_api`; a stock build has no stats API to answer and is
+never marked unresponsive for the lack of one.
+
 **ForgeDNS listener won't bind :53.** Port 53 needs `CAP_NET_BIND_SERVICE` (the
 systemd unit and Docker grant it) or root. Set `FORGEPANEL_DNS_PORT` to a high
 port for testing.
