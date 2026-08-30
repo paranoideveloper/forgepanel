@@ -54,6 +54,9 @@ const (
 	migVWebhooks uint64 = 21
 	// 22: 20 went to outbound_groups and 21 to webhooks in the same batch.
 	migVNodeStatus uint64 = 22
+	// 25, not 23: 23 and 24 were assigned to other steps in the same batch. A
+	// shipped version is never renumbered, so the gap stays.
+	migVCorePins uint64 = 25
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -377,6 +380,17 @@ func migrations() []migrate.Migration {
 				return tx.Model(&Node{}).
 					Where("status IS NULL OR status = ?", "").
 					Update("status", string(NodeConnecting)).Error
+			},
+		},
+		{
+			Version: migVCorePins,
+			Name:    "core_pins",
+			Rollback: "safe to drop: no other table references it. Every operator-selected core " +
+				"version is forgotten and the panel falls back to the versions this build shipped " +
+				"with, which is what it did before this migration.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&CorePin{}})
+				return err
 			},
 		},
 	}

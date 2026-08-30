@@ -54,10 +54,15 @@ func (s *Server) portHoppingCapability() gin.H {
 
 func (s *Server) handleCapabilities(c *gin.Context) {
 	c.JSON(200, gin.H{
+		// The EFFECTIVE versions, not the compiled constants: once an operator
+		// can pin a core, reporting the constant here would describe a core the
+		// panel is not running. The Reason strings below stay on the constants
+		// on purpose — they are prose about when a transport was removed
+		// upstream, and rewriting them to a pinned version would make them false.
 		"engines": gin.H{
-			"xray":     binmgr.XrayVersion,
-			"sing-box": binmgr.SingboxVersion,
-			"brook":    binmgr.BrookVersion,
+			"xray":     s.coreVersion(binmgr.EngineXray),
+			"sing-box": s.coreVersion(binmgr.EngineSingbox),
+			"brook":    s.coreVersion(binmgr.EngineBrook),
 		},
 		"transports": []TransportCap{
 			{Name: "tcp", Engine: "xray", Supported: true, CDN: false},

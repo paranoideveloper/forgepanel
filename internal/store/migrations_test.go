@@ -441,7 +441,14 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // stamps every existing row with one default, so an established fleet would come
 // out of the migration claiming every node — including ones long dead — is in
 // the same state.
-const modelSchemaFingerprintPinned = "80db10ca072ad78a1d6bfecd7a70fbef621a8c472a886ee1890afb3df3f597d7"
+//
+// core_pins came with migVCorePins: the operator's own (engine, version, asset)
+// checksums, which is what lets a panel move off the core version it was
+// compiled against. It has to be a table because a version needs one digest per
+// platform asset, and it has to carry the digest at all because binmgr refuses
+// to install an artifact it cannot verify — a version with no checksum is not a
+// smaller feature, it is an unverified proxy core.
+const modelSchemaFingerprintPinned = "c718b0c779a165e8f9795d899791f44e2b4cd1fa577c34187086d7b6b6ab7764"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.
