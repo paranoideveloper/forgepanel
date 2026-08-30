@@ -916,6 +916,9 @@ func (s *Server) routes() {
 			admin.POST("/inbounds/reality-quickstart", s.handleRealityQuickstart)
 			admin.POST("/inbounds/paas-quickstart", s.handlePaaSQuickstart)
 			admin.POST("/wizard/preset", s.handlePresetWizard)
+			// Ask every prerequisite up front, so a failing setup is one round of
+			// fixes rather than one per attempt. Writes nothing.
+			admin.POST("/wizard/preset/preflight", s.handlePresetPreflight)
 			admin.POST("/inbounds/:id/tls", s.handleInboundOneClickTLS)
 			admin.POST("/certs/import", s.handleCertImport)
 			admin.POST("/certs/issue", s.handleCertIssueDNS01)
