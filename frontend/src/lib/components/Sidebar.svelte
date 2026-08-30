@@ -13,12 +13,16 @@
   import { onMount } from 'svelte';
   import { apiFetch } from '$lib/api';
   import { session, canSeeTab } from '$lib/session.svelte';
+  import { deployment, sectionApplies } from '$lib/deployment.svelte';
 
   // Read from GET /api/version rather than a literal. It was pinned at v1.10.0
   // while the product shipped v1.20.0 — a badge that is confidently wrong is
   // worse than none, because a bug report quotes it.
   let panelVersion = $state('');
   onMount(async () => {
+    // Deployment first: it decides which tabs exist, and a late answer would
+    // render the full navigation and then visibly drop items from it.
+    if (!deployment.loaded) await deployment.load();
     try {
       const v = await apiFetch<{ version?: string }>('/version');
       if (v?.version) panelVersion = v.version.startsWith('v') ? v.version : 'v' + v.version;
@@ -62,7 +66,12 @@
   // and nothing read it — so a reseller saw Certificates, Admins, the Audit
   // trail, Nodes, Routing and ForgeDNS, clicked one, and got a 403 toast from a
   // route the panel already knew they could not use.
-  const visibleTabs = $derived(tabs.filter((t) => canSeeTab(t.id, session.role)));
+  // Two filters, for two different reasons. Role decides what this PRINCIPAL
+  // may reach; the deployment decides what EXISTS here at all — a Railway
+  // container has no certificates to manage no matter who is signed in.
+  const visibleTabs = $derived(
+    tabs.filter((t) => canSeeTab(t.id, session.role) && sectionApplies(t.id))
+  );
 
   function handleSelect(tab: string) {
     onTabChange(tab);

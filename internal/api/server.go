@@ -846,6 +846,9 @@ func (s *Server) routes() {
 			// editor because it has a lifecycle the others do not: a device is
 			// registered with Cloudflare, a license may be attached to it, and
 			// the endpoint rotates without the account changing.
+			// What this deployment can do, so the UI can drop what the platform
+			// owns instead of showing controls that cannot work.
+			admin.GET("/deployment", s.handleDeployment)
 			// REALITY dest probing: measured, not guessed.
 			admin.GET("/reality/dest-probe", s.handleRealityDestProbe)
 			admin.GET("/reality/dest-suggest", s.handleRealityDestSuggest)

@@ -12,8 +12,10 @@ package api
 // forgectl, or a support script) can ask the panel what it can be told.
 
 import (
+	"strings"
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/deploy"
 	"github.com/forgepanel/forgepanel/internal/settings"
 )
 
@@ -41,9 +43,29 @@ type settingDefView struct {
 // whether one is set, which is the same contract the Telegram card already has.
 func (s *Server) handleSettingsRegistry(c *gin.Context) {
 	defs := settings.All()
+	// What this deployment cannot do, it does not get controls for. A setting the
+	// platform owns is REMOVED rather than shown and ignored: an operator who
+	// tunes BBR inside a container, or types a public address the platform will
+	// override, gets no error at the switch and a failure somewhere else.
+	sur := s.deploySurface()
+	needs := deploy.SettingRequires()
+	inapplicable := func(key string) bool {
+		for k, capability := range needs {
+			// Prefix families (core_version_) are registered as one def whose key
+			// is the prefix, so an exact match covers both forms.
+			if k == key || (strings.HasSuffix(k, "_") && strings.HasPrefix(key, k)) {
+				return !sur.Allows(capability)
+			}
+		}
+		return false
+	}
+
 	out := make([]settingDefView, 0, len(defs))
 	for _, d := range defs {
 		if d.Scope == settings.ScopeInternal {
+			continue
+		}
+		if inapplicable(d.Key) {
 			continue
 		}
 		out = append(out, settingDefView{

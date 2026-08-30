@@ -260,3 +260,15 @@ func (p PaaS) PublicPortString() string {
 func SavePanelSettings(dataDir string, p *PanelSettings) error {
 	return savePanel(filepath.Join(dataDir, "panel.json"), p)
 }
+
+// WithPaaSForTest builds a Config carrying a chosen PaaS description.
+//
+// The field is unexported so nothing outside this package can pretend the
+// environment is something it is not at runtime — DetectPaaS reads the
+// platform's own variables and is the only writer. Tests need to describe a
+// Railway or Fly deployment without setting process-wide environment variables,
+// which leak between parallel tests and are exactly the kind of shared state
+// that makes one test's failure depend on another's ordering.
+func WithPaaSForTest(p PaaS) *Config {
+	return &Config{paas: p}
+}
