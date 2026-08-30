@@ -69,7 +69,7 @@ func newIPLimitState() *ipLimitState {
 // It returns true when anything changed, so the caller reloads the engines once
 // for the whole sweep rather than once per user.
 func (s *Scheduler) enforceIPLimits() bool {
-	if s.db == nil || s.activeAddresses == nil {
+	if !s.hasDB() || s.activeAddresses == nil {
 		// No presence source: the limit cannot be measured. Doing nothing is
 		// correct — acting on a count of zero would release every held user, and
 		// acting on a missing count would hold every limited one.
