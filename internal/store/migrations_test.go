@@ -441,7 +441,7 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // stamps every existing row with one default, so an established fleet would come
 // out of the migration claiming every node — including ones long dead — is in
 // the same state.
-const modelSchemaFingerprintPinned = "PENDING"
+const modelSchemaFingerprintPinned = "80db10ca072ad78a1d6bfecd7a70fbef621a8c472a886ee1890afb3df3f597d7"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

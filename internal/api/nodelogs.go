@@ -199,13 +199,13 @@ func (h *nodeLogHub) forget(id uint) {
 // cursor to keep per open tab.
 func (s *Server) handleNodeLogsStream(c *gin.Context) {
 	if s.db == nil {
-		c.JSON(503, gin.H{"error": "no database"})
+		fail(c, 503, "no database")
 		return
 	}
 	id := parseID(c)
 	n, err := s.db.NodeByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "not found"})
+		fail(c, 404, "not found")
 		return
 	}
 	name := n.Name

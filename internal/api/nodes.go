@@ -202,7 +202,7 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 	// through here would mark a node the operator switched off as enrolled and
 	// reporting again.
 	if n.Disabled {
-		c.JSON(403, gin.H{"error": "node is disabled"})
+		fail(c, 403, "node is disabled")
 		return
 	}
 	now := time.Now()
@@ -292,7 +292,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	// alive, and long before the bundle is built, so it is handed no credentials
 	// and no inbounds to serve.
 	if n.Disabled {
-		c.JSON(403, gin.H{"error": "node is disabled"})
+		fail(c, 403, "node is disabled")
 		return
 	}
 	now := time.Now()
@@ -564,12 +564,12 @@ func (s *Server) handleSetNodeState(c *gin.Context) {
 		Disabled *bool `json:"disabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Disabled == nil {
-		c.JSON(400, gin.H{"error": "disabled is required"})
+		fail(c, 400, "disabled is required")
 		return
 	}
 	n, err := s.db.NodeByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "not found"})
+		fail(c, 404, "not found")
 		return
 	}
 	n.Disabled = *req.Disabled
@@ -580,7 +580,7 @@ func (s *Server) handleSetNodeState(c *gin.Context) {
 	n.Status = st
 	n.Healthy = st == store.NodeConnected
 	if err := s.db.SaveNode(n); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if n.Disabled {
