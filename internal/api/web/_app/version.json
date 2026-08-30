@@ -1,1 +1,5 @@
+<<<<<<< HEAD
 {"version":"1788061762993"}
+=======
+{"version":"1788059932356"}
+>>>>>>> 8326b59 (webhooks: every lifecycle alert had exactly one sink, and it was a chat app)

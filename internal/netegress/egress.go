@@ -36,28 +36,39 @@ var (
 	raw     string
 )
 
-// Set configures the egress proxy. An empty string clears it, which restores
-// the environment-variable behaviour (including NO_PROXY).
-func Set(s string) error {
+// parseProxy validates one proxy URL. A blank string is not an error; it means
+// "no proxy" and returns a nil URL.
+//
+// net/http dials socks5 and socks5h itself, so every supported scheme is
+// carried by Transport.Proxy and nothing here needs a second dialer.
+func parseProxy(s string) (*url.URL, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		mu.Lock()
-		current, raw = nil, ""
-		mu.Unlock()
-		return nil
+		return nil, nil
 	}
 	u, err := url.Parse(s)
 	if err != nil {
-		return fmt.Errorf("egress proxy %q is not a URL: %w", s, err)
+		return nil, fmt.Errorf("egress proxy %q is not a URL: %w", s, err)
 	}
 	switch u.Scheme {
 	case "http", "https", "socks5", "socks5h":
 	default:
-		return fmt.Errorf("egress proxy scheme %q is not supported; use http, https, socks5 or socks5h", u.Scheme)
+		return nil, fmt.Errorf("egress proxy scheme %q is not supported; use http, https, socks5 or socks5h", u.Scheme)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("egress proxy %q has no host", s)
+		return nil, fmt.Errorf("egress proxy %q has no host", s)
 	}
+	return u, nil
+}
+
+// Set configures the egress proxy. An empty string clears it, which restores
+// the environment-variable behaviour (including NO_PROXY).
+func Set(s string) error {
+	u, err := parseProxy(s)
+	if err != nil {
+		return err
+	}
+	s = strings.TrimSpace(s)
 	mu.Lock()
 	current, raw = u, s
 	mu.Unlock()
@@ -96,6 +107,30 @@ func Transport() *http.Transport {
 // Client is the constructor every internet-bound call site uses.
 func Client(timeout time.Duration) *http.Client {
 	return &http.Client{Transport: Transport(), Timeout: timeout}
+}
+
+// ClientVia builds a client for a call that carries its OWN proxy, overriding
+// the panel-wide one. A blank override falls back to Client.
+//
+// It lives here rather than at the call site that needs it, because this
+// package is the one place the panel builds an HTTP client — an override built
+// anywhere else is exactly the bare &http.Client{} the wiring guard exists to
+// catch, and it would then also miss any future change to how the panel dials
+// out. The case that needs it: a webhook receiver on an operator's internal
+// network and the Telegram API are not reachable through the same hop, and
+// forcing one proxy on both breaks whichever was configured second.
+func ClientVia(proxyURL string, timeout time.Duration) (*http.Client, error) {
+	u, err := parseProxy(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if u == nil {
+		return Client(timeout), nil
+	}
+	base, _ := http.DefaultTransport.(*http.Transport)
+	t := base.Clone()
+	t.Proxy = http.ProxyURL(u)
+	return &http.Client{Transport: t, Timeout: timeout}, nil
 }
 
 // Probe checks that a target is reachable the way the panel would reach it —

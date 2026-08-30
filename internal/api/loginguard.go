@@ -24,7 +24,13 @@ package api
 // The IP guard remains the one that escalates, because an address that keeps
 // failing has no legitimate reason to.
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/forgepanel/forgepanel/internal/telegram"
+)
 
 const (
 	// usernameFailBudget is how many failures against ONE username, across all
@@ -59,15 +65,35 @@ func (s *Server) loginAllowed(ip, username string) bool {
 	return s.login.AllowedKey(usernameKey(username), usernameFailBudget)
 }
 
-// loginFailed records a failed attempt against both the source and the target.
+// loginFailed records a failed attempt against both the source and the target,
+// and says so out loud the first time an address is actually locked out.
+//
+// telegram.EventSecurity was declared for this and had NO producer anywhere: the
+// panel would lock an address out, escalate the backoff for an hour, and tell
+// nobody. A credential-stuffing run against a panel was invisible unless someone
+// thought to read the audit log, which is the opposite of how anyone finds out
+// they are being attacked.
 func (s *Server) loginFailed(ip, username string) {
 	if s.login == nil {
 		return
 	}
-	s.login.Fail(ip)
+	lockout := s.login.Fail(ip)
 	if username != "" {
 		s.login.FailKey(usernameKey(username))
 	}
+	if lockout <= 0 {
+		return
+	}
+	// Keyed on the ADDRESS, so the repeat gate holds one alert per attacker per
+	// six hours rather than one per request — an attacker who keeps trying is
+	// re-locked on every attempt, and that is the whole point of the gate.
+	target := ""
+	if username != "" {
+		target = fmt.Sprintf(" (most recently as %q)", username)
+	}
+	s.emit(telegram.EventSecurity, ip, fmt.Sprintf(
+		"Sign-in attempts from %s%s have failed repeatedly; the address is locked out for %s.",
+		ip, target, lockout.Round(time.Second)))
 }
 
 // loginSucceeded clears both counters.

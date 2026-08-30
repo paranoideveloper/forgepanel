@@ -173,15 +173,13 @@ func (s *Server) checkOneCertificate(domain string, now time.Time, panelOwned bo
 	} else {
 		fmt.Fprintf(os.Stderr, "forgepanel: certificate for %q expires in %d day(s)\n", domain, days)
 	}
-	if s.notifier != nil {
-		msg := fmt.Sprintf("The certificate for %s expires in %d day(s). "+
-			"Renewal has not happened on its own — check Certificates → Force ACME issue/renew.", domain, days)
-		if days < 0 {
-			msg = fmt.Sprintf("The certificate for %s EXPIRED %d day(s) ago. "+
-				"Clients are refusing the connection now.", domain, -days)
-		}
-		s.notifier.Notify(telegram.EventCertExpiry, domain, msg)
+	msg := fmt.Sprintf("The certificate for %s expires in %d day(s). "+
+		"Renewal has not happened on its own — check Certificates → Force ACME issue/renew.", domain, days)
+	if days < 0 {
+		msg = fmt.Sprintf("The certificate for %s EXPIRED %d day(s) ago. "+
+			"Clients are refusing the connection now.", domain, -days)
 	}
+	s.emit(telegram.EventCertExpiry, domain, msg)
 }
 
 // checkRotationPools health-checks every rotation pool and retires the domains
@@ -238,11 +236,9 @@ func (s *Server) checkRotationPools() {
 			fmt.Fprintf(os.Stderr,
 				"forgepanel: rotation pool %q has NO healthy domain left (%d checked) — rotate it to mint replacements\n",
 				name, report.Checked)
-			if s.notifier != nil {
-				s.notifier.Notify(telegram.EventPoolExhausted, name,
-					fmt.Sprintf("DNS rotation pool %q has no healthy domain left (%d checked). "+
-						"Rotate it to mint replacements.", name, report.Checked))
-			}
+			s.emit(telegram.EventPoolExhausted, name,
+				fmt.Sprintf("DNS rotation pool %q has no healthy domain left (%d checked). "+
+					"Rotate it to mint replacements.", name, report.Checked))
 		}
 	}
 }
@@ -253,7 +249,11 @@ func (s *Server) checkRotationPools() {
 // The health endpoint answers this on demand, which means somebody has to look.
 // A node that goes down at 3am stays down until someone thinks to check.
 func (s *Server) checkNodesReachable() {
-	if s.db == nil || s.notifier == nil {
+	// NOT `s.notifier == nil`. A panel that configured webhooks and never
+	// configured Telegram leaves the notifier nil — that is precisely the
+	// operator who bought this feature — and the old guard silently disabled
+	// node monitoring for exactly them.
+	if s.db == nil || (s.notifier == nil && s.webhooks == nil) {
 		return
 	}
 	nodes, err := s.db.ListNodes()
@@ -271,13 +271,13 @@ func (s *Server) checkNodesReachable() {
 		}
 		silent := n.LastSeen == nil || n.LastSeen.Before(cutoff)
 		if silent {
-			s.notifier.Notify(telegram.EventNodeDown, n.Name,
+			s.emit(telegram.EventNodeDown, n.Name,
 				fmt.Sprintf("*%s* has stopped reporting. Its inbounds may be down.", n.Name))
 			continue
 		}
 		// Only announces if it was actually alerted on, so a healthy fleet stays
 		// silent instead of announcing a recovery per node per minute.
-		s.notifier.Resolve(telegram.EventNodeDown, n.Name,
+		s.emitResolve(telegram.EventNodeDown, n.Name,
 			fmt.Sprintf("*%s* is reporting again.", n.Name))
 	}
 }

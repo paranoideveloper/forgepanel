@@ -432,7 +432,11 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // has no such table, and the rules that target a group would name a balancer the
 // generated config cannot define — which the core refuses whole, taking every
 // inbound down. The migration carries the table; this pin follows it.
-const modelSchemaFingerprintPinned = "c9d69556b72a6c21e3bdbcba92a46dd588196dba2dca255e225eaa90de1eef2d"
+//
+// webhook_endpoints came next, in the same batch: lifecycle alerts had exactly
+// one sink and it was a chat app, so anything wanting them programmatically had
+// to poll. Two models landing together is why this digest moved twice.
+const modelSchemaFingerprintPinned = "PENDING"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

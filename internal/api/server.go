@@ -42,6 +42,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 	"github.com/forgepanel/forgepanel/internal/version"
+	"github.com/forgepanel/forgepanel/internal/webhook"
 	"github.com/forgepanel/forgepanel/internal/wgpeer"
 )
 
@@ -100,6 +101,11 @@ type Server struct {
 	// notifier pushes operator alerts. Nil when Telegram is not configured, and
 	// every method on it is a safe no-op in that state, so no call site checks.
 	notifier *telegram.Notifier
+
+	// webhooks posts the same lifecycle events to endpoints the operator runs.
+	// Nil in the light constructor, and every method on it is a safe no-op in
+	// that state, so no call site checks.
+	webhooks *webhook.Dispatcher
 
 	// bots owns the Telegram bot's goroutine so a settings change can restart it
 	// without restarting the panel.
@@ -215,6 +221,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	// notify" pattern is how a stale copy of a config lingers.
 	s.engine.SetRoutingSource(s.routingSpecs)
 
+	// Outbound webhooks. Built eagerly rather than on first use: its only caller
+	// is the emit seam below, and a lazily built sink is a nil sink at exactly
+	// the moment the first event fires.
+	s.webhooks = webhook.NewDispatcher(s.webhookEndpoints, s.recordWebhookAttempt)
+
 	// Restore certificates the operator imported in an earlier run. Without
 	// this they lived in memory only: the upload succeeded, the panel served
 	// them, and after the next restart every TLS surface silently fell back to
@@ -317,7 +328,7 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 		// Quota trips and expiries are the transitions a customer notices before
 		// the operator does.
 		Notify: func(event, subject, message string) {
-			s.notifier.Notify(telegram.Event(event), subject, message)
+			s.emit(telegram.Event(event), subject, message)
 		},
 		AuditIPLimit: func(action, target string, seen, limit int) {
 			if s.db == nil {
@@ -334,6 +345,31 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	s.bots = &botControl{base: ctx}
 	s.restartBot()
 	return s, nil
+}
+
+// emit is the ONE place a lifecycle event reaches a sink.
+//
+// There was no such place. The scheduler's Notify closure called the Telegram
+// notifier directly, and so did four separate spots in maintenance.go, so a
+// second sink meant finding all five — and the four in maintenance.go are
+// exactly the ones a reader of the closure would never think to look for. Every
+// alert now goes through here; the next sink is one function, not a hunt.
+//
+// Both sinks suppress a repeat of an alert that is still active, on the same
+// six-hour window, so an operator running both does not see them disagree about
+// how often a node that is still down is worth mentioning.
+func (s *Server) emit(event telegram.Event, subject, message string) {
+	s.notifier.Notify(event, subject, message)
+	s.webhooks.Alert(webhook.Event{Type: string(event), Subject: subject, Message: message})
+}
+
+// emitResolve announces that an alert has cleared.
+//
+// Both sinks stay silent about a problem they never reported, so a healthy
+// fleet does not announce a recovery per node per sweep.
+func (s *Server) emitResolve(event telegram.Event, subject, message string) {
+	s.notifier.Resolve(event, subject, message)
+	s.webhooks.Resolve(webhook.Event{Type: string(event), Subject: subject, Message: message})
 }
 
 // Close stops background workers and dependent services before closing storage.
@@ -359,6 +395,10 @@ func (s *Server) Close() error {
 		if s.fdns != nil {
 			s.fdns.Stop()
 		}
+		// Stopped BEFORE the store closes: a delivery in flight records its
+		// outcome against the endpoint row, and a write into a closed database
+		// is an error nobody ever reads.
+		s.webhooks.Close()
 		if s.db != nil {
 			s.closeErr = s.db.Close()
 		}
@@ -856,6 +896,14 @@ func (s *Server) routes() {
 			admin.GET("/settings/telegram", s.handleGetTelegramSettings)
 			admin.POST("/settings/telegram", s.handleSetTelegramSettings)
 			admin.POST("/settings/telegram/test", s.handleTestTelegram)
+			// Webhook secrets sign deliveries a receiver acts on, so they are
+			// panel-level credentials like the bot token and land under the
+			// same owner-only /api/admin/settings prefix.
+			admin.GET("/settings/webhooks", s.handleListWebhooks)
+			admin.POST("/settings/webhooks", s.handleCreateWebhook)
+			admin.PUT("/settings/webhooks/:id", s.handleUpdateWebhook)
+			admin.DELETE("/settings/webhooks/:id", s.handleDeleteWebhook)
+			admin.POST("/settings/webhooks/:id/test", s.handleTestWebhook)
 			admin.GET("/settings/egress", s.handleGetEgressSettings)
 			admin.POST("/settings/egress", s.handleSetEgressSettings)
 			admin.POST("/settings/egress/test", s.handleTestEgress)

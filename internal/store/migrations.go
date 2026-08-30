@@ -48,6 +48,10 @@ const (
 	migVBridges        uint64 = 18
 	migVGroupInbounds  uint64 = 19
 	migVOutboundGroups uint64 = 20
+	// 21, not 20: outbound_groups took 20 in the same batch. A shipped version is
+	// never renumbered, and two migrations sharing a number would leave one of
+	// them recorded as already applied on every database that ran the other.
+	migVWebhooks uint64 = 21
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -320,6 +324,16 @@ func migrations() []migrate.Migration {
 			// the one a rule names stops answering.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&OutboundGroup{}})
+				return err
+			},
+		},
+		{
+			Version: migVWebhooks,
+			Name:    "outbound_webhook_endpoints",
+			Rollback: "safe to drop: no other table references it. Every configured receiver is " +
+				"forgotten and the panel goes back to having Telegram as its only sink.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&WebhookEndpoint{}})
 				return err
 			},
 		},

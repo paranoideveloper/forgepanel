@@ -19,6 +19,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/version"
+	"github.com/forgepanel/forgepanel/internal/webhook"
 )
 
 // handleLogin authenticates an admin and returns an access+refresh token pair.
@@ -619,11 +620,19 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 
 func (s *Server) handleDeleteUser(c *gin.Context) {
 	id := parseID(c)
+	// Read the name BEFORE the row goes. The audit trail recorded a bare row id,
+	// which is unresolvable the moment the row is gone — the one entry where
+	// knowing WHO was deleted is the entire point — and a webhook receiver
+	// cannot act on a number either.
+	target := strconv.FormatUint(uint64(id), 10)
+	if u, err := s.db.UserByID(id); err == nil && u.Username != "" {
+		target = u.Username
+	}
 	if err := s.db.DeleteUserCascade(id); err != nil {
 		failErr(c, 500, err)
 		return
 	}
-	s.audit(c, "user.delete", strconv.FormatUint(uint64(id), 10))
+	s.audit(c, "user.delete", target)
 	s.startBackground(s.reloadEngines)
 	c.JSON(200, gin.H{"deleted": id})
 }
@@ -837,6 +846,21 @@ func (s *Server) audit(c *gin.Context, action, target string) {
 		al.Actor = claims.Username
 	}
 	s.db.Audit(al)
+
+	// The USER lifecycle rides on the audit trail rather than on the two
+	// handlers, because every path that creates or removes a user already
+	// audits it — the import, the bulk operations, anything added later — and
+	// hanging the event here is what makes "all of them" true instead of "the
+	// two I remembered". It goes to webhooks only: a provisioning system wants
+	// the POST, and nobody wants a chat message per account created.
+	switch action {
+	case "user.create":
+		s.webhooks.Dispatch(webhook.Event{Type: eventUserCreated, Subject: target,
+			Message: "Account " + target + " was created."})
+	case "user.delete":
+		s.webhooks.Dispatch(webhook.Event{Type: eventUserDeleted, Subject: target,
+			Message: "Account " + target + " was deleted."})
+	}
 }
 
 func parseID(c *gin.Context) uint {
