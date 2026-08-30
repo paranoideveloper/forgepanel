@@ -16,6 +16,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/protocol/routing"
 	"github.com/forgepanel/forgepanel/internal/settings"
+	"github.com/forgepanel/forgepanel/internal/store"
 )
 
 // The subscription renderer's operator defaults. Each one is a key in the
@@ -249,6 +250,33 @@ func canonicalSubFormat(f string) string {
 	}
 }
 
+// recordSubFetch stamps one subscription pull.
+//
+// It is fire-and-forget by design: a telemetry write must never fail a
+// subscription fetch, because that would take working clients offline for the
+// sake of a reporting feature.
+func (s *Server) recordSubFetch(c *gin.Context, token, format string) {
+	if s.db == nil {
+		return // the stateless constructor has no store to write to
+	}
+	u, err := s.db.UserBySubToken(token)
+	if err != nil {
+		// An UNKNOWN token must never create a row, or this unauthenticated
+		// public endpoint becomes a way to fill the operator's database.
+		return
+	}
+	ua := c.GetHeader("User-Agent")
+	if len(ua) > 512 {
+		// The column's width. ToValidUTF8 drops the rune the cut landed inside,
+		// so a long non-ASCII User-Agent cannot leave a broken byte sequence in
+		// the JSON the inspector serves.
+		ua = strings.ToValidUTF8(ua[:512], "")
+	}
+	_ = s.db.RecordSubRequest(&store.SubRequest{
+		UserID: u.ID, Format: format, UserAgent: ua, IP: c.ClientIP(),
+	})
+}
+
 // handleSub serves a subscription (spec §9). Format is chosen by explicit
 // suffix (/clash, /sing-box, /links, /json) or, absent that, auto-detected from
 // the User-Agent. Correct subscription headers are always emitted.
@@ -284,6 +312,11 @@ func (s *Server) handleSub(c *gin.Context) {
 		token := c.Param("token")
 		base := hostSubBase(c)
 		c.Header("Subscription-Userinfo", s.subscriptionUserinfo(token))
+		// Recorded on THIS exit too, not only the client one: a human opening the
+		// link is the most common interaction with a subscription URL, and a
+		// history that omitted it would tell the operator "never fetched" about a
+		// user who had just looked at their own page.
+		s.recordSubFetch(c, token, "browser")
 		c.Data(200, "text/html; charset=utf-8", subLandingPage(base, s.subscriptionUserinfo(token)))
 		return
 	}
@@ -312,6 +345,12 @@ func (s *Server) handleSub(c *gin.Context) {
 	} else if s.subs != nil {
 		s.subs.Success(ip)
 	}
+
+	// One call site above the renderer switch, so all ten formats record, and it
+	// records the CANONICAL name: clash-meta and mihomo both land as "clash", so
+	// the inspector's vocabulary is the renderer set plus "browser" rather than
+	// whatever string a User-Agent happened to imply.
+	s.recordSubFetch(c, token, format)
 
 	// Never hand a subscriber material only the server should hold (REALITY/TLS/
 	// WireGuard server private keys). Redact once, up front, so every format below

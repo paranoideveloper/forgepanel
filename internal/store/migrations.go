@@ -54,6 +54,8 @@ const (
 	migVWebhooks uint64 = 21
 	// 22: 20 went to outbound_groups and 21 to webhooks in the same batch.
 	migVNodeStatus uint64 = 22
+	// 23: 22 went to node_status.
+	migVSubTelemetry uint64 = 23
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -377,6 +379,19 @@ func migrations() []migrate.Migration {
 				return tx.Model(&Node{}).
 					Where("status IS NULL OR status = ?", "").
 					Update("status", string(NodeConnecting)).Error
+			},
+		},
+		{
+			Version: migVSubTelemetry,
+			Name:    "subscription_fetch_telemetry",
+			Rollback: "safe to drop: nothing references sub_requests, and the two user columns are " +
+				"read-only reporting. The panel goes back to being unable to say whether a " +
+				"subscription URL has ever been fetched.",
+			Up: func(tx *gorm.DB) error {
+				// No backfill: there is no historical data to recover, and a NULL
+				// sub_updated_at correctly reads as "never fetched".
+				_, err := alignSchema(tx, []any{&User{}, &SubRequest{}})
+				return err
 			},
 		},
 	}

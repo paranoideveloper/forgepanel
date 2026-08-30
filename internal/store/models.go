@@ -161,6 +161,15 @@ type User struct {
 	TelegramID     int64      `json:"telegram_id"`
 	Note           string     `json:"note"`
 	SubRevoked     *time.Time `json:"sub_revoked_at"`
+
+	// SubUpdatedAt / SubLastUA are the denormalised newest row of sub_requests,
+	// so the users LIST can show last-fetch for 500 users without 500 queries.
+	// Written by RecordSubRequest in the same transaction as the row itself.
+	//
+	// The explicit column name is not decoration: GORM's naming of SubLastUA is a
+	// guess the migration and the adoption test would otherwise have to match.
+	SubUpdatedAt *time.Time `json:"sub_updated_at"`
+	SubLastUA    string     `gorm:"column:sub_last_ua;size:512" json:"sub_last_user_agent"`
 }
 
 // Inbound is a canonical model.Node persisted plus panel bookkeeping. The
@@ -287,7 +296,7 @@ func AllModels() []any {
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}, &TrafficRollup{},
 		&InboundHost{}, &WGPeer{}, &Bridge{}, &GroupInbound{},
 		&Outbound{}, &RoutingRule{}, &OutboundGroup{}, &APIToken{},
-		&Profile{}, &ProfileBinding{}, &WebhookEndpoint{}}
+		&Profile{}, &ProfileBinding{}, &WebhookEndpoint{}, &SubRequest{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

@@ -26,6 +26,13 @@
   let subModalOpen = $state(false);
   let activeSubUser = $state<User | null>(null);
   let subFormat = $state('v2ray');
+  // Subscription-fetch telemetry, loaded when the modal opens. Without it the
+  // panel could not tell "imported the link and it is broken" from "never
+  // imported the link", which is the first thing support has to establish.
+  interface SubRequestRow { created_at: string; format: string; user_agent: string; ip: string; }
+  let subReqs = $state<SubRequestRow[]>([]);
+  let subLastFetch = $state<string | null>(null);
+  let subLastUA = $state('');
   // Client app names, not prose: "Quantumult X" is what the app is called in
   // every language. An unknown format still renders under its wire name, so a
   // format added server-side appears here without a frontend change.
@@ -307,7 +314,20 @@
     } catch (err: any) { showToast(err.message || tr('users.failed_to_delete'), 'error'); }
   }
 
-  function openSubModal(user: User) { activeSubUser = user; subModalOpen = true; }
+  async function openSubModal(user: User) {
+    // Open first, then load: a telemetry failure must never withhold the URL and
+    // QR the operator actually came here for.
+    activeSubUser = user; subModalOpen = true;
+    subReqs = []; subLastFetch = null; subLastUA = '';
+    try {
+      const r = await apiFetch<{ items: SubRequestRow[]; last_fetch_at: string | null; last_user_agent: string }>(
+        `/admin/users/${user.id}/sub-requests`
+      );
+      subReqs = r.items ?? [];
+      subLastFetch = r.last_fetch_at ?? null;
+      subLastUA = r.last_user_agent ?? '';
+    } catch (_) { /* the modal still shows the URL and QR */ }
+  }
   async function copySubUrl() {
     try { await navigator.clipboard.writeText(subUrl); showToast(tr('users.copied'), 'success'); }
     catch (_) { showToast(tr('users.failed_to_copy'), 'error'); }
@@ -862,6 +882,31 @@
   </div>
   <div class="uri-row"><code data-testid="sub-url">{subUrl}</code><button class="sm" onclick={copySubUrl}>{tr('users.copy')}</button></div>
   {#if subUrl}<div class="qr"><QRCode value={subUrl} size={190} /></div>{/if}
+  <div class="sub-telemetry">
+    <div class="sub-last" data-testid="sub-last-fetch">
+      {#if subLastFetch}
+        {tr('users.sub_last_fetched')} {new Date(subLastFetch).toLocaleString()} — {subLastUA}
+      {:else}
+        {tr('users.sub_never_fetched')}
+      {/if}
+    </div>
+    {#if subReqs.length}
+      <table>
+        <thead><tr>
+          <th>{tr('users.sub_when')}</th><th>{tr('users.format')}</th>
+          <th>{tr('users.sub_client')}</th><th>{tr('users.sub_ip')}</th>
+        </tr></thead>
+        <tbody>
+          {#each subReqs as q (q.created_at + q.ip)}
+            <tr data-testid="sub-request-row">
+              <td>{new Date(q.created_at).toLocaleString()}</td>
+              <td>{q.format}</td><td class="ua">{q.user_agent}</td><td>{q.ip}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </div>
 </Modal>
 
 <style>
@@ -916,6 +961,12 @@
   .uri-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .uri-row code { flex: 1; background: #0F1420; padding: 10px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #27D17C; }
   .qr { display: flex; justify-content: center; padding: 10px; background: #fff; border-radius: 10px; }
+  .sub-telemetry { margin-top: 16px; }
+  .sub-telemetry .sub-last { color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 10px; }
+  .sub-telemetry table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .sub-telemetry th { text-align: start; color: rgba(255,255,255,0.45); font-weight: 500; padding: 6px 8px; }
+  .sub-telemetry td { padding: 6px 8px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .sub-telemetry td.ua { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
   .sub { display: block; font-size: 11px; }
   .quota { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; color: rgba(255,255,255,0.65); }

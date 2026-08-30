@@ -286,6 +286,8 @@ func TestLegacyDatabaseIsAdoptedWithoutLosingData(t *testing.T) {
 		{&User{}, "last_reset_at"},
 		{&User{}, "last_seen_at"},
 		{&User{}, "sub_revoked"},
+		{&User{}, "sub_updated_at"},
+		{&User{}, "sub_last_ua"},
 		{&Inbound{}, "prev_node_json"},
 		{&Node{}, "config_dirty"},
 		{&Group{}, "is_default"},
@@ -295,7 +297,7 @@ func TestLegacyDatabaseIsAdoptedWithoutLosingData(t *testing.T) {
 			t.Fatalf("adoption did not add %T.%s", want.model, want.column)
 		}
 	}
-	for _, m := range []any{&UserInbound{}, &Domain{}, &EdgeDeployment{}} {
+	for _, m := range []any{&UserInbound{}, &Domain{}, &EdgeDeployment{}, &SubRequest{}} {
 		if !db.Migrator().HasTable(m) {
 			t.Fatalf("adoption did not create the missing table for %T", m)
 		}
@@ -441,7 +443,12 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // stamps every existing row with one default, so an established fleet would come
 // out of the migration claiming every node — including ones long dead — is in
 // the same state.
-const modelSchemaFingerprintPinned = "80db10ca072ad78a1d6bfecd7a70fbef621a8c472a886ee1890afb3df3f597d7"
+//
+// sub_requests, plus users.sub_updated_at and users.sub_last_ua, came with
+// migVSubTelemetry: /sub/:token recorded nothing, so no panel could say whether
+// a subscriber's client had ever pulled its configuration. A table and two
+// columns move the digest together.
+const modelSchemaFingerprintPinned = "e783e61eab6ebeb60a5f178dc9dce9717c8823ce30ee16f5f73cd81423b80ac7"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.
