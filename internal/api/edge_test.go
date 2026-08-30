@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -749,7 +751,7 @@ func TestEdgeDeploy_WithoutBundleUsesEmbedded(t *testing.T) {
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
 	scripts := map[string]bool{}
-	cf := cfAPIMock(t, scripts)
+	cf := cfAPIMock(t, scripts, nil)
 	body := fmt.Sprintf(`{"name":"forgeedge-emb","api_token":"t","account_id":"acct-1","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
@@ -1007,7 +1009,11 @@ func TestConstantTimeEqualString(t *testing.T) {
 // cfAPIMock replays the Workers control-plane calls a deploy and a delete make.
 // The panel handlers accept an api_base override for exactly this reason (and
 // for an operator behind an egress proxy).
-func cfAPIMock(t *testing.T, scripts map[string]bool) *httptest.Server {
+//
+// uploads, when non-nil, collects the bindings array of every script upload. The
+// PUT body used to be thrown away, which made every binding the handler sends —
+// or fails to send — invisible from here.
+func cfAPIMock(t *testing.T, scripts map[string]bool, uploads *[][]map[string]any) *httptest.Server {
 	t.Helper()
 	var mu sync.Mutex
 	ok := func(w http.ResponseWriter, result string) {
@@ -1049,6 +1055,11 @@ func cfAPIMock(t *testing.T, scripts map[string]bool) *httptest.Server {
 				}
 				ok(w, `{"id":"`+name+`"}`)
 			case http.MethodPut:
+				// sub == "" is the script upload itself; the deploy also PUTs
+				// .../schedules, which carries no bindings.
+				if uploads != nil && sub == "" {
+					*uploads = append(*uploads, cfUploadBindings(t, r))
+				}
 				scripts[name] = true
 				ok(w, `{"id":"`+name+`"}`)
 			case http.MethodDelete:
@@ -1067,11 +1078,41 @@ func cfAPIMock(t *testing.T, scripts map[string]bool) *httptest.Server {
 	return srv
 }
 
+// cfUploadBindings pulls the bindings array out of a script upload's multipart
+// `metadata` part.
+func cfUploadBindings(t *testing.T, r *http.Request) []map[string]any {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		t.Errorf("upload content type: %v", err)
+		return nil
+	}
+	mr := multipart.NewReader(r.Body, params["boundary"])
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			t.Error("the upload carried no metadata part")
+			return nil
+		}
+		if part.FormName() != "metadata" {
+			continue
+		}
+		var meta struct {
+			Bindings []map[string]any `json:"bindings"`
+		}
+		if err := json.NewDecoder(part).Decode(&meta); err != nil {
+			t.Errorf("decode upload metadata: %v", err)
+			return nil
+		}
+		return meta.Bindings
+	}
+}
+
 func TestEdgeDeploy_LiveAgainstMockCloudflare(t *testing.T) {
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
 	scripts := map[string]bool{}
-	cf := cfAPIMock(t, scripts)
+	cf := cfAPIMock(t, scripts, nil)
 
 	body := fmt.Sprintf(`{"name":"forgeedge-live","api_token":"t","account_id":"acct-1",
 		"secure_path":"livepath23456789abcdefg","bundle":"export default {}","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
@@ -1123,7 +1164,7 @@ func TestEdgeDeploy_LiveAgainstMockCloudflare(t *testing.T) {
 func TestEdgeDeploy_GeneratesNameAndPath(t *testing.T) {
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
-	cf := cfAPIMock(t, map[string]bool{})
+	cf := cfAPIMock(t, map[string]bool{}, nil)
 	body := fmt.Sprintf(`{"api_token":"t","account_id":"acct-1","bundle":"x","skip_verify": true, "api_base":%q}`, cf.URL+"/client/v4")
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
@@ -1147,11 +1188,65 @@ func TestEdgeDeploy_GeneratesNameAndPath(t *testing.T) {
 	}
 }
 
+// TestEdgeDeploy_SelfManageReachesTheUploadAndTheRow is wiring point A: the
+// panel's own deploy handler.
+//
+// Two separate things get forgotten here, and the second is the quieter one. If
+// the flag never reaches edge.DeploySpec the Worker is deployed without the
+// credential; if it never reaches the stored row, the Worker HAS the credential
+// and the next `forgectl edge update` strips it, because the update loop reads
+// the flag back from that row.
+func TestEdgeDeploy_SelfManageReachesTheUploadAndTheRow(t *testing.T) {
+	f := newEdgeFixture(t)
+	r := edgeRouter(f.s)
+	var uploads [][]map[string]any
+	cf := cfAPIMock(t, map[string]bool{}, &uploads)
+
+	body := fmt.Sprintf(`{"name":"forgeedge-self","api_token":"cf-token","account_id":"acct-1",
+		"secure_path":"selfpath23456789abcdefg","bundle":"export default {}","self_manage":true,
+		"skip_verify":true,"api_base":%q}`, cf.URL+"/client/v4")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/admin/edge/deploy", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("deploy: %d %s", w.Code, w.Body)
+	}
+	if len(uploads) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(uploads))
+	}
+	var sawToken, sawAccount bool
+	for _, b := range uploads[0] {
+		if b["name"] == "CF_API_TOKEN" && b["type"] == "secret_text" && b["text"] == "cf-token" {
+			sawToken = true
+		}
+		if b["name"] == "CF_ACCOUNT_ID" && b["type"] == "plain_text" && b["text"] == "acct-1" {
+			sawAccount = true
+		}
+	}
+	if !sawToken || !sawAccount {
+		t.Fatalf("self_manage:true did not reach the upload; bindings were %+v", uploads[0])
+	}
+
+	d, err := f.s.db.EdgeDeploymentByName("forgeedge-self")
+	if err != nil {
+		t.Fatalf("the deployment row is missing: %v", err)
+	}
+	if !d.SelfManage {
+		t.Error("the row says this Worker is not self-managed, so the next update will strip its credential")
+	}
+	// Only the boolean is persisted. The panel deliberately holds no long-lived
+	// Cloudflare secret; every deploy and update supplies its own api_token.
+	if strings.Contains(fmt.Sprintf("%+v", *d), "cf-token") {
+		t.Errorf("the API token was persisted in the panel row: %+v", *d)
+	}
+}
+
 func TestEdgeDeleteWorker_LiveAgainstMockCloudflare(t *testing.T) {
 	f := newEdgeFixture(t)
 	r := edgeRouter(f.s)
 	scripts := map[string]bool{"doomed": true}
-	cf := cfAPIMock(t, scripts)
+	cf := cfAPIMock(t, scripts, nil)
 	if err := f.s.db.CreateEdgeDeployment(&store.EdgeDeployment{
 		Name: "doomed", Origin: "https://doomed.acme.workers.dev", SecurePath: "p23456789abcdefghijklmno",
 	}); err != nil {

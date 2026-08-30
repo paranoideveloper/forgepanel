@@ -274,8 +274,17 @@ type EdgeDeployment struct {
 	// PushToken authorises `POST <origin>/<secure_path>/feed`. It is a bearer
 	// credential, so it never appears in an API response; the operator reads it
 	// from the Worker's own status page.
-	PushToken  string     `json:"-"`
-	AccountID  string     `json:"account_id,omitempty"`
+	PushToken string `json:"-"`
+	AccountID string `json:"account_id,omitempty"`
+	// SelfManage records that this Worker was deployed with the account's
+	// Cloudflare credential bound into it, which is what its own Deployment
+	// panel reads. `forgectl edge update` re-sends a CLOSED bindings list, so
+	// without this flag the next update silently strips the credential back out.
+	//
+	// The TOKEN itself is never stored: the panel deliberately holds no
+	// long-lived Cloudflare secret, and every deploy and update supplies its own
+	// api_token.
+	SelfManage bool       `json:"self_manage"`
 	LastPushAt *time.Time `json:"last_push_at"`
 	LastStatus string     `json:"last_status"`
 }

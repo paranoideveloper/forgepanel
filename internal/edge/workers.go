@@ -112,7 +112,8 @@ type Binding struct {
 	NamespaceID string `json:"namespace_id,omitempty"`
 	// ID is set for d1 bindings.
 	ID string `json:"id,omitempty"`
-	// Text is set for plain_text bindings (this is how SECURE_PATH is passed).
+	// Text is set for plain_text and secret_text bindings (this is how
+	// SECURE_PATH is passed).
 	Text string `json:"text,omitempty"`
 }
 
@@ -129,6 +130,14 @@ func D1Binding(databaseID string) Binding {
 // PlainTextBinding builds a plain-text var binding.
 func PlainTextBinding(name, text string) Binding {
 	return Binding{Type: "plain_text", Name: name, Text: text}
+}
+
+// SecretTextBinding builds a secret_text binding: the same shape on the wire as
+// plain_text, but Cloudflare redacts the value from the dashboard and from the
+// API afterwards. It exists for CF_API_TOKEN, the one binding whose value is a
+// credential rather than a setting.
+func SecretTextBinding(name, text string) Binding {
+	return Binding{Type: "secret_text", Name: name, Text: text}
 }
 
 // UploadSpec is one script upload.

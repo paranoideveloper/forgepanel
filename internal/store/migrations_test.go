@@ -456,8 +456,14 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // handler now reads it — so an unmigrated panel would answer every template-backed
 // create with a missing-table error.
 //
-// Both landed in the same batch, so neither branch's digest is the merged one.
-const modelSchemaFingerprintPinned = "a9acd2c5834073fce82f61a1a1831966bdf738e6cc090dbbb0ca7d6da925c52a"
+// edge_deployments gained self_manage: the Worker's own Deployment panel reads
+// CF_API_TOKEN/CF_ACCOUNT_ID bindings, and an update re-sends a closed bindings
+// list. Without a record of which Workers were deployed with that credential,
+// the next `forgectl edge update` strips it back out and nothing reports it.
+//
+// Three models landed in the same batch, so no single branch's digest is the
+// merged one; this is recomputed at the merge.
+const modelSchemaFingerprintPinned = "054cbf6fd8bd39a4e4ee78a161e22465dcf80af7312f37e3655a417568f08453"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

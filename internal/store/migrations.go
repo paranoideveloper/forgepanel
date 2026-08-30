@@ -61,6 +61,12 @@ const (
 	// internal/migrate/schema.go:129), and leaving the gap is cheaper than
 	// renumbering a step somebody else has already written.
 	migVUserTemplates uint64 = 24
+	// 26: 23-25 are assigned to other rows landing in the same batch. Numbers
+	// are handed out, not computed from "the next free one" — two migrations
+	// sharing a number would leave one of them recorded as already applied on
+	// every database that ran the other. 25 belongs to the core-pin row, which
+	// has not landed yet; the gap is deliberate.
+	migVEdgeSelfManage uint64 = 26
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -407,6 +413,19 @@ func migrations() []migrate.Migration {
 				"saved plan; the accounts created from one keep their limits and are unaffected.",
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&UserTemplate{}})
+				return err
+			},
+		},
+		{
+			Version: migVEdgeSelfManage,
+			Name:    "edge_self_manage",
+			Rollback: "safe to drop. `forgectl edge update` then stops re-sending the " +
+				"CF_API_TOKEN/CF_ACCOUNT_ID bindings, and the Worker's own Deployment panel " +
+				"goes back to \"no Cloudflare credential bound\" on the next update.",
+			// No backfill: false is right for every existing row, because until
+			// this column existed nothing had ever bound the credential.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&EdgeDeployment{}})
 				return err
 			},
 		},

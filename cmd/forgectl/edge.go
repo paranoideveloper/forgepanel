@@ -127,7 +127,7 @@ func edgeUsage() {
 Usage:
   forgectl edge deploy      [--name n] [--target workers] [--domain d] [--api-token t]
                             [--account id] [--bundle worker.js] [--secure-path p]
-                            [--d1] [--force] [--feed] [--json]
+                            [--d1] [--force] [--self-manage] [--feed] [--json]
   forgectl edge update      [--name n | --all] [--check-only] [--force] [--bundle f]
   forgectl edge delete      --name n [--yes] [--keep-kv]
   forgectl edge status      [--name n | --all] [--password p] [--json]
@@ -237,6 +237,9 @@ func cmdEdgeDeploy(args []string) error {
 		securePath = fs.String("secure-path", "", "secure path to bind (default: freshly generated)")
 		useD1      = fs.Bool("d1", false, "also create and bind a D1 database")
 		force      = fs.Bool("force", false, "overwrite a Worker that already exists")
+		selfManage = fs.Bool("self-manage", false,
+			"bind this account's Cloudflare credential into the Worker so its own panel can report "+
+				"its deployment (a token in a binding is readable by anyone who can deploy to this account)")
 		skipVerify = fs.Bool("skip-verify", false,
 			"return as soon as the upload is accepted, without checking the Worker actually serves. "+
 				"Only for a host with no route to the edge: \"the API accepted it\" and \"it serves\" "+
@@ -260,6 +263,16 @@ func cmdEdgeDeploy(args []string) error {
 		}
 		*name = n
 	}
+	// The refusal belongs here, not in edge.Deploy: edgeCreds is the only code
+	// that knows whether a token came from --api-token, the environment or the
+	// PKCE flow, and edge.Client carries no provenance.
+	if *selfManage && strings.TrimSpace(*apiToken) == "" && strings.TrimSpace(os.Getenv("CF_API_TOKEN")) == "" {
+		return withExit(exitUsage, &edge.Error{Op: "edge-deploy", Kind: edge.KindValidation,
+			Message: "--self-manage needs an explicit API token",
+			Remediation: "pass --api-token (or set CF_API_TOKEN). The OAuth token this command would " +
+				"otherwise use is short-lived, and binding an expiring token into a Worker produces a " +
+				"Deployment panel that silently rots."})
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	c, err := edgeCreds(ctx, *apiToken, *account, *apiBase, true)
@@ -269,6 +282,7 @@ func cmdEdgeDeploy(args []string) error {
 	res, err := edge.Deploy(ctx, c, edge.DeploySpec{
 		Name: *name, Target: *target, SecurePath: *securePath, Bundle: raw,
 		Domain: *domain, Force: *force, D1: *useD1, SkipVerify: *skipVerify,
+		SelfManage: *selfManage,
 	})
 	if err != nil {
 		// A Worker that uploaded but does not serve is still registered locally
@@ -321,10 +335,14 @@ func registerEdgeLocally(data string, res *edge.DeployResult, accountID string) 
 	defer db.Close()
 	d := &store.EdgeDeployment{
 		Name: res.Name, Target: res.Target, Origin: res.Origin,
-		SecurePath: res.SecurePath, AccountID: accountID,
+		SecurePath: res.SecurePath, AccountID: accountID, SelfManage: res.SelfManage,
 	}
 	if existing, err := db.EdgeDeploymentByName(res.Name); err == nil {
 		existing.Origin, existing.SecurePath, existing.AccountID = res.Origin, res.SecurePath, accountID
+		// Also on the update branch: a --force --self-manage redeploy over a row
+		// that says false would leave the Worker holding a credential the next
+		// `edge update` strips, with nothing anywhere reporting it.
+		existing.SelfManage = res.SelfManage
 		if err := db.SaveEdgeDeployment(existing); err != nil {
 			fmt.Fprintf(os.Stderr, "note: deployed, but the panel row could not be updated: %v\n", err)
 		}
@@ -398,16 +416,48 @@ func cmdEdgeUpdate(args []string) error {
 	if len(targets) == 0 {
 		return withExit(exitUsage, errors.New("edge update needs --name or --all"))
 	}
+	// The same refusal the deploy path carries, and it belongs here for a
+	// stronger reason: this is the DEFAULT invocation. `forgectl edge update
+	// --all` with no token falls through edgeCreds to the stored OAuth access
+	// token — OAuth being the documented preferred flow — and the loop below
+	// re-binds whatever it gets as CF_API_TOKEN on every self-managed target.
+	// So the path that runs unattended was the one without the guard.
+	//
+	// Before edgeCreds, not after: reaching it starts a PKCE flow that waits
+	// five minutes for a browser callback, and refusing after a partial upload
+	// would leave some Workers rebound and some not.
+	if strings.TrimSpace(*apiToken) == "" && strings.TrimSpace(os.Getenv("CF_API_TOKEN")) == "" {
+		var selfManaged []string
+		for _, t := range targets {
+			if t.SelfManage {
+				selfManaged = append(selfManaged, t.Name)
+			}
+		}
+		if len(selfManaged) > 0 {
+			return withExit(exitUsage, &edge.Error{Op: "edge-update", Kind: edge.KindValidation,
+				Message: "updating a self-managed Worker needs an explicit API token: " +
+					strings.Join(selfManaged, ", "),
+				Remediation: "pass --api-token (or set CF_API_TOKEN). This update re-binds the " +
+					"credential the Worker's own Deployment panel uses, and the OAuth token this " +
+					"command would otherwise reach for is short-lived — binding it produces a panel " +
+					"that works today and silently rots. --name a Worker that is not self-managed " +
+					"to update it without one."})
+		}
+	}
 	c, err := edgeCreds(ctx, *apiToken, *account, *apiBase, true)
 	if err != nil {
 		return err
 	}
 	for _, t := range targets {
 		// keep_bindings preserves KV and D1, so config, users and the secure
-		// path all survive the re-upload (see edge.UploadScript).
+		// path all survive the re-upload (see edge.UploadScript). It does NOT
+		// cover the text bindings: those are a closed list resent on every
+		// upload, so the self-manage credential has to be replayed from the
+		// registered row or this update silently strips it.
 		res, err := edge.Deploy(ctx, c, edge.DeploySpec{
 			Name: t.Name, Target: t.Target, SecurePath: t.SecurePath,
 			Bundle: raw, Update: true, Force: *force, SkipVerify: *skipVerify,
+			SelfManage: t.SelfManage,
 		})
 		if err != nil {
 			return err
