@@ -52,7 +52,7 @@ func TestEveryPresetIsAcceptedByTheRealCore(t *testing.T) {
 				InboundTags: r.InboundTags, OutboundTag: r.OutboundTag,
 			})
 		}
-		b, err := engine.BuildMultiWithRouting(specs, 10085, "", "", nil, rules)
+		b, err := engine.BuildMultiWithRouting(specs, 10085, "", "", nil, rules, nil)
 		if err != nil {
 			t.Fatalf("preset %q did not render: %v", p.Name, err)
 		}

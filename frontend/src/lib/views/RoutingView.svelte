@@ -42,9 +42,27 @@
     outbound_tag: string;
   }
 
+  // A rule could name exactly ONE exit, so an operator with two relays picked
+  // one and their users went down with it. A group is several outbounds behind
+  // a single tag, health-probed by the core, and rules target it by name.
+  interface Group {
+    id: number;
+    tag: string;
+    members: string[] | null;
+    strategy: string;
+    probe_url: string;
+    probe_interval: string;
+    all_down_policy: string;
+    enabled: boolean;
+    note: string;
+  }
+
   let outbounds = $state<Outbound[]>([]);
   let builtin = $state<string[]>(['direct', 'block']);
   let rules = $state<Rule[]>([]);
+  let groups = $state<Group[]>([]);
+  let strategies = $state<string[]>([]);
+  let groupDefaults = $state({ strategy: '', probe_url: '', probe_interval: '' });
   let precedence = $state<string[]>([]);
   let loading = $state(true);
   let loadError = $state('');
@@ -55,19 +73,33 @@
   ];
 
   const allTags = $derived([...builtin, ...outbounds.filter((o) => o.enabled).map((o) => o.tag)]);
+  // Members are outbounds only: "direct" and "block" are always reachable, so
+  // either of them inside a group wins every health probe and the real exits
+  // never see traffic. The API refuses them for the same reason.
+  const memberTags = $derived(outbounds.filter((o) => o.enabled).map((o) => o.tag));
+  // A rule may send traffic to an outbound, a built-in, or a group.
+  const ruleTargets = $derived([...allTags, ...groups.filter((g) => g.enabled).map((g) => g.tag)]);
 
   async function load() {
     loading = true;
     loadError = '';
     try {
-      const [o, r] = await Promise.all([
+      const [o, r, g] = await Promise.all([
         apiFetch<{ outbounds: Outbound[]; builtin: string[] }>('/admin/routing/outbounds'),
-        apiFetch<{ rules: Rule[]; precedence: string[] }>('/admin/routing/rules')
+        apiFetch<{ rules: Rule[]; precedence: string[] }>('/admin/routing/rules'),
+        apiFetch<{
+          groups: Group[];
+          strategies: string[];
+          defaults: { strategy: string; probe_url: string; probe_interval: string };
+        }>('/admin/routing/groups')
       ]);
       outbounds = o.outbounds ?? [];
       builtin = o.builtin ?? builtin;
       rules = r.rules ?? [];
       precedence = r.precedence ?? [];
+      groups = g.groups ?? [];
+      strategies = g.strategies ?? [];
+      groupDefaults = g.defaults ?? groupDefaults;
     } catch (err: any) {
       loadError = err.message || tr('routing.failed_to_load_routing');
     } finally {
@@ -141,6 +173,69 @@
       await load();
     } catch (err: any) {
       // The API refuses while a rule still points at it, and says which rules.
+      showToast(err.message || tr('routing.failed_to_delete'), 'error');
+    }
+  }
+
+  // --- failover group editing ---
+  let grOpen = $state(false);
+  let grEditing = $state<Group | null>(null);
+  let grTag = $state('');
+  let grMembers = $state<string[]>([]);
+  let grStrategy = $state('');
+  let grProbeURL = $state('');
+  let grProbeInterval = $state('');
+  let grAllDown = $state('block');
+  let grNote = $state('');
+
+  function openGroup(g: Group | null) {
+    grEditing = g;
+    grTag = g?.tag ?? '';
+    grMembers = [...(g?.members ?? [])];
+    grStrategy = g?.strategy || groupDefaults.strategy;
+    grProbeURL = g?.probe_url || groupDefaults.probe_url;
+    grProbeInterval = g?.probe_interval || groupDefaults.probe_interval;
+    grAllDown = g?.all_down_policy || 'block';
+    grNote = g?.note ?? '';
+    grOpen = true;
+  }
+
+  function toggleMember(tag: string) {
+    grMembers = grMembers.includes(tag)
+      ? grMembers.filter((m) => m !== tag)
+      : [...grMembers, tag];
+  }
+
+  async function saveGroup() {
+    try {
+      const body = {
+        tag: grTag.trim(),
+        members: grMembers,
+        strategy: grStrategy,
+        probe_url: grProbeURL.trim(),
+        probe_interval: grProbeInterval.trim(),
+        all_down_policy: grAllDown,
+        note: grNote.trim(),
+        enabled: grEditing ? grEditing.enabled : true
+      };
+      const path = grEditing ? `/admin/routing/groups/${grEditing.id}` : '/admin/routing/groups';
+      await apiFetch(path, { method: grEditing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      showToast(tr('routing.group_saved'), 'success');
+      grOpen = false;
+      await load();
+    } catch (err: any) {
+      showToast(err.message || tr('routing.failed_to_save_group'), 'error');
+    }
+  }
+
+  async function deleteGroup(g: Group) {
+    if (!confirm(tr('routing.delete_the_group_tag', { tag: g.tag }))) return;
+    try {
+      await apiFetch(`/admin/routing/groups/${g.id}`, { method: 'DELETE' });
+      showToast(tr('routing.group_deleted'), 'success');
+      await load();
+    } catch (err: any) {
+      // The API refuses while a rule still targets it, and says which rules.
       showToast(err.message || tr('routing.failed_to_delete'), 'error');
     }
   }
@@ -325,6 +420,37 @@
 
   <div class="card">
     <div class="section-head">
+      <h3>{tr('routing.failover_groups')}</h3>
+      <button class="btn-primary" data-testid="new-group" onclick={() => openGroup(null)}>
+        {tr('routing.new_group')}
+      </button>
+    </div>
+    <p class="muted">{tr('routing.several_outbounds_behind_one_tag')}</p>
+    {#if groups.length === 0}
+      <p class="muted" data-testid="no-groups">{tr('routing.no_groups_yet')}</p>
+    {:else}
+      <table>
+        <thead><tr><th>{tr('routing.tag')}</th><th>{tr('routing.members')}</th><th>{tr('routing.strategy')}</th><th>{tr('routing.all_down_policy')}</th><th></th></tr></thead>
+        <tbody>
+          {#each groups as g}
+            <tr class:off={!g.enabled}>
+              <td><code>{g.tag}</code></td>
+              <td class="mono">{(g.members ?? []).join(', ')}</td>
+              <td>{g.strategy}</td>
+              <td><code>{g.all_down_policy}</code></td>
+              <td class="acts">
+                <button class="btn-sm" onclick={() => openGroup(g)}>{tr('routing.edit')}</button>
+                <button class="btn-sm danger" onclick={() => deleteGroup(g)}>{tr('routing.delete')}</button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </div>
+
+  <div class="card">
+    <div class="section-head">
       <h3>{tr('routing.rules')}</h3>
       <button class="btn-primary" data-testid="new-rule" onclick={() => openRule(null)}>{tr('routing.new_rule')}</button>
     </div>
@@ -389,6 +515,54 @@
   </div>
 </Modal>
 
+<Modal title={grEditing ? tr('routing.edit_group') : tr('routing.new_group')} isOpen={grOpen} onClose={() => (grOpen = false)}>
+  <label>{tr('routing.tag')}<input bind:value={grTag} placeholder={tr('routing.failover_eu')} data-testid="group-tag" /></label>
+  <fieldset>
+    <legend>{tr('routing.members')}</legend>
+    {#if memberTags.length === 0}
+      <p class="warn">{tr('routing.define_an_outbound_first')}</p>
+    {:else}
+      {#each memberTags as t}
+        <label class="check">
+          <input type="checkbox" checked={grMembers.includes(t)} onchange={() => toggleMember(t)} />
+          <code>{t}</code>
+        </label>
+      {/each}
+    {/if}
+  </fieldset>
+  <label>
+    {tr('routing.strategy')}
+    <select bind:value={grStrategy} data-testid="group-strategy">
+      {#each strategies as st}<option value={st}>{st}</option>{/each}
+    </select>
+  </label>
+  <label>
+    {tr('routing.probe_url')}
+    <input bind:value={grProbeURL} placeholder={groupDefaults.probe_url} />
+    <!-- The core keeps ONE observatory for the whole config, so two groups that
+         disagree here cannot both be honoured and the save is refused. -->
+    <small>{tr('routing.every_group_shares_one_probe')}</small>
+  </label>
+  <label>{tr('routing.probe_interval')}<input bind:value={grProbeInterval} placeholder={groupDefaults.probe_interval} /></label>
+  <label>
+    {tr('routing.all_down_policy')}
+    <select bind:value={grAllDown}>
+      {#each allTags as t}<option value={t}>{t}</option>{/each}
+    </select>
+    <small>{tr('routing.where_traffic_goes_when_every_member')}</small>
+  </label>
+  <label>{tr('routing.note')}<input bind:value={grNote} placeholder={tr('routing.what_this_group_is_for')} /></label>
+  {#if grMembers.length === 0}
+    <p class="warn" data-testid="group-warning">{tr('routing.a_group_needs_at_least_one_member')}</p>
+  {/if}
+  <div class="modal-actions">
+    <button class="btn-sm" onclick={() => (grOpen = false)}>{tr('routing.cancel')}</button>
+    <button class="btn-primary" data-testid="save-group" disabled={grMembers.length === 0} onclick={saveGroup}>
+      {tr('routing.save')}
+    </button>
+  </div>
+</Modal>
+
 <Modal title={rEditing ? tr('routing.edit_rule') : tr('routing.new_rule')} isOpen={ruleOpen} onClose={() => (ruleOpen = false)}>
   <label>{tr('routing.name')}<input bind:value={rName} placeholder={tr('routing.block_ads')} data-testid="rule-name" /></label>
   <label>
@@ -423,7 +597,7 @@
   <label>
     {tr('routing.send_to')}
     <select bind:value={rOutbound} data-testid="rule-outbound">
-      {#each allTags as t}<option value={t}>{t}</option>{/each}
+      {#each ruleTargets as t}<option value={t}>{t}</option>{/each}
     </select>
   </label>
   {#if !ruleHasMatcher}
@@ -463,6 +637,10 @@
   label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.45); font-size: 11px; }
   input, select, textarea { width: 100%; background: #0F1420; border: 1px solid rgba(255,255,255,0.12); color: #fff; padding: 9px; border-radius: 8px; font: inherit; margin-top: 4px; }
   textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
+  fieldset { border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+  legend { font-size: 12px; color: rgba(255,255,255,0.7); padding: 0 6px; }
+  label.check { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  label.check input { width: auto; margin-top: 0; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .btn-primary { background: #FF7A1A; color: #10141c; padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
   .btn-primary:disabled { opacity: 0.4; cursor: default; }

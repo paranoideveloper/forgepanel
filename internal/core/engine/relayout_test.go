@@ -30,7 +30,7 @@ func TestSocksAndHTTPRelayOutboundsWithAuth(t *testing.T) {
 		[]RuleSpec{
 			{Name: "via-socks", Domain: []string{"a.example"}, OutboundTag: "socks-relay"},
 			{Name: "via-http", Domain: []string{"b.example"}, OutboundTag: "http-relay"},
-		})
+		}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

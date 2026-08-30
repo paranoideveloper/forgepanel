@@ -28,25 +28,26 @@ import (
 // a new step cannot silently reuse a number that has already shipped, and so a
 // migration can be referenced by name from a test.
 const (
-	migVBaseline      uint64 = 1
-	migVAlignLegacy   uint64 = 2
-	migVRepairOrphans uint64 = 3
-	migVTrafficSnaps  uint64 = 4
-	migVNodeMetrics   uint64 = 5
-	migVRollups       uint64 = 6
-	migVIPLimit       uint64 = 7
-	migVRouting       uint64 = 8
-	migVNotServing    uint64 = 9
-	migVTrafficSplit  uint64 = 10
-	migVAPITokens     uint64 = 11
-	migVProfiles      uint64 = 12
-	migVImportSource  uint64 = 13
-	migVNodeSbStats   uint64 = 14
-	migVNodeMTLS      uint64 = 15
-	migVInboundHosts  uint64 = 16
-	migVWGPeers       uint64 = 17
-	migVBridges       uint64 = 18
-	migVGroupInbounds uint64 = 19
+	migVBaseline       uint64 = 1
+	migVAlignLegacy    uint64 = 2
+	migVRepairOrphans  uint64 = 3
+	migVTrafficSnaps   uint64 = 4
+	migVNodeMetrics    uint64 = 5
+	migVRollups        uint64 = 6
+	migVIPLimit        uint64 = 7
+	migVRouting        uint64 = 8
+	migVNotServing     uint64 = 9
+	migVTrafficSplit   uint64 = 10
+	migVAPITokens      uint64 = 11
+	migVProfiles       uint64 = 12
+	migVImportSource   uint64 = 13
+	migVNodeSbStats    uint64 = 14
+	migVNodeMTLS       uint64 = 15
+	migVInboundHosts   uint64 = 16
+	migVWGPeers        uint64 = 17
+	migVBridges        uint64 = 18
+	migVGroupInbounds  uint64 = 19
+	migVOutboundGroups uint64 = 20
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -303,6 +304,23 @@ func migrations() []migrate.Migration {
 					}
 				}
 				return nil
+			},
+		},
+		{
+			Version: migVOutboundGroups,
+			Name:    "outbound_failover_groups",
+			Rollback: "safe to drop, but READ THIS FIRST: dropping the table removes every failover " +
+				"group, so each rule that targeted one names a balancer nothing defines. The core " +
+				"accepts that config and silently drops every connection those rules match — the " +
+				"traffic stops with one line in the engine log and nothing in the panel. Delete the " +
+				"rules that point at groups first, or take a backup.",
+			// Named failover groups: several outbounds behind one tag, health
+			// probed. Without the table a rule can only name ONE exit, so an
+			// operator with two relays loses their users' traffic the moment
+			// the one a rule names stops answering.
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&OutboundGroup{}})
+				return err
 			},
 		},
 	}

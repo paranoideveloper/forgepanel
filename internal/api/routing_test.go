@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
@@ -244,7 +246,7 @@ func TestSavedRoutingReachesTheGeneratedConfig(t *testing.T) {
 	// The whole point: stored routing must actually be what the core is given.
 	// A panel that stores rules and generates a config without them is the
 	// silent-failure shape this codebase keeps finding.
-	outs, rules := s.routingSpecs()
+	outs, rules, _ := s.routingSpecs()
 	if len(outs) != 1 || outs[0].Tag != "hole" {
 		t.Fatalf("outbound specs = %+v", outs)
 	}
@@ -260,7 +262,7 @@ func TestDisabledRoutingIsNotRendered(t *testing.T) {
 		`{"name":"off","domain":["a.com"],"outbound_tag":"hole","enabled":false}`); code != 200 {
 		t.Fatalf("%d: %s", code, b)
 	}
-	_, rules := s.routingSpecs()
+	_, rules, _ := s.routingSpecs()
 	// "Enabled" has to mean something. A disabled rule that still routes traffic
 	// is worse than no toggle at all, because the operator believes it is off.
 	if len(rules) != 0 {
@@ -400,5 +402,94 @@ func TestUnknownPresetIs404(t *testing.T) {
 	s, token := adminAPI(t)
 	if code, _ := doPOST(t, s, "/api/admin/routing/presets/nonsense", token, `{}`); code != 404 {
 		t.Errorf("unknown preset returned %d, want 404", code)
+	}
+}
+
+// --- failover groups --------------------------------------------------------
+
+func mkGroup(t *testing.T, s *Server, token, body string) (int, string) {
+	t.Helper()
+	return doPOST(t, s, "/api/admin/routing/groups", token, body)
+}
+
+// The wiring assertion. A GroupSpec, a RenderBalancers and a groups table can
+// all be written, unit-tested and shipped while the panel's routing source stays
+// a two-tuple of outbounds and rules — at which point the operator configures
+// failover, the UI shows it, and not one generated config contains a balancer.
+func TestFailoverGroupReachesTheGeneratedConfig(t *testing.T) {
+	s, token := adminAPI(t)
+	mkOutbound(t, s, token, "relay-a", "blackhole")
+	mkOutbound(t, s, token, "relay-b", "blackhole")
+	if code, b := mkGroup(t, s, token,
+		`{"tag":"failover","members":["relay-a","relay-b"],"strategy":"leastPing","enabled":true}`); code != 200 {
+		t.Fatalf("creating the group: %d %s", code, b)
+	}
+	if code, b := doPOST(t, s, "/api/admin/routing/rules", token,
+		`{"name":"web","domain":["example.com"],"outbound_tag":"failover","enabled":true}`); code != 200 {
+		t.Fatalf("a rule could not target the group: %d %s", code, b)
+	}
+
+	outs, rules, groups := s.routingSpecs()
+	if len(groups) != 1 || groups[0].Tag != "failover" {
+		t.Fatalf("group specs = %+v", groups)
+	}
+	bundle, err := engine.BuildMultiWithRouting(s.candidateSpecs(), 0, "", "", outs, rules, groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Routing struct {
+			Balancers []struct {
+				Tag string `json:"tag"`
+			} `json:"balancers"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(bundle.Xray, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Routing.Balancers) != 1 || doc.Routing.Balancers[0].Tag != "failover" {
+		t.Fatalf("the saved group is in no generated config: %s", bundle.Xray)
+	}
+}
+
+// A member the config no longer defines makes the core refuse the WHOLE
+// document, so one delete takes every inbound on the box down.
+func TestAnOutboundInsideAGroupCannotBeDeleted(t *testing.T) {
+	s, token := adminAPI(t)
+	mkOutbound(t, s, token, "relay-a", "blackhole")
+	mkOutbound(t, s, token, "relay-b", "blackhole")
+	if code, b := mkGroup(t, s, token,
+		`{"tag":"failover","members":["relay-a","relay-b"],"enabled":true}`); code != 200 {
+		t.Fatalf("creating the group: %d %s", code, b)
+	}
+	obs, err := s.db.ListOutbounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var id uint
+	for _, o := range obs {
+		if o.Tag == "relay-a" {
+			id = o.ID
+		}
+	}
+	code, body := doDELETE(t, s, fmt.Sprintf("/api/admin/routing/outbounds/%d", id), token)
+	if code != http.StatusConflict {
+		t.Fatalf("deleting a group member returned %d, want 409: %s", code, body)
+	}
+	if !strings.Contains(body, "failover") {
+		t.Errorf("the refusal does not name the group holding it: %s", body)
+	}
+}
+
+func TestAGroupNamingAnUnknownMemberIsRefused(t *testing.T) {
+	s, token := adminAPI(t)
+	mkOutbound(t, s, token, "relay-a", "blackhole")
+	code, body := mkGroup(t, s, token,
+		`{"tag":"failover","members":["relay-a","ghost"],"enabled":true}`)
+	if code == 200 {
+		t.Fatalf("a group selecting an outbound nothing defines was stored: %s", body)
+	}
+	if list, err := s.db.ListOutboundGroups(); err != nil || len(list) != 0 {
+		t.Fatalf("the rejected group was stored anyway: %+v (%v)", list, err)
 	}
 }

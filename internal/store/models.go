@@ -286,7 +286,7 @@ func AllModels() []any {
 	return []any{&Admin{}, &Group{}, &User{}, &Inbound{}, &Setting{}, &AuditLog{}, &Node{},
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}, &TrafficRollup{},
 		&InboundHost{}, &WGPeer{}, &Bridge{}, &GroupInbound{},
-		&Outbound{}, &RoutingRule{}, &APIToken{},
+		&Outbound{}, &RoutingRule{}, &OutboundGroup{}, &APIToken{},
 		&Profile{}, &ProfileBinding{}}
 }
 

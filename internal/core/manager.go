@@ -67,7 +67,8 @@ type Controller struct {
 	// compromise into a history of everyone's activity.
 	presence *online.Tracker
 
-	// routingSource supplies the operator's outbounds and rules at build time.
+	// routingSource supplies the operator's outbounds, rules and failover groups
+	// at build time.
 	// A function rather than stored state so an edit takes effect on the next
 	// reload without the controller having to be told about it — the pattern
 	// that let a stale copy of the config linger before.
@@ -76,7 +77,7 @@ type Controller struct {
 	// which deliberately runs without the reload lock so a preview cannot be
 	// blocked by a reload in progress.
 	routingMu     sync.RWMutex
-	routingSource func() ([]engine.OutboundSpec, []engine.RuleSpec)
+	routingSource func() ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec)
 
 	mu      sync.Mutex
 	brook   *BrookManager
@@ -234,8 +235,8 @@ func (c *Controller) ReloadSpecs(specs []engine.InboundSpec) (*engine.Bundle, er
 	}
 	cp, kp, _ := cert.EnsureSelfSigned(filepath.Join(c.dataDir, "certs"))
 	c.applyCerts(specs)
-	outbounds, rules := c.routing()
-	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules)
+	outbounds, rules, groups := c.routing()
+	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules, groups)
 	if err != nil {
 		return nil, err
 	}
@@ -320,8 +321,8 @@ func (c *Controller) Validate(nodes []*model.Node) (*engine.Bundle, map[string]s
 	c.mu.Lock()
 	c.applyCerts(specs)
 	c.mu.Unlock()
-	outbounds, rules := c.routing()
-	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules)
+	outbounds, rules, groups := c.routing()
+	bundle, err := engine.BuildMultiWithRouting(specs, c.xrayAPIPort, cp, kp, outbounds, rules, groups)
 	results := map[string]string{}
 	if err != nil {
 		results["build"] = err.Error()
@@ -448,22 +449,27 @@ func validateResult(err error) string {
 	return "valid"
 }
 
-// SetRoutingSource installs the supplier of operator-defined outbounds and
-// routing rules. Nil (the default) renders a config identical to one from before
-// the feature existed.
-func (c *Controller) SetRoutingSource(fn func() ([]engine.OutboundSpec, []engine.RuleSpec)) {
+// SetRoutingSource installs the supplier of operator-defined outbounds, routing
+// rules and failover groups. Nil (the default) renders a config identical to one
+// from before the feature existed.
+//
+// The signature carries all three TOGETHER because that is the only thing
+// stopping a group from being stored, listed, edited and rendered by its own
+// unit tests while never reaching a running core: a two-tuple compiles happily
+// with a groups table nothing reads.
+func (c *Controller) SetRoutingSource(fn func() ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec)) {
 	c.routingMu.Lock()
 	defer c.routingMu.Unlock()
 	c.routingSource = fn
 }
 
 // routing reads the current routing definition.
-func (c *Controller) routing() ([]engine.OutboundSpec, []engine.RuleSpec) {
+func (c *Controller) routing() ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec) {
 	c.routingMu.RLock()
 	fn := c.routingSource
 	c.routingMu.RUnlock()
 	if fn == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	return fn()
 }

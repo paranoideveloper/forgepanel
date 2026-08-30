@@ -52,7 +52,7 @@ type InboundSpec struct {
 var SingboxAPIPort int
 
 func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) (*Bundle, error) {
-	return BuildMultiWithRouting(specs, xrayAPIPort, certPath, keyPath, nil, nil)
+	return BuildMultiWithRouting(specs, xrayAPIPort, certPath, keyPath, nil, nil, nil)
 }
 
 // BuildMultiWithRouting is BuildMulti plus the operator's own outbounds and
@@ -61,8 +61,8 @@ func BuildMulti(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string) 
 // See routing.go for why the rules are placed AFTER the per-inbound egress
 // rules: it is a safety decision, not an ordering detail.
 func BuildMultiWithRouting(specs []InboundSpec, xrayAPIPort int, certPath, keyPath string,
-	outbounds []OutboundSpec, rules []RuleSpec) (*Bundle, error) {
-	return BuildMultiFor(specs, xrayAPIPort, SingboxAPIPort, certPath, keyPath, outbounds, rules)
+	outbounds []OutboundSpec, rules []RuleSpec, groups []GroupSpec) (*Bundle, error) {
+	return BuildMultiFor(specs, xrayAPIPort, SingboxAPIPort, certPath, keyPath, outbounds, rules, groups)
 }
 
 // BuildMultiFor is BuildMultiWithRouting with the sing-box stats port passed
@@ -76,7 +76,7 @@ func BuildMultiWithRouting(specs []InboundSpec, xrayAPIPort int, certPath, keyPa
 // nodes unmetered forever) and would emit it for a node whose stock binary
 // refuses to start with it.
 func BuildMultiFor(specs []InboundSpec, xrayAPIPort, singboxAPIPort int, certPath, keyPath string,
-	outbounds []OutboundSpec, rules []RuleSpec) (*Bundle, error) {
+	outbounds []OutboundSpec, rules []RuleSpec, groups []GroupSpec) (*Bundle, error) {
 	b := &Bundle{}
 	var xin, sin, sep []any
 	statsUsed := false
@@ -232,7 +232,19 @@ func BuildMultiFor(specs []InboundSpec, xrayAPIPort, singboxAPIPort int, certPat
 	for _, t := range egressTag {
 		known[t] = true
 	}
-	userRules, err := RenderRules(rules, known)
+	// Failover groups are rendered BEFORE the rules that target them, because
+	// RenderRules has to know which tags are balancers: the core spells that
+	// target "balancerTag", and a rule that hands it "outboundTag" instead
+	// validates cleanly and then drops every connection it matches.
+	balancers, observatory, err := RenderBalancers(groups, known)
+	if err != nil {
+		return nil, err
+	}
+	balancerTags := make(map[string]bool, len(groups))
+	for _, sp := range groups {
+		balancerTags[strings.TrimSpace(sp.Tag)] = true
+	}
+	userRules, err := RenderRules(rules, known, balancerTags)
 	if err != nil {
 		return nil, err
 	}
@@ -269,12 +281,31 @@ func BuildMultiFor(specs []InboundSpec, xrayAPIPort, singboxAPIPort int, certPat
 			jobj{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
 		}, egressRules...), userRules...)},
 	}
+	if len(balancers) > 0 {
+		// Both keys are added only when a group exists, so a panel that uses no
+		// groups still generates the config it always did — byte for byte.
+		xrayCfg["routing"].(jobj)["balancers"] = balancers
+		// burstObservatory is a TOP-LEVEL app, not part of routing. Nesting it
+		// under routing is silently ignored by the core, and the balancer then
+		// grades every member equally healthy for the life of the process:
+		// failover that reports itself as working and moves nothing.
+		xrayCfg["burstObservatory"] = observatory
+	}
 	raw, err := json.MarshalIndent(xrayCfg, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	b.Xray = raw
 
+	// FAILOVER GROUPS DO NOT CROSS INTO SING-BOX, deliberately. The operator's
+	// outbounds are stored as the core's own JSON verbatim — Xray's JSON — and
+	// none of them is rendered into the sing-box document, so a sing-box
+	// "urltest" over their tags would select outbounds this config does not
+	// define. sing-box refuses the whole document for that, which takes every
+	// hysteria2, TUIC, AnyTLS, ShadowTLS and WireGuard inbound on the box down.
+	// Operator routing has always been Xray-only for the same reason; groups
+	// inherit it rather than pretending otherwise.
+	//
 	// No stats API is configured for sing-box, and that is a limitation of the
 	// upstream binary rather than an oversight. Per-user counters would come from
 	// experimental.v2ray_api, which the OFFICIAL sing-box release archives are not

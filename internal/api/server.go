@@ -770,6 +770,12 @@ func (s *Server) routes() {
 			admin.PUT("/routing/rules/:id", s.handleSaveRoutingRule)
 			admin.DELETE("/routing/rules/:id", s.handleDeleteRoutingRule)
 			admin.POST("/routing/rules/reorder", s.handleReorderRoutingRules)
+			// Failover groups: several outbounds behind one tag, health-probed,
+			// so a rule keeps working when the exit it names stops answering.
+			admin.GET("/routing/groups", s.handleListOutboundGroups)
+			admin.POST("/routing/groups", s.handleSaveOutboundGroup)
+			admin.PUT("/routing/groups/:id", s.handleSaveOutboundGroup)
+			admin.DELETE("/routing/groups/:id", s.handleDeleteOutboundGroup)
 			admin.GET("/routing/presets", s.handleListRoutingPresets)
 			admin.POST("/routing/presets/:name", s.handleApplyRoutingPreset)
 			admin.GET("/traffic/series", s.handleTrafficSeries)

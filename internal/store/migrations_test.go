@@ -426,7 +426,13 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // table's writer (internal/service) was never linked into any binary, so the
 // baselines it modelled were never written, and the replacement is scoped and
 // updates atomically with the usage it accounts for.
-const modelSchemaFingerprintPinned = "37606782e87a46d2a51f01a08ce67aed1c5920a5e2b1d3caca299e65acfaea42"
+//
+// outbound_groups was added with migVOutboundGroups: named failover groups,
+// several outbounds behind one tag. A database already at the previous version
+// has no such table, and the rules that target a group would name a balancer the
+// generated config cannot define — which the core refuses whole, taking every
+// inbound down. The migration carries the table; this pin follows it.
+const modelSchemaFingerprintPinned = "c9d69556b72a6c21e3bdbcba92a46dd588196dba2dca255e225eaa90de1eef2d"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

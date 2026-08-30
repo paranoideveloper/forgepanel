@@ -30,13 +30,18 @@ import (
 // User ids become the counter emails the core knows them by. Doing it here, at
 // the boundary, keeps that encoding in one place — two copies is exactly how the
 // panel and a node end up disagreeing about which user owns a rule.
-func (s *Server) routingSpecs() ([]engine.OutboundSpec, []engine.RuleSpec) {
+//
+// It returns groups alongside outbounds and rules because this function IS the
+// controller's routing source (server.go wires it to SetRoutingSource). A group
+// left out here is a group that renders correctly in every unit test and appears
+// in no config any core is ever handed.
+func (s *Server) routingSpecs() ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec) {
 	if s.db == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	obs, err := s.db.ListOutbounds()
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	outs := make([]engine.OutboundSpec, 0, len(obs))
 	for _, o := range obs {
@@ -51,9 +56,25 @@ func (s *Server) routingSpecs() ([]engine.OutboundSpec, []engine.RuleSpec) {
 		})
 	}
 
+	gs, err := s.db.ListOutboundGroups()
+	if err != nil {
+		return outs, nil, nil
+	}
+	groups := make([]engine.GroupSpec, 0, len(gs))
+	for _, g := range gs {
+		if !g.Enabled {
+			continue
+		}
+		groups = append(groups, engine.GroupSpec{
+			Tag: g.Tag, Members: g.Members, Strategy: g.Strategy,
+			ProbeURL: g.ProbeURL, ProbeInterval: g.ProbeInterval,
+			FallbackTag: g.AllDownPolicy,
+		})
+	}
+
 	rs, err := s.db.ListRoutingRules()
 	if err != nil {
-		return outs, nil
+		return outs, nil, groups
 	}
 	rules := make([]engine.RuleSpec, 0, len(rs))
 	for _, r := range rs {
@@ -71,7 +92,7 @@ func (s *Server) routingSpecs() ([]engine.OutboundSpec, []engine.RuleSpec) {
 			OutboundTag: r.OutboundTag,
 		})
 	}
-	return outs, rules
+	return outs, rules, groups
 }
 
 // validateRoutingOrFail builds a candidate config with the current routing
@@ -86,8 +107,8 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 		// running core.
 		return true
 	}
-	outs, rules := s.routingSpecs()
-	bundle, err := engine.BuildMultiWithRouting(s.candidateSpecs(), 0, "", "", outs, rules)
+	outs, rules, groups := s.routingSpecs()
+	bundle, err := engine.BuildMultiWithRouting(s.candidateSpecs(), 0, "", "", outs, rules, groups)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return false

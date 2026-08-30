@@ -237,7 +237,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	// fleet's wide open, with nothing in the UI to say the rules stopped at the
 	// panel. The rules are scoped to the inbounds this node actually serves —
 	// see nodeRoutingSpecs.
-	outs, rules := s.nodeRoutingSpecs(specs)
+	outs, rules, groups := s.nodeRoutingSpecs(specs)
 	// THE NODE NEEDS A SERVER CERTIFICATE. These two arguments were "" and "",
 	// so every TLS-terminating inbound assigned to a node was built with no
 	// certificate and refused by the core on that node:
@@ -252,7 +252,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 	// The paths are on the NODE's filesystem; the agent materialises the
 	// certificate at exactly this location before it applies any config.
 	certPath, keyPath := nodeCertPaths(req.DataDir)
-	b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, outs, rules)
+	b, err := engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, outs, rules, groups)
 	if err != nil {
 		// A routing table that renders for the panel can still be refused for a
 		// node: RenderRules rejects a rule whose outbound tag the node's own
@@ -261,7 +261,7 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		// fail — a node with no operator rules still serves its own inbounds,
 		// while the LastBundle fallback below would hand it the PANEL's config,
 		// whose inbounds belong to a different machine.
-		b, err = engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, nil, nil)
+		b, err = engine.BuildMultiFor(specs, nodeXrayAPIPort, sbAPIPort, certPath, keyPath, nil, nil, nil)
 	}
 	if err == nil && b != nil {
 		xrayCfg, singboxCfg = string(b.Xray), singboxIfServing(b)
@@ -293,12 +293,14 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 // node config that does not resemble the routing table they wrote.
 //
 // A rule with no inbound scope is fleet-wide by definition and always goes.
-func (s *Server) nodeRoutingSpecs(specs []engine.InboundSpec) ([]engine.OutboundSpec, []engine.RuleSpec) {
-	outs, rules := s.routingSpecs()
+func (s *Server) nodeRoutingSpecs(specs []engine.InboundSpec) ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec) {
+	outs, rules, groups := s.routingSpecs()
 	if len(rules) == 0 {
-		// No rules can apply here, so no outbound is needed here either. See
-		// keepReferencedOutbounds for why that matters.
-		return nil, nil
+		// No rules can apply here, so no outbound and no group is needed here
+		// either — a balancer nothing selects changes nothing about what the
+		// node does, while its members' credentials would still have to travel
+		// to the node to make the config render. See keepReferencedOutbounds.
+		return nil, nil, nil
 	}
 	// Mirror the tag BuildMultiFor will assign, or a rule written against an
 	// inbound the operator never named would be dropped for the wrong reason.
@@ -336,9 +338,36 @@ func (s *Server) nodeRoutingSpecs(specs []engine.InboundSpec) ([]engine.Outbound
 		kept = append(kept, r)
 	}
 	if len(kept) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return keepReferencedOutbounds(outs, kept), kept
+	keptGroups := keepReferencedGroups(groups, kept)
+	return keepReferencedOutbounds(outs, kept, keptGroups), kept, keptGroups
+}
+
+// keepReferencedGroups returns only the failover groups the kept rules target.
+//
+// Same reasoning as keepReferencedOutbounds, one step further out: a group is a
+// list of relay tags whose OUTBOUNDS have to be shipped with it, credentials and
+// all. A group no surviving rule can select cannot change what this node does,
+// so sending it is pure exposure — and it would drag every member's password
+// onto a machine with no use for any of them.
+func keepReferencedGroups(groups []engine.GroupSpec, rules []engine.RuleSpec) []engine.GroupSpec {
+	need := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		if r.OutboundTag != "" {
+			need[r.OutboundTag] = true
+		}
+	}
+	kept := make([]engine.GroupSpec, 0, len(groups))
+	for _, g := range groups {
+		if need[g.Tag] {
+			kept = append(kept, g)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // keepReferencedOutbounds returns only the outbounds the kept rules name.
@@ -354,11 +383,24 @@ func (s *Server) nodeRoutingSpecs(specs []engine.InboundSpec) ([]engine.Outbound
 // The filter is by rule reference rather than by "is it valid here", because
 // that is the property that makes an outbound necessary: an outbound no
 // surviving rule can select cannot change what the node does.
-func keepReferencedOutbounds(outs []engine.OutboundSpec, rules []engine.RuleSpec) []engine.OutboundSpec {
+func keepReferencedOutbounds(outs []engine.OutboundSpec, rules []engine.RuleSpec, groups []engine.GroupSpec) []engine.OutboundSpec {
 	need := make(map[string]bool, len(rules))
 	for _, r := range rules {
 		if r.OutboundTag != "" {
 			need[r.OutboundTag] = true
+		}
+	}
+	// A rule that targets a group names the GROUP, not an exit. Its members and
+	// its all-down policy have to travel too, or the node receives a balancer
+	// selecting tags its own config does not define — which the core accepts
+	// and then sends that rule's traffic out DIRECT, from the node's own
+	// address, past the relays the group exists to hide behind.
+	for _, g := range groups {
+		for _, m := range g.Members {
+			need[m] = true
+		}
+		if g.FallbackTag != "" {
+			need[g.FallbackTag] = true
 		}
 	}
 	if len(need) == 0 {

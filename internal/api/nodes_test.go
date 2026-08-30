@@ -295,7 +295,7 @@ func TestANodeOnlyGetsTheOutboundsItsOwnRulesName(t *testing.T) {
 		t.Fatalf("saving rule: %d %s", code, resp)
 	}
 
-	outs, rules := s.nodeRoutingSpecs(nil)
+	outs, rules, _ := s.nodeRoutingSpecs(nil)
 	if len(rules) != 1 {
 		t.Fatalf("rules = %v, want the one unscoped rule", rules)
 	}
@@ -321,7 +321,7 @@ func TestANodeWithNoApplicableRulesGetsNoOperatorOutbounds(t *testing.T) {
 		t.Fatalf("saving outbound: %d %s", code, resp)
 	}
 	// No rules saved at all: the len(rules)==0 path.
-	outs, rules := s.nodeRoutingSpecs(nil)
+	outs, rules, _ := s.nodeRoutingSpecs(nil)
 	if len(outs) != 0 || len(rules) != 0 {
 		t.Fatalf("a node with no rules received %d outbound(s) and %d rule(s)", len(outs), len(rules))
 	}
@@ -595,5 +595,72 @@ func TestTheNodeUnitGrantsTheCapabilityPortHoppingNeeds(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "CAP_NET_ADMIN") {
 		t.Error("the node unit grants no CAP_NET_ADMIN, so a hop range on this node can never be installed")
+	}
+}
+
+// WIRING POINT C. The heartbeat is a SECOND, independent call into the config
+// builder, fed by nodeRoutingSpecs rather than by the controller's routing
+// source — and this exact omission already shipped once: operator rules were
+// wired into the panel and "every remote node enforced none of it". A failover
+// group wired only into the local controller reproduces it, and worse, because
+// the operator believes their fleet is now redundant.
+func TestFailoverGroupReachesANode(t *testing.T) {
+	s, token := adminAPI(t)
+	n := &store.Node{Name: "edge", Address: "203.0.113.40", EnrollToken: "tok-g", Enrolled: true}
+	if err := s.db.SaveNode(n); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := doPOST(t, s, "/api/admin/inbounds", token,
+		`{"protocol":"vless","address":"203.0.113.40","port":8443,"remark":"v"}`); code != 200 && code != 201 {
+		t.Fatalf("creating the node's inbound: %d %s", code, b)
+	}
+	mkOutbound(t, s, token, "relay-a", "blackhole")
+	mkOutbound(t, s, token, "relay-b", "blackhole")
+	if code, b := doPOST(t, s, "/api/admin/routing/groups", token,
+		`{"tag":"failover","members":["relay-a","relay-b"],"strategy":"leastPing","enabled":true}`); code != 200 {
+		t.Fatalf("creating the group: %d %s", code, b)
+	}
+	if code, b := doPOST(t, s, "/api/admin/routing/rules", token,
+		`{"name":"web","domain":["example.com"],"outbound_tag":"failover","enabled":true}`); code != 200 {
+		t.Fatalf("creating the rule: %d %s", code, b)
+	}
+
+	code, body := doPOST(t, s, "/api/node/heartbeat", "", `{"token":"tok-g"}`)
+	if code != 200 {
+		t.Fatalf("heartbeat: %d %s", code, body)
+	}
+	var resp struct {
+		XrayConfig string `json:"xray_config"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Routing struct {
+			Balancers []struct {
+				Tag      string   `json:"tag"`
+				Selector []string `json:"selector"`
+			} `json:"balancers"`
+		} `json:"routing"`
+		BurstObservatory struct {
+			SubjectSelector []string `json:"subjectSelector"`
+		} `json:"burstObservatory"`
+	}
+	if err := json.Unmarshal([]byte(resp.XrayConfig), &doc); err != nil {
+		t.Fatalf("the node was sent no usable config (%v): %s", err, resp.XrayConfig)
+	}
+	if len(doc.Routing.Balancers) != 1 || doc.Routing.Balancers[0].Tag != "failover" {
+		t.Fatalf("the node enforces no failover group, so its traffic never moves off a dead relay: %s", resp.XrayConfig)
+	}
+	if len(doc.BurstObservatory.SubjectSelector) != 2 {
+		t.Errorf("the node probes %v; without the observatory every member looks alive forever",
+			doc.BurstObservatory.SubjectSelector)
+	}
+	// The members have to travel with the group or the balancer selects tags the
+	// node's own config does not define — which is the whole config refused.
+	for _, want := range []string{`"relay-a"`, `"relay-b"`} {
+		if !strings.Contains(resp.XrayConfig, want) {
+			t.Errorf("member %s is missing from the node's config: %s", want, resp.XrayConfig)
+		}
 	}
 }

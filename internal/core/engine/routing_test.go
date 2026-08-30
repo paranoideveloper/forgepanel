@@ -68,7 +68,7 @@ func TestRulesTranslateEveryMatcher(t *testing.T) {
 		Name: "everything", Domain: []string{"geosite:ads"}, IP: []string{"geoip:ir"},
 		Port: "80,443", Network: "tcp", Protocol: []string{"tls"},
 		InboundTags: []string{"in-1"}, UserEmails: []string{"u.7"}, OutboundTag: "block",
-	}}, known)
+	}}, known, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRulesTranslateEveryMatcher(t *testing.T) {
 
 func TestRuleWithNoConditionsIsRefused(t *testing.T) {
 	_, err := RenderRules([]RuleSpec{{Name: "catch-all", OutboundTag: "block"}},
-		map[string]bool{"block": true})
+		map[string]bool{"block": true}, nil)
 	// Placed above a carefully ordered list, a condition-less rule silently
 	// swallows all of it and routing appears to have "stopped working".
 	if err == nil {
@@ -97,7 +97,7 @@ func TestRuleWithNoConditionsIsRefused(t *testing.T) {
 
 func TestRuleTargetingAnUndefinedOutboundIsRefused(t *testing.T) {
 	_, err := RenderRules([]RuleSpec{{Name: "r", Domain: []string{"a.com"}, OutboundTag: "ghost"}},
-		map[string]bool{"direct": true})
+		map[string]bool{"direct": true}, nil)
 	if err == nil {
 		t.Fatal("a rule pointing at an undefined outbound was accepted")
 	}
@@ -140,7 +140,7 @@ func chainedSpec() InboundSpec {
 func TestOperatorRulesComeAfterEgress(t *testing.T) {
 	b, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "",
 		nil,
-		[]RuleSpec{{Name: "direct-leak", Domain: []string{"example.com"}, OutboundTag: "direct"}})
+		[]RuleSpec{{Name: "direct-leak", Domain: []string{"example.com"}, OutboundTag: "direct"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestOperatorRulesComeAfterEgress(t *testing.T) {
 
 func TestDirectStaysTheFirstOutbound(t *testing.T) {
 	b, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "",
-		[]OutboundSpec{{Tag: "mine", Protocol: "freedom"}}, nil)
+		[]OutboundSpec{{Tag: "mine", Protocol: "freedom"}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestDirectStaysTheFirstOutbound(t *testing.T) {
 }
 
 func TestNoRulesRendersExactlyWhatItAlwaysDid(t *testing.T) {
-	with, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "", nil, nil)
+	with, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +237,8 @@ func TestRoutingConfigIsAcceptedByTheRealCore(t *testing.T) {
 		[]OutboundSpec{
 			{Tag: "relay", Protocol: "socks",
 				Settings: json.RawMessage(`{"servers":[{"address":"127.0.0.1","port":1080}]}`)},
+			{Tag: "backup", Protocol: "socks",
+				Settings: json.RawMessage(`{"servers":[{"address":"127.0.0.2","port":1080}]}`)},
 			{Tag: "hole", Protocol: "blackhole"},
 		},
 		[]RuleSpec{
@@ -244,7 +246,17 @@ func TestRoutingConfigIsAcceptedByTheRealCore(t *testing.T) {
 			{Name: "ir-direct", IP: []string{"geoip:ir"}, OutboundTag: "direct"},
 			{Name: "one-user", UserEmails: []string{"u.1"}, OutboundTag: "relay"},
 			{Name: "ports", Port: "80,443", Network: "tcp", Protocol: []string{"tls"}, OutboundTag: "relay"},
-		})
+			// The balancer path, which is the only one a panel-side assertion
+			// cannot judge: "balancerTag" vs "outboundTag", the shape of
+			// burstObservatory and whether fallbackTag exists at all are Xray's
+			// opinions, and getting any of them wrong rejects the whole config.
+			{Name: "web", Domain: []string{"domain:example.com"}, OutboundTag: "failover"},
+		},
+		[]GroupSpec{{
+			Tag: "failover", Members: []string{"relay", "backup"},
+			Strategy: "leastPing", ProbeURL: "https://www.gstatic.com/generate_204",
+			ProbeInterval: "60s", FallbackTag: "hole",
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,5 +268,173 @@ func TestRoutingConfigIsAcceptedByTheRealCore(t *testing.T) {
 	out, err := exec.Command(bin, "run", "-test", "-c", path).CombinedOutput()
 	if err != nil {
 		t.Fatalf("the real core rejected the generated routing config: %v\n%s\n--- config ---\n%s", err, out, b.Xray)
+	}
+}
+
+// --- failover groups --------------------------------------------------------
+
+// A group is a BALANCER, and every part of it is load-bearing. A balancer with
+// no observatory never learns a member is down, so it "fails over" to a relay
+// that stopped answering an hour ago. A balancer with no fallback leaves the
+// core to choose when every member is down. And a rule that points at a balancer
+// with "outboundTag" is not refused by anything — measured on Xray 26.2.6 the
+// config validates and the core starts, then every connection that rule matches
+// is dropped with one "non existing outTag" line in the log. The operator's
+// failover feature becomes the outage it was bought to prevent, quietly.
+func TestFailoverGroupRendersABalancerWithObservatoryAndFallback(t *testing.T) {
+	b, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "",
+		[]OutboundSpec{
+			{Tag: "relay-a", Protocol: "socks",
+				Settings: json.RawMessage(`{"servers":[{"address":"127.0.0.1","port":1080}]}`)},
+			{Tag: "relay-b", Protocol: "socks",
+				Settings: json.RawMessage(`{"servers":[{"address":"127.0.0.2","port":1080}]}`)},
+		},
+		[]RuleSpec{{Name: "web", Domain: []string{"example.com"}, OutboundTag: "failover"}},
+		[]GroupSpec{{
+			Tag: "failover", Members: []string{"relay-a", "relay-b"},
+			Strategy: "leastPing", ProbeURL: "https://www.gstatic.com/generate_204",
+			ProbeInterval: "60s", FallbackTag: "block",
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		Routing struct {
+			Rules     []map[string]any `json:"rules"`
+			Balancers []struct {
+				Tag         string   `json:"tag"`
+				Selector    []string `json:"selector"`
+				FallbackTag string   `json:"fallbackTag"`
+				Strategy    struct {
+					Type string `json:"type"`
+				} `json:"strategy"`
+			} `json:"balancers"`
+		} `json:"routing"`
+		BurstObservatory struct {
+			SubjectSelector []string `json:"subjectSelector"`
+			PingConfig      struct {
+				Destination string `json:"destination"`
+				Interval    string `json:"interval"`
+			} `json:"pingConfig"`
+		} `json:"burstObservatory"`
+	}
+	if err := json.Unmarshal(b.Xray, &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(doc.Routing.Balancers) != 1 {
+		t.Fatalf("balancers = %+v, want exactly one", doc.Routing.Balancers)
+	}
+	bal := doc.Routing.Balancers[0]
+	if bal.Tag != "failover" || strings.Join(bal.Selector, ",") != "relay-a,relay-b" {
+		t.Errorf("balancer = %+v", bal)
+	}
+	if bal.Strategy.Type != "leastPing" {
+		t.Errorf("strategy = %q; a balancer with no strategy round-robins onto dead members", bal.Strategy.Type)
+	}
+	// Measured on Xray 26.2.6: with every member unreachable and NO fallbackTag,
+	// the connection goes out DIRECT — the server's real address, past the
+	// relays. The fallback is what turns a failed group into a drop instead of
+	// a leak, so losing it from the render is not cosmetic.
+	if bal.FallbackTag != "block" {
+		t.Errorf("fallbackTag = %q, want block", bal.FallbackTag)
+	}
+
+	// The observatory is what makes it a FAILOVER group rather than a load
+	// balancer: without it every member looks alive forever.
+	if strings.Join(doc.BurstObservatory.SubjectSelector, ",") != "relay-a,relay-b" {
+		t.Errorf("burstObservatory.subjectSelector = %v; the members are never probed",
+			doc.BurstObservatory.SubjectSelector)
+	}
+	if doc.BurstObservatory.PingConfig.Destination != "https://www.gstatic.com/generate_204" {
+		t.Errorf("pingConfig.destination = %q", doc.BurstObservatory.PingConfig.Destination)
+	}
+	if doc.BurstObservatory.PingConfig.Interval != "60s" {
+		t.Errorf("pingConfig.interval = %q", doc.BurstObservatory.PingConfig.Interval)
+	}
+
+	var opRule map[string]any
+	for _, r := range doc.Routing.Rules {
+		if r["domain"] != nil {
+			opRule = r
+		}
+	}
+	if opRule == nil {
+		t.Fatalf("the operator rule is missing: %+v", doc.Routing.Rules)
+	}
+	if opRule["balancerTag"] != "failover" {
+		t.Errorf("rule targets balancerTag=%v, want failover", opRule["balancerTag"])
+	}
+	// Both keys at once is not "belt and braces". Xray takes outboundTag when
+	// both are present, so the rule targets a tag no outbound defines and the
+	// connections are dropped exactly as if balancerTag had never been written.
+	if _, has := opRule["outboundTag"]; has {
+		t.Errorf("the rule also carries outboundTag; Xray refuses that and rejects the whole config: %+v", opRule)
+	}
+}
+
+// The leak this feature could ship with. Measured on Xray 26.2.6: a balancer
+// whose members are all unreachable and which carries NO fallbackTag sends the
+// connection out direct — the server's own address, past every relay. An
+// operator who never filled the field in would be leaking at exactly the moment
+// their exits failed, so the renderer refuses to produce that balancer at all.
+func TestAGroupWithNoFallbackStillBlocksWhenEveryMemberIsDown(t *testing.T) {
+	got, _, err := RenderBalancers([]GroupSpec{{Tag: "g", Members: []string{"relay-a"}}},
+		map[string]bool{"block": true, "relay-a": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag := got[0].(jobj)["fallbackTag"]; tag != "block" {
+		t.Fatalf("fallbackTag = %v; with none, an all-members-down group exits direct", tag)
+	}
+}
+
+func TestAGroupMemberThatNoOutboundDefinesIsRefused(t *testing.T) {
+	_, _, err := RenderBalancers([]GroupSpec{{Tag: "g", Members: []string{"relay-a", "ghost"}}},
+		map[string]bool{"direct": true, "block": true, "relay-a": true})
+	if err == nil {
+		t.Fatal("a group selecting an undefined outbound was accepted")
+	}
+	// Xray's selector is a PREFIX match, so a typo'd member does not fail loudly
+	// in the core. Measured on 26.2.6: a balancer whose selector matches no
+	// outbound sends its traffic out DIRECT, from the server's own address, with
+	// fallbackTag ignored — a leak that validates and logs nothing.
+	if !strings.Contains(err.Error(), "ghost") || !strings.Contains(err.Error(), "g") {
+		t.Errorf("error names neither the group nor the member: %v", err)
+	}
+}
+
+func TestTwoGroupsCannotAskForDifferentProbes(t *testing.T) {
+	known := map[string]bool{"a": true, "b": true, "block": true}
+	_, _, err := RenderBalancers([]GroupSpec{
+		{Tag: "g1", Members: []string{"a"}, ProbeURL: "https://one.example/generate_204", ProbeInterval: "60s"},
+		{Tag: "g2", Members: []string{"b"}, ProbeURL: "https://two.example/generate_204", ProbeInterval: "60s"},
+	}, known)
+	// Xray has ONE burstObservatory for the whole config. Honouring the first
+	// group's probe and silently discarding the second's would leave an operator
+	// watching a probe URL that is not the one their group is graded on.
+	if err == nil {
+		t.Fatal("two groups with conflicting probe settings were accepted; only one can be honoured")
+	}
+}
+
+// A group is an XRAY construct. The sing-box half of the bundle has no operator
+// outbounds at all (their settings are Xray's own JSON), so emitting a sing-box
+// urltest over their tags would name outbounds that config does not define —
+// sing-box refuses the whole document and every hysteria2, TUIC, AnyTLS and
+// ShadowTLS inbound on the box stops serving.
+func TestAGroupDoesNotLeakIntoTheSingboxConfig(t *testing.T) {
+	b, err := BuildMultiWithRouting([]InboundSpec{chainedSpec()}, 10085, "", "",
+		[]OutboundSpec{{Tag: "relay-a", Protocol: "blackhole"}},
+		[]RuleSpec{{Name: "web", Domain: []string{"example.com"}, OutboundTag: "failover"}},
+		[]GroupSpec{{Tag: "failover", Members: []string{"relay-a"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"urltest", "failover", "relay-a"} {
+		if strings.Contains(string(b.Singbox), bad) {
+			t.Errorf("the sing-box config names %q, which it defines no outbound for: %s", bad, b.Singbox)
+		}
 	}
 }
