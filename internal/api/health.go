@@ -151,7 +151,7 @@ func (s *Server) healthReport() HealthReport {
 // anywhere to say why.
 func (s *Server) healthStorage() Subsystem {
 	sub := Subsystem{Key: "storage", Label: "Data directory"}
-	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+	if s.cfg == nil || !s.paas().Enabled {
 		// On a machine the panel owns, the data directory is ordinary disk.
 		// There is no question to answer and a row here would be noise.
 		sub.State, sub.Summary = HealthNotConfigured, "Ordinary disk; not a platform deployment."

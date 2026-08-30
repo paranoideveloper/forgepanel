@@ -509,7 +509,7 @@ func TestStartupRepairsPlatformAddresses(t *testing.T) {
 // carries it, and learning it there is what unblocks every link.
 func TestThePanelLearnsItsHostnameFromAnAdminRequest(t *testing.T) {
 	s := paasServerNoDomain(t)
-	if s.cfg.PaaS().Domain != "" {
+	if s.paas().Domain != "" {
 		t.Fatal("precondition: the platform should not have supplied a domain")
 	}
 	r := gin.New()
@@ -519,7 +519,7 @@ func TestThePanelLearnsItsHostnameFromAnAdminRequest(t *testing.T) {
 	req.Host = "forgepanel-production.up.railway.app"
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
-	if got := s.cfg.PaaS().Domain; got != "forgepanel-production.up.railway.app" {
+	if got := s.paas().Domain; got != "forgepanel-production.up.railway.app" {
 		t.Fatalf("panel did not learn its hostname: %q", got)
 	}
 	// It must survive a restart, or it is relearned on every boot and the window
@@ -544,7 +544,7 @@ func TestThePanelDoesNotLearnAnAddressAsItsHostname(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/admin/ping", nil)
 		req.Host = host
 		r.ServeHTTP(httptest.NewRecorder(), req)
-		if got := s.cfg.PaaS().Domain; got != "" {
+		if got := s.paas().Domain; got != "" {
 			t.Errorf("panel adopted %q as its public hostname from Host %q", got, host)
 		}
 	}
@@ -859,5 +859,36 @@ func TestACDNFrontedPlatformRefusesTheTransportsItCannotFrame(t *testing.T) {
 		if r := paasRoutable(cdn, tc.node); r.Why != "" {
 			t.Errorf("%s was refused behind a CDN, where it demonstrably works: %s", tc.name, r.Why)
 		}
+	}
+}
+
+// Which edge fronts a deployment decides whether httpupgrade and brook can work
+// at all, and hardcoding it per platform is a guess: a custom domain can put
+// Cloudflare in front of a platform that has none, and a platform can change
+// what it uses without telling anyone.
+//
+// It does not have to be guessed. Cloudflare stamps every request it forwards —
+// CF-Ray is on the request the origin receives — so the panel can read the
+// answer off traffic it is already handling, with no probe and no network call.
+func TestThePanelLearnsItsEdgeFromTheRequestsItReceives(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{"cloudflare stamps cf-ray", map[string]string{"CF-Ray": "a3340da85b6bd0a8-CDG"}, true},
+		{"cloudflare connecting ip", map[string]string{"CF-Connecting-IP": "203.0.113.7"}, true},
+		{"a plain platform edge", map[string]string{"X-Forwarded-For": "203.0.113.7"}, false},
+		{"nothing at all", map[string]string{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/admin/inbounds", nil)
+			for k, v := range tc.headers {
+				r.Header.Set(k, v)
+			}
+			if got := requestCameThroughACDN(r); got != tc.want {
+				t.Fatalf("requestCameThroughACDN = %v, want %v for %v", got, tc.want, tc.headers)
+			}
+		})
 	}
 }

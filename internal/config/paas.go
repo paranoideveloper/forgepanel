@@ -197,6 +197,10 @@ func firstEnv(keys ...string) string {
 
 // PaaS returns the detected platform configuration. The zero value (Enabled
 // false) is a normal install.
+//
+// CDNFronted here is only what DETECTION assumed. What was actually observed in
+// front of the panel is learned from live traffic and applied by the API layer
+// — Config is marshalled by value, so it cannot hold the atomic that needs.
 func (c *Config) PaaS() PaaS { return c.paas }
 
 // applyPaaS overrides the persisted panel address with what the platform

@@ -737,7 +737,7 @@ func (s *Server) handleOverview(c *gin.Context) {
 	// served there is a fraction of the whole, and offering the operator the
 	// same choices as on a real server is how they end up creating inbounds
 	// that cannot carry anything.
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	c.JSON(200, gin.H{
 		"status":         "ok",
 		"version":        version.Get().Version,

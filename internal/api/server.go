@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,6 +73,12 @@ func (s *Server) knobs() *settings.Values {
 
 // Server wraps the gin engine, configuration, persistence and auth.
 type Server struct {
+	// cdnSeen is set the first time a request arrives stamped by a CDN that
+	// parses WebSocket traffic. It lives here rather than on Config because
+	// Config is marshalled by value and an atomic makes it uncopyable — vet
+	// says so. Learn-once: one stamped request proves a CDN is in front, and an
+	// unstamped one proves nothing.
+	cdnSeen atomic.Bool
 	cfg     *config.Config
 	router  *gin.Engine
 	db      *store.Store             // GORM-backed persistence (spec §4); nil in the light constructor

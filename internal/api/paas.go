@@ -236,7 +236,7 @@ func paasEngineNode(n *model.Node, port int) *model.Node {
 // returns the specs to hand the cores alongside the routing table the front
 // proxy needs and the inbounds that cannot be served here at all.
 func (s *Server) paasSpecs() ([]engine.InboundSpec, []paasRoute, []engine.SkippedInbound) {
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	all := s.enabledInboundSpecs()
 	var (
 		specs   []engine.InboundSpec
@@ -332,7 +332,7 @@ func (s *Server) paasMatch(path string) (paasRoute, bool) {
 // without buffering, which FlushInterval -1 does. Splicing the raw socket would
 // mean re-implementing both.
 func (s *Server) paasFront(next http.Handler) http.Handler {
-	if !s.cfg.PaaS().Enabled {
+	if !s.paas().Enabled {
 		return next
 	}
 	proxy := &httputil.ReverseProxy{
@@ -418,7 +418,7 @@ func paasRouteFrom(r *http.Request) (paasRoute, bool) {
 // dress up an inbound that cannot be served here as one that can; it is
 // reported in the not-serving column instead, with the reason.
 func (s *Server) applyPaaSAddressing(n *model.Node) {
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	if !pa.Enabled || pa.Domain == "" || n == nil {
 		return
 	}
@@ -554,7 +554,7 @@ func paasNeedsPath(n *model.Node) bool {
 // TLS, host — and only for inbounds the platform can actually serve; it never
 // touches credentials, paths, or an inbound that is unservable here anyway.
 func (s *Server) ReconcilePaaSAddresses() int {
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	if !pa.Enabled || pa.Domain == "" || s.db == nil {
 		return 0
 	}
@@ -593,6 +593,46 @@ func (s *Server) ReconcilePaaSAddresses() int {
 	return fixed
 }
 
+// paas returns the platform configuration with what was OBSERVED in front of
+// this panel folded in.
+//
+// Detection can only guess which platforms sit behind a CDN, and a guess here
+// fails silently: the transports it governs carry nothing rather than erroring.
+// cdnSeen is set the first time a request arrives stamped by one.
+func (s *Server) paas() config.PaaS {
+	p := s.cfg.PaaS()
+	if s.cdnSeen.Load() {
+		p.CDNFronted = true
+	}
+	return p
+}
+
+// requestCameThroughACDN reports whether a CDN that PARSES WebSocket traffic
+// forwarded this request.
+//
+// Cloudflare stamps every request it proxies, so the answer is already in
+// traffic the panel is handling — no probe, no network call, and correct for a
+// custom domain that puts a CDN in front of a platform that has none. That
+// matters because the alternative is a per-platform constant, and a constant is
+// a guess that goes stale silently: the transports it governs fail by carrying
+// nothing rather than by erroring.
+//
+// Only Cloudflare for now, because Cloudflare is the one measured to drop these
+// transports and the one Render puts in front of every deployment. A header
+// that merely proves SOME proxy is in front — X-Forwarded-For — says nothing
+// about framing and must not count.
+func requestCameThroughACDN(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	for _, h := range []string{"Cf-Ray", "Cf-Connecting-Ip"} {
+		if r.Header.Get(h) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // learnPaaSDomain records the hostname the panel is actually reached on, when
 // the platform did not tell it.
 //
@@ -613,8 +653,21 @@ func (s *Server) ReconcilePaaSAddresses() int {
 func (s *Server) learnPaaSDomain() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
-		pa := s.cfg.PaaS()
-		if !pa.Enabled || pa.Domain != "" || c.Writer.Status() >= 400 {
+		pa := s.paas()
+		if !pa.Enabled || c.Writer.Status() >= 400 {
+			return
+		}
+		// The edge, learned from the same trustworthy request as the hostname.
+		// An unauthenticated caller could otherwise set CF-Ray by hand and take
+		// away two transports.
+		if !pa.CDNFronted && requestCameThroughACDN(c.Request) {
+			if s.cdnSeen.CompareAndSwap(false, true) {
+				fmt.Println("forgepanel: this service is served through Cloudflare — httpupgrade and " +
+					"brook cannot be carried through it and will not be offered")
+				s.reloadSpecs()
+			}
+		}
+		if pa.Domain != "" {
 			return
 		}
 		host := c.Request.Host
@@ -664,7 +717,7 @@ func (s *Server) setPanelDomain(host string) error {
 // Refusing at the door also means the reason arrives while the operator is
 // still looking at the form, instead of in a column they have to notice later.
 func (s *Server) paasCreateRefusal(n *model.Node) *apierr.Error {
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	if !pa.Enabled || n == nil {
 		return nil
 	}
@@ -723,7 +776,7 @@ func paasSupportedCombinations() []gin.H {
 // paasProtocolSupport reports whether this deployment can serve the protocol at
 // all, and why not when it cannot.
 func (s *Server) paasProtocolSupport(p model.Protocol) (bool, string) {
-	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+	if s.cfg == nil || !s.paas().Enabled {
 		return render.ServesInbound(p), ""
 	}
 	if !render.ServesInbound(p) {
@@ -743,7 +796,7 @@ func (s *Server) paasProtocolSupport(p model.Protocol) (bool, string) {
 
 // paasNarrowTransports keeps only the transports a shared HTTP port can route.
 func (s *Server) paasNarrowTransports(p model.Protocol, all []string) []string {
-	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+	if s.cfg == nil || !s.paas().Enabled {
 		return all
 	}
 	ok := map[string]bool{string(model.NetWS): true, string(model.NetHTTPUpgrade): true, string(model.NetXHTTP): true}
@@ -765,7 +818,7 @@ func (s *Server) paasNarrowTransports(p model.Protocol, all []string) []string {
 // handshake with a borrowed certificate, and the edge has already completed a
 // different one with its own.
 func (s *Server) paasNarrowSecurities(all []string) []string {
-	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+	if s.cfg == nil || !s.paas().Enabled {
 		return all
 	}
 	return []string{string(model.SecTLS)}

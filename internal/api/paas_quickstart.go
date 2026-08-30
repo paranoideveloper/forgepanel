@@ -109,7 +109,7 @@ func (s *Server) handlePaaSQuickstart(c *gin.Context) {
 		fail(c, 501, "this server has no database")
 		return
 	}
-	pa := s.cfg.PaaS()
+	pa := s.paas()
 	if !pa.Enabled {
 		apierr.Fail(c, &apierr.Error{Op: "paas-quickstart", Kind: apierr.KindConflict,
 			Message: "this panel is not running behind a platform edge",

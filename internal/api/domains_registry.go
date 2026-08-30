@@ -199,7 +199,7 @@ func (s *Server) handleRealityQuickstart(c *gin.Context) {
 	// created a REALITY inbound and a Shadowsocks one and neither could work.
 	// The quickstart's promise is a connectable inbound with no inputs, so on a
 	// platform it makes the one shape that IS connectable there.
-	if s.cfg.PaaS().Enabled {
+	if s.paas().Enabled {
 		n = model.Node{
 			Protocol: model.ProtoVLESS, Remark: "websocket-quickstart",
 			Transport: model.Transport{Network: model.NetWS},
@@ -219,7 +219,7 @@ func (s *Server) handleRealityQuickstart(c *gin.Context) {
 	}
 	s.audit(c, "inbound.reality_quickstart", in.Remark)
 	s.startBackground(s.reloadEngines)
-	if s.cfg.PaaS().Enabled {
+	if s.paas().Enabled {
 		c.JSON(201, gin.H{"id": in.ID, "protocol": "vless", "security": "tls", "port": n.Port,
 			"note": "VLESS over WebSocket created. On this platform it is the transport the edge " +
 				"can carry; REALITY and raw-TCP protocols cannot be served here."})

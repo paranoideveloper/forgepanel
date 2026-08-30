@@ -166,7 +166,7 @@ func (s *Server) engineUnavailable(c *gin.Context) {
 // unusable there, and the error was about the inbounds rather than the rule
 // the operator was trying to save.
 func (s *Server) specsForBuild() ([]engine.InboundSpec, []paasRoute, []engine.SkippedInbound) {
-	if s.cfg != nil && s.cfg.PaaS().Enabled {
+	if s.cfg != nil && s.paas().Enabled {
 		return s.paasSpecs()
 	}
 	return s.localInboundSpecs(), nil, nil
@@ -233,7 +233,7 @@ func (s *Server) reloadEngines() {
 	// construction, the one public port is the platform's to manage, and
 	// opening a hole for 127.0.0.1:39000 would be a firewall rule for traffic
 	// that can never arrive.
-	if s.cfg == nil || !s.cfg.PaaS().Enabled {
+	if s.cfg == nil || !s.paas().Enabled {
 		ports := make([]int, 0, len(specs))
 		for _, sp := range specs {
 			if sp.Node != nil && sp.Node.Port > 0 {

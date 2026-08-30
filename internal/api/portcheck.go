@@ -219,7 +219,7 @@ func (s *Server) portConflictFor(n *model.Node, excludeID uint) *PortConflict {
 	// one after it with a conflict against a listener that does not exist. The
 	// collision that IS real there is two inbounds on one PATH, and paasSpecs
 	// refuses that with its own reason.
-	if s.cfg != nil && s.cfg.PaaS().Enabled && paasSharesPublicPort(n) {
+	if s.cfg != nil && s.paas().Enabled && paasSharesPublicPort(n) {
 		return nil
 	}
 
