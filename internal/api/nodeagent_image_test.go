@@ -58,3 +58,71 @@ func TestEveryImageShipsTheAgentThePanelServes(t *testing.T) {
 		}
 	}
 }
+
+// A COPY whose source .dockerignore filtered out fails as "not found", which
+// reads as a missing file rather than an excluded one — and the fix is in a
+// different file from the error.
+//
+// It has happened once: .dockerignore excludes the whole deploy/ tree and
+// re-includes the PaaS entrypoint by name, so renaming deploy/railway to
+// deploy/paas left the negation pointing at a path that no longer existed. Both
+// images then failed to build, and nothing in the Go suite could see it because
+// nothing in the Go suite reads .dockerignore.
+func TestEveryDockerfileCOPYSurvivesDockerignore(t *testing.T) {
+	ignore, err := os.ReadFile(filepath.Join("..", "..", ".dockerignore"))
+	if err != nil {
+		t.Skipf("no .dockerignore: %v", err)
+	}
+	var excluded, included []string
+	for _, ln := range strings.Split(string(ignore), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		if strings.HasPrefix(ln, "!") {
+			included = append(included, strings.TrimPrefix(ln, "!"))
+			continue
+		}
+		excluded = append(excluded, ln)
+	}
+
+	for _, df := range []string{
+		filepath.Join("..", "..", "Dockerfile"),
+		filepath.Join("..", "..", "deploy", "paas", "Dockerfile"),
+	} {
+		b, err := os.ReadFile(df)
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(b), "\n") {
+			f := strings.Fields(strings.TrimSpace(ln))
+			// Only COPY from the build CONTEXT matters; --from=<stage> copies
+			// out of an earlier image and .dockerignore has no say in it.
+			if len(f) < 3 || !strings.EqualFold(f[0], "COPY") || strings.HasPrefix(f[1], "--from") {
+				continue
+			}
+			src := strings.Trim(f[1], `"`)
+			if src == "." {
+				continue
+			}
+			for _, ex := range excluded {
+				dir := strings.TrimSuffix(ex, "/")
+				if dir == "" || !strings.HasPrefix(src, dir+"/") {
+					continue
+				}
+				ok := false
+				for _, in := range included {
+					if in == src {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					t.Errorf("%s: COPY %s, but .dockerignore excludes %q and does not re-include it — "+
+						"the build fails with %q not found, which names the file rather than the exclusion",
+						df, src, ex, src)
+				}
+			}
+		}
+	}
+}

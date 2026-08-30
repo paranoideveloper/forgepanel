@@ -31,10 +31,14 @@ packaging/
 deploy/
 # …except the PaaS entrypoint, which the PaaS image copies in. Excluding the
 # whole deploy tree used to be right when nothing in it was ever built into an
-# image; deploy/railway/Dockerfile needs its sibling script, and a COPY that
-# names an ignored path fails with "not found" rather than saying it was
-# filtered out of the context.
-!deploy/railway/entrypoint.sh
+# image; deploy/paas/Dockerfile needs its sibling script, and a COPY that names
+# an ignored path fails with "not found" rather than saying it was filtered out
+# of the context — so the error names the file and the fix is in this one.
+#
+# It has already gone wrong once: renaming deploy/railway to deploy/paas left
+# this line pointing at a path that no longer existed and both images stopped
+# building. TestEveryDockerfileCOPYSurvivesDockerignore now compares the two.
+!deploy/paas/entrypoint.sh
 
 # Docs — README is kept out of the image; docs/ is published with releases.
 docs/
