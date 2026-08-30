@@ -55,6 +55,22 @@ type PaaS struct {
 	// harder to diagnose than the refusal it replaced.
 	TCPPorts []int
 	UDPPorts []int
+	// CDNFronted is set when the platform serves every deployment through a CDN
+	// that PARSES WebSocket traffic rather than passing the upgraded socket
+	// through. Render does, with Cloudflare, for every deploy.
+	//
+	// It decides which transports can be offered at all, and the distinction is
+	// finer than "is there a proxy in front": ws and xhttp are ordinary HTTP and
+	// go through untouched, while two transports do not produce WebSocket frames
+	// and are dropped —
+	//
+	//   httpupgrade never performs a WebSocket handshake (no Sec-WebSocket-Key),
+	//   so the CDN answers 101 and then relays nothing;
+	//   brook completes a valid handshake and then writes RAW bytes, not frames.
+	//
+	// Both were measured working through the same panel with no CDN in front, so
+	// this is a property of the edge, not of the panel.
+	CDNFronted bool
 	// UDPBindHost is the address a UDP inbound must bind, when the platform
 	// demands a particular one. Fly routes UDP only to `fly-global-services`
 	// and refuses to rewrite the port; binding 0.0.0.0 there silently receives
@@ -118,6 +134,10 @@ func DetectPaaS() PaaS {
 	case os.Getenv("RENDER_EXTERNAL_HOSTNAME") != "":
 		p.Enabled, p.Platform = true, "render"
 		p.Domain = os.Getenv("RENDER_EXTERNAL_HOSTNAME")
+		// Every Render deployment is served through Cloudflare — its own
+		// response headers say so — and Cloudflare relays WebSocket frames
+		// rather than the upgraded socket.
+		p.CDNFronted = true
 	case os.Getenv("FLY_APP_NAME") != "":
 		p.Enabled, p.Platform = true, "fly"
 		p.Domain = os.Getenv("FLY_APP_NAME") + ".fly.dev"
@@ -157,6 +177,11 @@ func DetectPaaS() PaaS {
 	p.UDPPorts = parsePorts(os.Getenv("FORGEPANEL_PAAS_UDP_PORTS"))
 	if h := envStr("FORGEPANEL_PAAS_UDP_BIND", ""); h != "" {
 		p.UDPBindHost = h
+	}
+	// Both directions, for a custom domain that puts a CDN in front of a
+	// platform that has none — or takes one away.
+	if v := os.Getenv("FORGEPANEL_PAAS_CDN"); v != "" {
+		p.CDNFronted = envBool("FORGEPANEL_PAAS_CDN")
 	}
 	return p
 }

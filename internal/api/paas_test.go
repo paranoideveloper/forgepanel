@@ -794,3 +794,70 @@ func TestAnOwnPortInboundKeepsItsPortAndItsTLS(t *testing.T) {
 		t.Fatal("an own-port inbound was moved to loopback, where the platform cannot route to it")
 	}
 }
+
+// Render fronts every deployment with Cloudflare, and Cloudflare relays
+// WebSocket FRAMES. Two of the transports this panel offers do not produce them,
+// so both were served, enabled, and silently carried nothing:
+//
+//   - httpupgrade never performs a WebSocket handshake at all — Xray sends
+//     Connection: Upgrade / Upgrade: websocket with no Sec-WebSocket-Key, so the
+//     CDN answers 101 (there is nothing to reject) and relays nothing, because
+//     it is not a WebSocket.
+//   - brook completes a VALID handshake, key and all, and then writes raw bytes
+//     rather than frames. Measured: the first byte after the 101 is 0x2c, an
+//     opcode of 12, which is not a frame at all.
+//
+// Both were measured working through this same panel with no CDN in front, so
+// this is the edge and not the panel — which is exactly why it has to be
+// refused rather than left looking like a panel bug.
+func TestACDNFrontedPlatformRefusesTheTransportsItCannotFrame(t *testing.T) {
+	cdn := config.PaaS{Enabled: true, Platform: "render", Domain: "x.onrender.com",
+		Port: 8080, PublicPort: 443, CDNFronted: true}
+	plain := config.PaaS{Enabled: true, Platform: "railway", Domain: "x.up.railway.app",
+		Port: 8080, PublicPort: 443}
+
+	hu := &model.Node{
+		Remark: "hu", Protocol: model.ProtoVLESS, Address: "x", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetHTTPUpgrade, Path: "/p"},
+	}
+	brook := &model.Node{
+		Remark: "bk", Protocol: model.ProtoBrook, Address: "x", Port: 443, Password: "pw",
+		Brook: &model.BrookOptions{Mode: "wssserver", Path: "/b"},
+	}
+	ws := &model.Node{
+		Remark: "ws", Protocol: model.ProtoVLESS, Address: "x", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetWS, Path: "/w"},
+	}
+	xh := &model.Node{
+		Remark: "xh", Protocol: model.ProtoVLESS, Address: "x", Port: 443,
+		UUID:      "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetXHTTP, Path: "/x"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		node *model.Node
+	}{{"httpupgrade", hu}, {"brook", brook}} {
+		if r := paasRoutable(cdn, tc.node); r.Why == "" {
+			t.Errorf("%s was offered on a CDN-fronted platform, where it carries nothing", tc.name)
+		} else if !strings.Contains(r.Why, "WebSocket") {
+			t.Errorf("%s refusal does not name the cause: %q", tc.name, r.Why)
+		}
+		if r := paasRoutable(plain, tc.node); r.Why != "" {
+			t.Errorf("%s was refused on a platform with no CDN in front: %s", tc.name, r.Why)
+		}
+	}
+
+	// ws and xhttp are real HTTP and measured working through the CDN. Refusing
+	// them would take away everything that does work there.
+	for _, tc := range []struct {
+		name string
+		node *model.Node
+	}{{"ws", ws}, {"xhttp", xh}} {
+		if r := paasRoutable(cdn, tc.node); r.Why != "" {
+			t.Errorf("%s was refused behind a CDN, where it demonstrably works: %s", tc.name, r.Why)
+		}
+	}
+}

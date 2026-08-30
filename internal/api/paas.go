@@ -105,7 +105,23 @@ func paasRoutable(pa config.PaaS, n *model.Node) paasServe {
 	// HTTP port can route.
 	if n.Protocol == model.ProtoBrook {
 		path, why := brookRoutable(n)
+		if why == "" && pa.CDNFronted {
+			why = "brook completes a WebSocket handshake and then sends raw bytes rather than " +
+				"WebSocket frames, which the CDN in front of this platform drops. It works on a " +
+				"platform whose edge is not a CDN, or on a node."
+			path = ""
+		}
 		return paasServe{Path: path, Why: why}
+	}
+	// httpupgrade borrows the WebSocket token without doing the handshake: no
+	// Sec-WebSocket-Key, so no Sec-WebSocket-Accept comes back and the CDN has
+	// nothing to reject — it answers 101 and then relays nothing. Measured
+	// against a live deploy: ws returns Sec-WebSocket-Accept and carries
+	// traffic, httpupgrade returns neither.
+	if pa.CDNFronted && n.Transport.Network == model.NetHTTPUpgrade {
+		return paasServe{Why: "httpupgrade is not a real WebSocket — it sends no Sec-WebSocket-Key — " +
+			"so the CDN in front of this platform answers the upgrade and then carries nothing. " +
+			"Use ws, which is the same shape and does handshake properly."}
 	}
 	switch n.Transport.Network {
 	case model.NetWS, model.NetHTTPUpgrade, model.NetXHTTP:
