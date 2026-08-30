@@ -13,6 +13,7 @@ import { getGlobalConfig } from '../config/runtime';
 import { parseVlessHeader, vlessResponseHeader } from './framing';
 import { handleTCPOutbound } from './outbound';
 import { readableFromWebSocket, safeCloseSocket, WS_OPEN, concatBytes } from './ws';
+import { releaseConnection, type ConnHandle } from './limits';
 import type { OutboundOptions } from './outbound';
 
 export interface VlessHandlerOptions {
@@ -20,6 +21,8 @@ export interface VlessHandlerOptions {
   outbound: OutboundOptions;
   /** Where DNS-over-UDP requests are forwarded. */
   dohUpstream: string;
+  /** The limiter slot the router took for this connection, given back on close. */
+  handle?: ConnHandle;
 }
 
 export function vlessOverWS(request: Request, opts: VlessHandlerOptions): Response {
@@ -27,6 +30,13 @@ export function vlessOverWS(request: Request, opts: VlessHandlerOptions): Respon
   const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
   server.accept();
   server.binaryType = 'arraybuffer';
+
+  // Before anything that can throw, and on BOTH events: `close` and `error` are
+  // separate listeners on this socket (see ws.ts) and an errored socket need not
+  // also close. releaseConnection is idempotent, so one that fires both is
+  // counted once.
+  server.addEventListener('close', () => releaseConnection(opts.handle));
+  server.addEventListener('error', () => releaseConnection(opts.handle));
 
   let address = '';
   let tag = '';

@@ -22,6 +22,7 @@ import { matchSecurePath } from './auth';
 import { vlessOverWS } from './protocols/vless';
 import { trojanOverWS } from './protocols/trojan';
 import { forwardToBackend } from './protocols/backend';
+import { admitIP, releaseConnection } from './protocols/limits';
 import type { OutboundOptions } from './protocols/outbound';
 import { handleDoH } from './dns/doh';
 import { handleSubscription } from './sub';
@@ -81,13 +82,33 @@ export async function route(request: Request, env: Env): Promise<Response> {
     }
 
     const kind = url.pathname.split('/').filter(Boolean)[0];
-    if (kind === 'vl') {
-      return vlessOverWS(request, { uuid: cfg.vlessUUID, outbound, dohUpstream: cfg.dohUpstream });
+    if (kind !== 'vl' && kind !== 'tr') return decoy(request, cfg.fallbackHost);
+
+    // Admitted HERE, not at the top of the branch. The two paths above take no
+    // slot on purpose: Backend Mode returns a relayed fetch() Response whose
+    // socket lifetime the Worker never sees, and the decoy never reaches a
+    // handler — the release hooks live inside vless.ts/trojan.ts, so admitting
+    // on either would take a slot nothing can ever give back and would lock out
+    // every user behind that IP for the life of the isolate.
+    const admit = admitIP(request.headers.get('CF-Connecting-IP') ?? '', cfg.limits);
+    // Refused with the SAME decoy an unmatched path gets, never a 429: a
+    // distinctive status on /vl/… tells a scanner exactly what this Worker is,
+    // which is what the decoy design above exists to prevent.
+    if (!admit.ok) return decoy(request, cfg.fallbackHost);
+
+    try {
+      if (kind === 'vl') {
+        return vlessOverWS(request, {
+          uuid: cfg.vlessUUID, outbound, dohUpstream: cfg.dohUpstream, handle: admit.handle,
+        });
+      }
+      return trojanOverWS(request, { password: cfg.trojanPassword, outbound, handle: admit.handle });
+    } catch (e) {
+      // worker.ts turns any throw out of here into a bare 400, so without this
+      // the slot leaks silently and the limiter becomes the outage.
+      releaseConnection(admit.handle);
+      throw e;
     }
-    if (kind === 'tr') {
-      return trojanOverWS(request, { password: cfg.trojanPassword, outbound });
-    }
-    return decoy(request, cfg.fallbackHost);
   }
 
   // --- 2. control path ----------------------------------------------------

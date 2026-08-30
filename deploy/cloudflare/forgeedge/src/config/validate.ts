@@ -92,5 +92,16 @@ export function validateConfig(cfg: EdgeConfig): string[] {
     errors.push('bestPingInterval below 5s will hammer the probe URL');
   }
 
+  // The panel edits `limits` through a free-form JSON box, so this is the only
+  // thing standing between a typo and a Worker that refuses every connection.
+  const limits = cfg.limits;
+  if (limits) {
+    for (const key of ['perIPConcurrent', 'perIPNewPerMinute', 'perUUIDConcurrent'] as const) {
+      const v = limits[key];
+      if (!Number.isInteger(v) || v < 1) errors.push(`limits.${key} must be a positive integer`);
+    }
+    if (typeof limits.enabled !== 'boolean') errors.push('limits.enabled must be a boolean');
+  }
+
   return errors;
 }
