@@ -18,6 +18,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
+
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/telegram"
@@ -173,7 +175,7 @@ func webhookView(r store.WebhookEndpoint) gin.H {
 func (s *Server) handleListWebhooks(c *gin.Context) {
 	rows, err := s.db.ListWebhooks()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	out := make([]gin.H, 0, len(rows))
@@ -186,7 +188,7 @@ func (s *Server) handleListWebhooks(c *gin.Context) {
 func (s *Server) handleCreateWebhook(c *gin.Context) {
 	var req webhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	row := &store.WebhookEndpoint{Enabled: true}
@@ -194,16 +196,17 @@ func (s *Server) handleCreateWebhook(c *gin.Context) {
 		row.URL = strings.TrimSpace(*req.URL)
 	}
 	if err := validateWebhookURL(row.URL); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.Events != nil {
 		events, err := normalizeEvents(*req.Events)
 		if err != nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{
-				"error":       err.Error(),
-				"remediation": "Leave the list empty to receive everything, or choose from: " + strings.Join(webhookEventTypes, ", "),
-			})
+			e := apierr.New(http.StatusUnprocessableEntity, err.Error())
+			e.Op = "webhook.events"
+			e.Remediation = "Leave the list empty to receive everything, or choose from: " +
+				strings.Join(webhookEventTypes, ", ")
+			apierr.Fail(c, e)
 			return
 		}
 		row.Events = events
@@ -211,7 +214,7 @@ func (s *Server) handleCreateWebhook(c *gin.Context) {
 	if req.ProxyURL != nil {
 		row.ProxyURL = strings.TrimSpace(*req.ProxyURL)
 		if err := webhook.ValidateProxy(row.ProxyURL); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			failErr(c, http.StatusBadRequest, err)
 			return
 		}
 	}
@@ -227,13 +230,13 @@ func (s *Server) handleCreateWebhook(c *gin.Context) {
 		// it, and an operator asked to invent a secret picks a memorable one.
 		secret, err := keygen.Password(32)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			failErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		row.Secret, reveal = secret, secret
 	}
 	if err := s.db.CreateWebhook(row); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "webhook.create", row.URL)
@@ -250,17 +253,17 @@ func (s *Server) handleCreateWebhook(c *gin.Context) {
 func (s *Server) handleUpdateWebhook(c *gin.Context) {
 	row, err := s.db.WebhookByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such webhook"})
+		fail(c, http.StatusNotFound, "no such webhook")
 		return
 	}
 	var req webhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if req.URL != nil {
 		if err := validateWebhookURL(*req.URL); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			failErr(c, http.StatusBadRequest, err)
 			return
 		}
 		row.URL = strings.TrimSpace(*req.URL)
@@ -268,17 +271,18 @@ func (s *Server) handleUpdateWebhook(c *gin.Context) {
 	if req.Events != nil {
 		events, err := normalizeEvents(*req.Events)
 		if err != nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{
-				"error":       err.Error(),
-				"remediation": "Leave the list empty to receive everything, or choose from: " + strings.Join(webhookEventTypes, ", "),
-			})
+			e := apierr.New(http.StatusUnprocessableEntity, err.Error())
+			e.Op = "webhook.events"
+			e.Remediation = "Leave the list empty to receive everything, or choose from: " +
+				strings.Join(webhookEventTypes, ", ")
+			apierr.Fail(c, e)
 			return
 		}
 		row.Events = events
 	}
 	if req.ProxyURL != nil {
 		if err := webhook.ValidateProxy(strings.TrimSpace(*req.ProxyURL)); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			failErr(c, http.StatusBadRequest, err)
 			return
 		}
 		row.ProxyURL = strings.TrimSpace(*req.ProxyURL)
@@ -290,7 +294,7 @@ func (s *Server) handleUpdateWebhook(c *gin.Context) {
 		row.Secret = strings.TrimSpace(*req.Secret)
 	}
 	if err := s.db.SaveWebhook(row); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "webhook.update", row.URL)
@@ -300,11 +304,11 @@ func (s *Server) handleUpdateWebhook(c *gin.Context) {
 func (s *Server) handleDeleteWebhook(c *gin.Context) {
 	row, err := s.db.WebhookByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such webhook"})
+		fail(c, http.StatusNotFound, "no such webhook")
 		return
 	}
 	if err := s.db.DeleteWebhook(row.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "webhook.delete", row.URL)
@@ -321,7 +325,7 @@ func (s *Server) handleDeleteWebhook(c *gin.Context) {
 func (s *Server) handleTestWebhook(c *gin.Context) {
 	row, err := s.db.WebhookByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such webhook"})
+		fail(c, http.StatusNotFound, "no such webhook")
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
