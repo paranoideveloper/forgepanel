@@ -125,6 +125,28 @@ func (m *Manager) EnsurePeer(inboundID, userID uint, serverCIDR string) (*Peer, 
 		Address: addr.String(), Enabled: true,
 	}
 	if err := m.repo.CreatePeer(row); err != nil {
+		// Lost a race for this (inbound, user).
+		//
+		// The read above and this write are not one transaction, so two callers
+		// can both find no peer and both insert — and the unique index turns the
+		// loser into an error. That is not hypothetical: applyWGPeers runs while
+		// rendering a config, reloadEngines is started in the background from
+		// many handlers, and two overlapping reloads race for exactly this row.
+		// It surfaced as an intermittent
+		//
+		//   UNIQUE constraint failed: wg_peers.inbound_id, wg_peers.user_id
+		//
+		// under a loaded test suite, and in production it would drop the user
+		// from the rendered peer list — disconnecting a client because something
+		// else was creating its peer at the same moment.
+		//
+		// The winner's row is the right answer, so take it. Re-reading rather
+		// than wrapping the whole allocate-and-insert in a transaction keeps the
+		// address pool logic out of a lock it does not need: whoever won already
+		// allocated a valid address.
+		if existing, ferr := m.repo.PeerFor(inboundID, userID); ferr == nil && existing != nil {
+			return m.decode(existing)
+		}
 		return nil, err
 	}
 	return m.decode(row)
