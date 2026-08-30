@@ -50,8 +50,13 @@ func (s *Server) handle2FASetup(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	// Stash the pending secret in settings until confirmed.
-	s.db.SetSetting("pending_totp_"+claims.Username, secret)
+	// Stash the pending secret in settings until confirmed. A write that fails
+	// here would hand the admin a QR code that 2fa/enable can never match, so it
+	// is reported rather than discarded.
+	if err := s.knobs().Set("pending_totp_"+claims.Username, secret); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
 	uri := auth.TOTPURI("ForgePanel", claims.Username, secret)
 	c.JSON(200, gin.H{"secret": secret, "otpauth_url": uri})
 }
@@ -67,7 +72,7 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	secret := s.db.GetSetting("pending_totp_" + claims.Username)
+	secret := s.knobs().String("pending_totp_" + claims.Username)
 	if secret == "" {
 		c.JSON(400, gin.H{"error": "run 2fa/setup first"})
 		return
@@ -83,7 +88,7 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 	}
 	admin.TOTPSecret = secret
 	_ = s.db.SaveAdmin(admin)
-	s.db.SetSetting("pending_totp_"+claims.Username, "")
+	_ = s.knobs().Set("pending_totp_"+claims.Username, "")
 	// Persist HASHES of the recovery codes; return the plaintext exactly once.
 	codes, err := s.generateRecoveryCodes(admin.ID, 8)
 	if err != nil {

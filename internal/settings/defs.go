@@ -1,0 +1,133 @@
+package settings
+
+// The keys this panel actually stores, each with the default that used to live
+// inside whichever reader wanted it.
+//
+// Adding a key here is what makes it writable: Values refuses a key it does not
+// know, so a typo in a handler fails the save loudly instead of writing a row
+// nothing will ever read back.
+
+import (
+	"fmt"
+	"net"
+	"strings"
+)
+
+var defaults = buildRegistry()
+
+// Defs is the registry every reader and writer in the panel shares.
+func Defs() *Registry { return defaults }
+
+// All returns every registered def, in registration order.
+func All() []Def { return defaults.All() }
+
+// Lookup resolves a stored key to its def.
+func Lookup(key string) (Def, bool) { return defaults.Lookup(key) }
+
+// Choices returns the legal values of an enum key, so the API serves the UI's
+// dropdown from the same table the validator rejects against. The two lists
+// were separate before, and only one of them was ever enforced.
+func Choices(key string) []string {
+	d, ok := defaults.Lookup(key)
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), d.Choices...)
+}
+
+func buildRegistry() *Registry {
+	r := NewRegistry()
+
+	// --- subscription rendering ---------------------------------------------
+	r.Register(Def{
+		Key: "sub_routing_preset", Kind: KindEnum, Scope: ScopeSubscription,
+		Default: "iran", Choices: []string{"iran", "full", "block", "off"},
+		Help: "Routing rules baked into every generated config. A per-request ?routing= overrides it.",
+	})
+	r.Register(Def{
+		Key: "sub_fragment_default", Kind: KindBool, Scope: ScopeSubscription, Default: "0",
+		Help: "Fragment the TLS hello in generated Xray configs by default. A per-request ?fragment= overrides it.",
+	})
+	r.Register(Def{
+		Key: "sub_name_template", Kind: KindString, Scope: ScopeSubscription, Default: "",
+		Help: "Node-naming template, e.g. \"{FLAG} {NAME}\". Empty leaves each node's own remark untouched.",
+	})
+	r.Register(Def{
+		Key: "sub_pattern_default", Kind: KindEnum, Scope: ScopeSubscription,
+		Default: "off", Choices: []string{"off", "only", "both"},
+		Help: "Whether link and v2ray subscriptions carry the unsafe-uTLS \"pattern\" variant. A per-request ?patt= overrides it.",
+	})
+	r.Register(Def{
+		Key: "sub_front_domain", Kind: KindDomain, Scope: ScopeSubscription, Default: "",
+		Help: "Camouflage domain applied to every node in the subscription. Empty means no fronting.",
+	})
+	r.Register(Def{
+		Key: "sub_front_mode", Kind: KindEnum, Scope: ScopeSubscription,
+		Default: "none", Choices: []string{"none", "sni", "cdn"},
+		Help: "How the camouflage domain is applied: sni rewrites Host+SNI, cdn fronts the transport Host only.",
+	})
+	r.Register(Def{
+		// ON by default, and stored as "1"/"0" because the reader treats anything
+		// other than "0" as on. A value of "false" here would read back as ON.
+		Key: "sub_expand_sni", Kind: KindBool, Scope: ScopeSubscription, Default: "1",
+		Help: "Fan a REALITY inbound out into one config per borrowed SNI. On by default — it is the point of listing several.",
+	})
+	r.Register(Def{
+		Key: "sub_front_cleanip", Kind: KindBool, Scope: ScopeSubscription, Default: "0",
+		Help: "Fan a CDN-frontable inbound out across the clean-IP list. Only useful once that list is set.",
+	})
+	r.Register(Def{
+		Key: "sub_clean_ips", Kind: KindStringList, Scope: ScopeSubscription, Default: "",
+		Help:     "Clean CDN edge addresses used for IP fan-out. Comma, space or newline separated.",
+		Validate: everyEntryIsAnAddress,
+	})
+
+	// --- the panel's own public address --------------------------------------
+	r.Register(Def{
+		// A MIRROR of panel.json's domain, kept so a reader that only wants the
+		// public hostname does not have to parse the config file. It is written
+		// from the normalized value the panel settings service accepted, never
+		// from raw operator input — the raw form leaked into generated links.
+		Key: "public_address", Kind: KindDomain, Scope: ScopePanel, Default: "",
+		Help: "Hostname exported links use when an inbound binds a wildcard address. Mirrors the panel domain.",
+	})
+
+	// --- Telegram alerts ------------------------------------------------------
+	r.Register(Def{
+		Key: "telegram_bot_token", Kind: KindSecret, Scope: ScopeTelegram, Default: "", Secret: true,
+		Help: "Bot token from @BotFather. Set here it wins over FORGEPANEL_TELEGRAM_TOKEN.",
+	})
+	r.Register(Def{
+		Key: "telegram_admin_ids", Kind: KindIntList, Scope: ScopeTelegram, Default: "",
+		Help: "Chat ids that receive alerts. Negative for a group; message @userinfobot to find yours.",
+	})
+	r.Register(Def{
+		Key: "telegram_backup_delivery", Kind: KindBool, Scope: ScopeTelegram, Default: "0",
+		Help: "Ship each scheduled backup to those chats. Off by default: it sends the panel's whole state to a third party.",
+	})
+
+	// --- panel-owned, never an operator surface -------------------------------
+	r.Register(Def{
+		Key: "edge_feed_pull_token", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true,
+		Help: "Bearer the edge Worker presents to /api/edge/feed. Minted and rotated by the panel.",
+	})
+	r.Register(Def{
+		Key: "pending_totp_", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true, Prefix: true,
+		Help: "Per-admin TOTP secret held between 2FA setup and confirmation, then cleared.",
+	})
+
+	return r
+}
+
+// everyEntryIsAnAddress rejects a clean-IP list with a typo in it. An unusable
+// entry here is invisible: the fan-out still renders a config, it just points at
+// nothing, and the operator sees "some of my configs do not connect".
+func everyEntryIsAnAddress(v string) error {
+	for _, f := range SplitList(v) {
+		if net.ParseIP(f) != nil || ValidDomain(strings.ToLower(f)) {
+			continue
+		}
+		return fmt.Errorf("%q is neither an IP address nor a hostname", f)
+	}
+	return nil
+}

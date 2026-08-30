@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,100 +15,59 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
 	"github.com/forgepanel/forgepanel/internal/protocol/routing"
+	"github.com/forgepanel/forgepanel/internal/settings"
 )
 
-// subRoutingPreset is the operator's default routing preset for generated
-// sing-box/Xray/Clash configs. Defaults to the Iran preset (bypass Iran + direct
-// LAN + block ads/malware); a per-request ?routing= overrides it. Stored under
-// the "sub_routing_preset" setting so an operator can change or disable it.
-func (s *Server) subRoutingPreset() string {
-	if s.db == nil {
-		return "iran"
-	}
-	if v := s.db.GetSetting("sub_routing_preset"); v != "" {
-		return v
-	}
-	return "iran"
-}
+// The subscription renderer's operator defaults. Each one is a key in the
+// settings registry (internal/settings/defs.go), which owns its type, its
+// default and — for the three enums — the values it will accept. These
+// accessors used to carry a copy of the default in each of two branches, and
+// nothing tied either copy to the list the UI offered or to what a write would
+// be allowed to store.
+//
+// s.knobs is nil in the stateless constructor and every one of these still
+// answers the registered default, which is what the old `if s.db == nil` arms
+// returned.
+
+// subRoutingPreset is the default routing preset baked into generated
+// sing-box/Xray/Clash configs; a per-request ?routing= overrides it.
+func (s *Server) subRoutingPreset() string { return s.knobs().String("sub_routing_preset") }
 
 // subFragmentDefault reports whether generated Xray subscriptions fragment the
-// TLS hello by default (operator setting; per-request ?fragment= overrides it).
-func (s *Server) subFragmentDefault() bool {
-	return s.db != nil && s.db.GetSetting("sub_fragment_default") == "1"
-}
+// TLS hello by default (per-request ?fragment= overrides it).
+func (s *Server) subFragmentDefault() bool { return s.knobs().Bool("sub_fragment_default") }
 
 // subNameTemplate is the operator's node-naming template, e.g. "{FLAG} {NAME}".
 // Empty (the default) means "leave each node's own remark untouched", so the
 // feature is strictly opt-in and changes nothing until a template is set.
-func (s *Server) subNameTemplate() string {
-	if s.db == nil {
-		return ""
-	}
-	return s.db.GetSetting("sub_name_template")
-}
+func (s *Server) subNameTemplate() string { return s.knobs().String("sub_name_template") }
 
 // subPatternDefault is the operator's default for the unsafe-uTLS "pattern"
 // variant on link/v2ray subscriptions (per-request ?patt= overrides it).
 func (s *Server) subPatternDefault() patternMode {
-	if s.db == nil {
-		return patternOff
-	}
-	return parsePatternMode(s.db.GetSetting("sub_pattern_default"), patternOff)
+	return parsePatternMode(s.knobs().String("sub_pattern_default"), patternOff)
 }
 
 // subFrontDomain is the fancy wizard's fronting/camouflage domain applied to
 // every node in the subscription. Empty means no fronting.
-func (s *Server) subFrontDomain() string {
-	if s.db == nil {
-		return ""
-	}
-	return strings.TrimSpace(s.db.GetSetting("sub_front_domain"))
-}
+func (s *Server) subFrontDomain() string { return s.knobs().String("sub_front_domain") }
 
 // subFrontMode is how subFrontDomain is applied (none | sni | cdn).
 func (s *Server) subFrontMode() model.FrontMode {
-	if s.db == nil {
-		return model.FrontNone
-	}
-	return model.ParseFrontMode(s.db.GetSetting("sub_front_mode"))
+	return model.ParseFrontMode(s.knobs().String("sub_front_mode"))
 }
 
 // subExpandSNI fans a REALITY inbound out into one config per borrowed SNI.
 // Default ON — it is the whole point of listing several SNIs on an inbound.
-func (s *Server) subExpandSNI() bool {
-	if s.db == nil {
-		return true
-	}
-	return s.db.GetSetting("sub_expand_sni") != "0"
-}
+func (s *Server) subExpandSNI() bool { return s.knobs().Bool("sub_expand_sni") }
 
 // subFrontCleanIP fans a CDN-frontable inbound out across the clean-IP list.
 // Default OFF — it only helps once the operator has a clean-IP list set.
-func (s *Server) subFrontCleanIP() bool {
-	if s.db == nil {
-		return false
-	}
-	return s.db.GetSetting("sub_front_cleanip") == "1"
-}
+func (s *Server) subFrontCleanIP() bool { return s.knobs().Bool("sub_front_cleanip") }
 
-// subCleanIPs is the operator's comma/space/newline-separated list of clean
-// Cloudflare edge IPs (or hostnames) used for CDN IP fan-out.
-func (s *Server) subCleanIPs() []string {
-	if s.db == nil {
-		return nil
-	}
-	raw := s.db.GetSetting("sub_clean_ips")
-	if raw == "" {
-		return nil
-	}
-	var out []string
-	for _, f := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == ' ' || r == '\t' || r == '\r' }) {
-		if f = strings.TrimSpace(f); f != "" {
-			out = append(out, f)
-		}
-	}
-	return out
-}
+// subCleanIPs is the operator's list of clean Cloudflare edge IPs (or
+// hostnames) used for CDN IP fan-out.
+func (s *Server) subCleanIPs() []string { return s.knobs().List("sub_clean_ips") }
 
 // patternSettingString maps a mode back to its stored form.
 func patternSettingString(m patternMode) string {
@@ -126,16 +87,16 @@ func (s *Server) handleGetSubSettings(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"routing_preset": s.subRoutingPreset(),
 		"fragment":       s.subFragmentDefault(),
-		"presets":        []string{"iran", "full", "block", "off"},
+		"presets":        settings.Choices("sub_routing_preset"),
 		"name_template":  s.subNameTemplate(),
 		"name_tokens":    []string{"{FLAG}", "{COUNTRY}", "{NAME}", "{PROTOCOL}", "{NET}", "{TLS}", "{PORT}", "{HOST}", "{USER}", "{NUM}", "{DATE}"},
 		"pattern":        patternSettingString(s.subPatternDefault()),
-		"pattern_modes":  []string{"off", "only", "both"},
+		"pattern_modes":  settings.Choices("sub_pattern_default"),
 		// Fancy-config wizard: the fronting domain + model + the styled theme
 		// catalogue the UI offers.
 		"front_domain": s.subFrontDomain(),
 		"front_mode":   string(s.subFrontMode()),
-		"front_modes":  []string{"none", "sni", "cdn"},
+		"front_modes":  settings.Choices("sub_front_mode"),
 		"fancy_themes": model.FancyThemes(),
 		// The formats this endpoint can actually render, so the sub dialog offers
 		// exactly them. It offered three of nine hardcoded, which meant the Surge,
@@ -181,62 +142,67 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		c.JSON(501, gin.H{"error": "no store"})
 		return
 	}
+	// Collected first and written once, by the registry. Every one of these
+	// eleven writes used to go straight into the settings table unchecked: an
+	// unknown routing preset was stored and echoed back in the 200, then
+	// silently ignored by routing.Preset, so the panel displayed a policy it did
+	// not serve. Validating the whole batch before writing any of it also means
+	// one bad field no longer leaves the card half-saved.
+	pending := map[string]string{}
 	if req.RoutingPreset != nil {
-		_ = s.db.SetSetting("sub_routing_preset", strings.ToLower(strings.TrimSpace(*req.RoutingPreset)))
+		pending["sub_routing_preset"] = *req.RoutingPreset
 	}
 	if req.Fragment != nil {
-		v := "0"
-		if *req.Fragment {
-			v = "1"
-		}
-		_ = s.db.SetSetting("sub_fragment_default", v)
+		pending["sub_fragment_default"] = strconv.FormatBool(*req.Fragment)
 	}
 	if req.NameTemplate != nil {
-		_ = s.db.SetSetting("sub_name_template", strings.TrimSpace(*req.NameTemplate))
+		pending["sub_name_template"] = *req.NameTemplate
 	}
 	if req.Pattern != nil {
-		_ = s.db.SetSetting("sub_pattern_default", patternSettingString(parsePatternMode(*req.Pattern, patternOff)))
+		pending["sub_pattern_default"] = *req.Pattern
 	}
-	// Applying a theme wins over a raw name_template/front_mode in the same
-	// request, since it is the higher-level intent.
+	// Applying a theme sets the name template; a raw name_template in the same
+	// request is overwritten by it, and a raw front_mode below still wins.
 	if req.FancyTheme != nil {
 		id := strings.TrimSpace(*req.FancyTheme)
 		if id == "" {
 			// An explicit empty theme clears fancy naming back to plain remarks.
-			_ = s.db.SetSetting("sub_name_template", "")
-			_ = s.db.SetSetting("sub_front_mode", string(model.FrontNone))
+			pending["sub_name_template"] = ""
+			pending["sub_front_mode"] = string(model.FrontNone)
 		} else if th, ok := model.FancyThemeByID(id); ok {
-			_ = s.db.SetSetting("sub_name_template", th.Template)
-			_ = s.db.SetSetting("sub_front_mode", string(th.Front))
+			pending["sub_name_template"] = th.Template
+			pending["sub_front_mode"] = string(th.Front)
 		} else {
-			c.JSON(400, gin.H{"error": "unknown fancy theme: " + id})
+			c.JSON(400, gin.H{"error": "unknown fancy theme: " + id,
+				"fields": gin.H{"fancy_theme": "no theme with that id"}})
 			return
 		}
 	}
 	if req.FrontDomain != nil {
-		_ = s.db.SetSetting("sub_front_domain", strings.TrimSpace(*req.FrontDomain))
+		pending["sub_front_domain"] = *req.FrontDomain
 	}
 	if req.FrontMode != nil {
-		_ = s.db.SetSetting("sub_front_mode", string(model.ParseFrontMode(*req.FrontMode)))
+		pending["sub_front_mode"] = *req.FrontMode
 	}
 	if req.ExpandSNI != nil {
-		// Stored as the reader expects: subExpandSNI defaults ON and treats
-		// anything other than "0" as on, so the off case must be exactly "0".
-		v := "1"
-		if !*req.ExpandSNI {
-			v = "0"
-		}
-		_ = s.db.SetSetting("sub_expand_sni", v)
+		pending["sub_expand_sni"] = strconv.FormatBool(*req.ExpandSNI)
 	}
 	if req.FrontCleanIP != nil {
-		v := "0"
-		if *req.FrontCleanIP {
-			v = "1"
-		}
-		_ = s.db.SetSetting("sub_front_cleanip", v)
+		pending["sub_front_cleanip"] = strconv.FormatBool(*req.FrontCleanIP)
 	}
 	if req.CleanIPs != nil {
-		_ = s.db.SetSetting("sub_clean_ips", strings.TrimSpace(*req.CleanIPs))
+		pending["sub_clean_ips"] = *req.CleanIPs
+	}
+	if err := s.knobs().SetAll(pending); err != nil {
+		var ve *settings.ValidationError
+		if errors.As(err, &ve) {
+			// Named per field, so the UI can mark the input instead of showing a
+			// sentence about a card with eleven of them.
+			c.JSON(400, gin.H{"error": ve.Error(), "fields": ve.Fields()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())
 	c.JSON(200, gin.H{"ok": true, "routing_preset": s.subRoutingPreset(), "fragment": s.subFragmentDefault(),

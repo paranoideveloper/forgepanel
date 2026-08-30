@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/forgepanel/forgepanel/internal/edge"
+	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
 
@@ -309,7 +310,9 @@ func fetchPanelFeed(panelBase, pullToken, data string) ([]byte, error) {
 		}
 		defer db.Close()
 		if strings.TrimSpace(pullToken) == "" {
-			pullToken = db.GetSetting("edge_feed_pull_token")
+			// Through the registry like every other reader, so the CLI cannot
+			// drift from the panel on what this key is called or holds.
+			pullToken = settings.NewValues(db).String("edge_feed_pull_token")
 		}
 		if strings.TrimSpace(panelBase) == "" {
 			cfg, err := loadLocalConfig(data)

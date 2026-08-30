@@ -234,10 +234,16 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	// clean-IP fronting so the CDN inbounds are offered through many addresses —
 	// the same shape as the sample configs' 28-IP fan-out. Never clobber a list
 	// the operator already set.
-	if s.db.GetSetting("sub_clean_ips") == "" {
-		_ = s.db.SetSetting("sub_clean_ips",
-			"188.114.96.3,188.114.97.3,speed.cloudflare.com,cf.090227.xyz,104.17.148.22,cdn.anycast.eu.org")
-		_ = s.db.SetSetting("sub_front_cleanip", "1")
+	if s.knobs().String("sub_clean_ips") == "" {
+		if err := s.knobs().SetAll(map[string]string{
+			"sub_clean_ips":     "188.114.96.3,188.114.97.3,speed.cloudflare.com,cf.090227.xyz,104.17.148.22,cdn.anycast.eu.org",
+			"sub_front_cleanip": "true",
+		}); err != nil {
+			// Reported rather than dropped: the wizard's whole promise is that
+			// what it says it turned on IS on, and a seed list that silently
+			// failed to save leaves clean-IP fronting enabled against nothing.
+			warnings = append(warnings, "could not seed the clean-IP list: "+err.Error())
+		}
 	}
 	s.audit(c, "wizard.preset", fmt.Sprintf("%d inbounds", len(created)))
 

@@ -74,6 +74,15 @@ type ZoneRepository interface {
 	DeleteZone(id uint) error
 }
 
+// SettingRepository is the key/value settings table. It is stated as an
+// interface so *Store satisfies settings.KV by contract rather than by
+// coincidence: the settings registry is built on exactly these two methods, and
+// a rename here should break the build, not the panel.
+type SettingRepository interface {
+	GetSetting(key string) string
+	SetSetting(key, value string) error
+}
+
 // Interface combines all repository interfaces for complete store operations.
 type Interface interface {
 	AdminRepository
@@ -82,6 +91,7 @@ type Interface interface {
 	UserRepository
 	NodeRepository
 	ZoneRepository
+	SettingRepository
 }
 
 // Ensure *Store implements Interface at compile time.

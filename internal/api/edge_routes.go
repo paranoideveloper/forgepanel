@@ -27,7 +27,7 @@ import (
 // credentials to anyone who guessed the URL.
 func (s *Server) handleEdgeFeed(c *gin.Context) {
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
-	want := s.db.GetSetting(edgeFeedPullTokenKey)
+	want := s.knobs().String(edgeFeedPullTokenKey)
 	if want == "" {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":       "the pull feed is not enabled on this panel",
@@ -54,10 +54,10 @@ func (s *Server) handleEdgeFeed(c *gin.Context) {
 // presents to the pull endpoint.
 func (s *Server) handleEdgeFeedToken(c *gin.Context) {
 	rotate := c.Query("rotate") == "1" || c.Query("rotate") == "true"
-	tok := s.db.GetSetting(edgeFeedPullTokenKey)
+	tok := s.knobs().String(edgeFeedPullTokenKey)
 	if tok == "" || rotate {
 		tok = randHex(24)
-		if err := s.db.SetSetting(edgeFeedPullTokenKey, tok); err != nil {
+		if err := s.knobs().Set(edgeFeedPullTokenKey, tok); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

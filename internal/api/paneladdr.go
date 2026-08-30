@@ -216,12 +216,17 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if s.db != nil && req.Domain != nil {
+	if req.Domain != nil {
 		// Best-effort MIRROR. settings.Apply already persisted the authoritative
 		// value to panel.json and reported any failure; this copy only spares
 		// other readers a file parse, so losing it costs a lookup, not the
 		// setting.
-		_ = s.db.SetSetting("public_address", *req.Domain)
+		//
+		// The value mirrored is the one Apply NORMALIZED, not the raw request:
+		// an operator who typed "https://Panel.Example.com/" had that whole
+		// string copied here, and substituteAddr then handed it to every
+		// exported link as a hostname.
+		_ = s.knobs().Set("public_address", result.New.Domain)
 	}
 	s.writePublicURLFile()
 	// Bring TLS up without a restart: a configured domain (re)starts the :80 ACME

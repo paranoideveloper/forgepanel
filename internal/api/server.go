@@ -37,6 +37,7 @@ import (
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
+	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 	"github.com/forgepanel/forgepanel/internal/version"
@@ -45,6 +46,27 @@ import (
 
 //go:embed web/*
 var webFS embed.FS
+
+// The settings registry is built on exactly the two methods the store exposes
+// for its key/value table; assert it here so a rename breaks the build.
+var _ settings.KV = (*store.Store)(nil)
+
+// knobs is typed, validated, defaulted access to the settings table: every
+// reader and writer of an operator setting in this package goes through it.
+//
+// DERIVED from s.db rather than assigned in a constructor, deliberately. As a
+// field it had to be set in every place a Server is built, and it was not — the
+// half-dozen fixtures that assemble a Server around a live database by hand all
+// read registry defaults instead of the rows in front of them, which is the
+// same "wired in one place, forgotten in the others" failure the registry exists
+// to end. A nil *Values is usable and answers every read with the registered
+// default, which is what a panel with no store should do.
+func (s *Server) knobs() *settings.Values {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return settings.NewValues(s.db)
+}
 
 // Server wraps the gin engine, configuration, persistence and auth.
 type Server struct {
@@ -830,6 +852,9 @@ func (s *Server) routes() {
 			admin.GET("/settings/egress", s.handleGetEgressSettings)
 			admin.POST("/settings/egress", s.handleSetEgressSettings)
 			admin.POST("/settings/egress/test", s.handleTestEgress)
+			// What this panel can be told, described by the panel. Without it the
+			// UI has to carry its own copy of every enum and default.
+			admin.GET("/settings/registry", s.handleSettingsRegistry)
 			admin.GET("/settings/subscription", s.handleGetSubSettings)
 			admin.POST("/settings/subscription", s.handleSetSubSettings)
 			admin.GET("/settings/nettune", s.handleGetNetTune)

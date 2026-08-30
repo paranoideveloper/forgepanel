@@ -72,6 +72,14 @@
   interface FancyTheme { id: string; label: string; template: string; front: string; proto: string; sample: string; }
   interface SubSettings { routing_preset: string; fragment: boolean; presets: string[]; name_template?: string; name_tokens?: string[]; pattern?: string; pattern_modes?: string[]; front_domain?: string; front_mode?: string; front_modes?: string[]; fancy_themes?: FancyTheme[]; formats?: string[]; expand_sni?: boolean; front_clean_ip?: boolean; clean_ips?: string; }
   let subSettings = $state<SubSettings | null>(null);
+  // The panel refuses a settings save per KEY now, with a reason for each one.
+  // Kept here rather than shown only as a toast: this card writes nine settings
+  // at once, and "invalid value" in a banner that disappears in three seconds
+  // does not tell an operator which of the nine it was.
+  let subErrors = $state<Record<string, string>>({});
+  const frontKeys = ['sub_front_domain', 'sub_front_mode'];
+  const subCardErrors = $derived(Object.entries(subErrors).filter(([k]) => !frontKeys.includes(k)));
+  const frontCardErrors = $derived(Object.entries(subErrors).filter(([k]) => frontKeys.includes(k)));
   // The formats come from the server, which is the only thing that knows what it
   // can render. Hardcoding them here left six of nine renderers unreachable from
   // the panel, Surge/Loon/Quantumult X among them.
@@ -106,6 +114,7 @@
 
   async function saveSubSettings() {
     if (!subSettings) return;
+    subErrors = {};
     try {
       await apiFetch('/admin/settings/subscription', {
         method: 'POST',
@@ -126,6 +135,7 @@
       });
       showToast(tr('users.subscription_defaults_saved'), 'success');
     } catch (err: any) {
+      subErrors = err.fields ?? {};
       showToast(err.message || tr('users.failed_to_save'), 'error');
     }
   }
@@ -134,6 +144,7 @@
   // server-side in one step) together with the operator's camouflage domain.
   async function applyFancyTheme(theme: FancyTheme) {
     if (!subSettings) return;
+    subErrors = {};
     try {
       const res = await apiFetch<{ name_template?: string; front_domain?: string; front_mode?: string }>('/admin/settings/subscription', {
         method: 'POST',
@@ -143,6 +154,7 @@
       subSettings.front_mode = res.front_mode ?? theme.front;
       showToast(tr('users.applied_theme_label_p2', { label: theme.label, p2: theme.front === 'none' ? tr('users.no_fronting') : theme.front.toUpperCase() }), 'success');
     } catch (err: any) {
+      subErrors = err.fields ?? {};
       showToast(err.message || tr('users.failed_to_apply_theme'), 'error');
     }
   }
@@ -556,6 +568,11 @@
       </label>
     </div>
     <p class="hint">{tr('users.tokens', {  })} {#each (subSettings.name_tokens ?? []) as tk}<code style="margin-inline-end:4px">{tk}</code>{/each} — e.g. <code>{'{FLAG} {NAME} · {NET}'}</code> → <b>{tr('users.berlin_ws')}</b>{tr('users.set_a_country_per_inbound_for')}</p>
+    {#if subCardErrors.length}
+      <ul class="field-errs" data-testid="sub-settings-errors">
+        {#each subCardErrors as [key, why]}<li><code>{key}</code> — {why}</li>{/each}
+      </ul>
+    {/if}
   </div>
 
   <div class="card" data-testid="fancy-wizard">
@@ -575,6 +592,11 @@
       <button class="primary" data-testid="save-front" onclick={saveSubSettings}>{tr('users.save_domain')}</button>
     </div>
     <p class="hint"><b>{tr('users.sni_host')}</b>{tr('users.keep_the_real_server_address_but')} <b>CDN</b>{tr('users.set_only_the_host_header_and')}</p>
+    {#if frontCardErrors.length}
+      <ul class="field-errs" data-testid="front-settings-errors">
+        {#each frontCardErrors as [key, why]}<li><code>{key}</code> — {why}</li>{/each}
+      </ul>
+    {/if}
     {#if subSettings.fancy_themes && subSettings.fancy_themes.length}
       <div class="theme-grid">
         {#each subSettings.fancy_themes as th}
@@ -844,6 +866,10 @@
 
 <style>
   .warn-hint { color: #FF9D4D; }
+  /* Server-supplied text: the reason names the key the API rejected, so it is
+     not translated here any more than the toast that carries the same words. */
+  .field-errs { margin: 8px 0 0; padding-inline-start: 18px; color: #FF6B6B; font-size: 13px; }
+  .field-errs code { color: inherit; }
   .badge.held { background: rgba(217,155,43,0.18); color: #d99b2b; border: 1px solid rgba(217,155,43,0.4); margin-inline-start: 6px; }
   label small { display: block; margin-top: 4px; color: rgba(255,255,255,0.5); font-size: 11px; line-height: 1.5; }
 

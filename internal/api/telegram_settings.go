@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 )
 
@@ -43,11 +44,8 @@ type telegramSettings struct {
 // the panel and sees it ignored would have no way to understand why.
 func (s *Server) resolveTelegram() telegramSettings {
 	out := telegramSettings{}
-	var rawChats string
-	if s.db != nil {
-		out.Token = strings.TrimSpace(s.db.GetSetting(settingTGToken))
-		rawChats = strings.TrimSpace(s.db.GetSetting(settingTGChats))
-	}
+	out.Token = s.knobs().String(settingTGToken)
+	rawChats := s.knobs().String(settingTGChats)
 	if out.Token == "" && s.cfg != nil {
 		out.Token = strings.TrimSpace(s.cfg.TelegramToken)
 		out.FromEnv = out.Token != ""
@@ -213,20 +211,26 @@ func (s *Server) handleSetTelegramSettings(c *gin.Context) {
 		}
 	}
 
-	if err := s.db.SetSetting(settingTGToken, token); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	if err := s.db.SetSetting(settingTGChats, formatChatIDs(chats)); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+	// One batch through the registry, so the token is type-checked (a pasted
+	// token with a stray newline in it produced a bot that failed on every send
+	// with a header error nobody could trace back to this form) and so the
+	// backup toggle can no longer be written on its own after the token write
+	// failed.
+	pending := map[string]string{
+		settingTGToken: token,
+		settingTGChats: formatChatIDs(chats),
 	}
 	if req.BackupDelivery != nil {
-		v := "0"
-		if *req.BackupDelivery {
-			v = "1"
+		pending[settingTGBackup] = strconv.FormatBool(*req.BackupDelivery)
+	}
+	if err := s.knobs().SetAll(pending); err != nil {
+		var ve *settings.ValidationError
+		if errors.As(err, &ve) {
+			c.JSON(400, gin.H{"error": ve.Error(), "fields": ve.Fields()})
+			return
 		}
-		_ = s.db.SetSetting(settingTGBackup, v)
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 	s.restartBot()
 	// The token is never echoed, not even the one just supplied.
@@ -317,12 +321,7 @@ func telegramFailure(err error) gin.H {
 // the feature being SAFE, not for it being on without being asked for.
 const settingTGBackup = "telegram_backup_delivery"
 
-func (s *Server) telegramBackupDelivery() bool {
-	if s.db == nil {
-		return false
-	}
-	return s.db.GetSetting(settingTGBackup) == "1"
-}
+func (s *Server) telegramBackupDelivery() bool { return s.knobs().Bool(settingTGBackup) }
 
 // deliverBackupToTelegram uploads a written backup to every configured chat.
 //

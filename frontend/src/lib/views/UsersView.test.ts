@@ -418,3 +418,66 @@ describe('UsersView presence dot', () => {
     expect(screen.getByTestId('presence-8').className).toContain('online');
   });
 });
+
+// The subscription card writes nine settings in one request, and the panel now
+// refuses that request per key with a reason for each. Dropping the reasons on
+// the floor and showing one toast leaves an operator staring at nine inputs
+// knowing only that "something" was invalid — and the toast is gone before they
+// finish reading it.
+describe('UsersView subscription settings refusal', () => {
+  function stubRefusal(fields: Record<string, string>) {
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'POST') {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'settings: invalid value(s)', fields })
+        } as Response;
+      }
+      const table: Record<string, any> = {
+        '/api/admin/users': [user],
+        '/api/admin/groups': [],
+        '/api/admin/inbounds': [],
+        '/api/admin/settings/subscription': subSettings
+      };
+      return { ok: true, json: async () => table[String(url)] ?? {} } as Response;
+    };
+  }
+
+  it('names each refused key and why, under the card that owns it', async () => {
+    stubRefusal({
+      sub_routing_preset: '"nonsense" is not one of: iran, full, block, off',
+      sub_front_domain: '"not a domain" is not a hostname'
+    });
+
+    render(UsersView);
+    await screen.findByTestId('sub-settings');
+    await fireEvent.click(screen.getByTestId('save-sub-settings'));
+
+    const subs = await screen.findByTestId('sub-settings-errors');
+    expect(subs.textContent).toContain('sub_routing_preset');
+    expect(subs.textContent).toContain('is not one of');
+    // The fronting knobs live on the wizard card, so their refusal belongs there
+    // and not in a list under a card that does not show the input.
+    expect(subs.textContent).not.toContain('sub_front_domain');
+
+    const front = await screen.findByTestId('front-settings-errors');
+    expect(front.textContent).toContain('sub_front_domain');
+    expect(front.textContent).toContain('is not a hostname');
+  });
+
+  it('clears the previous refusal when the next save succeeds', async () => {
+    stubRefusal({ sub_routing_preset: 'nope' });
+    render(UsersView);
+    await screen.findByTestId('sub-settings');
+    await fireEvent.click(screen.getByTestId('save-sub-settings'));
+    await screen.findByTestId('sub-settings-errors');
+
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      if (opts?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+      return { ok: true, json: async () => ({}) } as Response;
+    };
+    await fireEvent.click(screen.getByTestId('save-sub-settings'));
+    await waitFor(() => expect(screen.queryByTestId('sub-settings-errors')).toBeNull());
+  });
+});
