@@ -10,10 +10,13 @@ import { getGlobalConfig } from '../config/runtime';
 import { parseTrojanHeader } from './framing';
 import { handleTCPOutbound, type OutboundOptions } from './outbound';
 import { readableFromWebSocket, safeCloseSocket, safeCloseWebSocket } from './ws';
+import { releaseConnection, type ConnHandle } from './limits';
 
 export interface TrojanHandlerOptions {
   password: string;
   outbound: OutboundOptions;
+  /** The limiter slot the router took for this connection, given back on close. */
+  handle?: ConnHandle;
 }
 
 export function trojanOverWS(request: Request, opts: TrojanHandlerOptions): Response {
@@ -21,6 +24,10 @@ export function trojanOverWS(request: Request, opts: TrojanHandlerOptions): Resp
   const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
   server.accept();
   server.binaryType = 'arraybuffer';
+
+  // Both events, before anything that can throw — see the same hook in vless.ts.
+  server.addEventListener('close', () => releaseConnection(opts.handle));
+  server.addEventListener('error', () => releaseConnection(opts.handle));
 
   let address = '';
   let tag = '';

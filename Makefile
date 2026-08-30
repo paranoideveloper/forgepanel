@@ -31,6 +31,11 @@ web-build:
 # edge-bundle compiles the ForgeEdge Worker (deploy/cloudflare/forgeedge/src) into
 # a single ESM module embedded by internal/edge (//go:embed). Run after changing
 # the Worker source; the committed artifact keeps `go build` free of a JS toolchain.
+#
+# USE BUN 1.4.0 — the same version pinned in the forgeedge-worker CI job. CI
+# compares the committed bundle byte-for-byte against a fresh build, and bun's
+# minifier renames identifiers between releases, so a bundle built with any
+# other bun is rejected even when the source is identical.
 edge-bundle:
 	cd deploy/cloudflare/forgeedge && bun install && \
 	  bun build src/worker.ts --outfile ../../../internal/edge/assets/forgeedge.worker.js \

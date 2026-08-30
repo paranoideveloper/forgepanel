@@ -62,6 +62,26 @@ export interface BackendConfig {
   fallbackToEdge: boolean;
 }
 
+/**
+ * Bounds on how much edge-terminated traffic one client may open. Enforced in
+ * `protocols/limits.ts`, which documents what these can and cannot promise —
+ * notably that the accounting is per-isolate and skips Backend Mode.
+ */
+export interface LimitsConfig {
+  /** Off means every upgrade is admitted and nothing is counted. */
+  enabled: boolean;
+  /** Live edge-terminated sockets allowed from one client IP. */
+  perIPConcurrent: number;
+  /** New edge-terminated connections per minute from one client IP (token bucket). */
+  perIPNewPerMinute: number;
+  /**
+   * Live sockets allowed per credential. DECLARED, NOT ENFORCED — see the
+   * header of `protocols/limits.ts` for the two reasons. Present so the config
+   * key exists with its final shape before anything starts reading it.
+   */
+  perUUIDConcurrent: number;
+}
+
 export interface WarpConfig {
   endpoints: string[];
   remoteDNS: string;
@@ -133,6 +153,7 @@ export interface EdgeConfig {
   proxyIPs: string[];
   nat64Prefixes: string[];
   backend: BackendConfig;
+  limits: LimitsConfig;
   /** Chain proxy URI (vless/trojan/ss/socks/http) that fixes the exit IP. */
   chainProxy: string;
 
@@ -205,6 +226,18 @@ export const DEFAULT_ROUTING: RoutingConfig = {
   customBypassRules: [],
   customBypassSanctionRules: [],
   customBlockRules: [],
+};
+
+/**
+ * Generous enough never to bite a real subscriber — a phone opens tens of
+ * sockets and reconnects in bursts when a network changes — and tight enough
+ * that a single host cannot use the Worker as an open relay.
+ */
+export const DEFAULT_LIMITS: LimitsConfig = {
+  enabled: true,
+  perIPConcurrent: 64,
+  perIPNewPerMinute: 120,
+  perUUIDConcurrent: 32,
 };
 
 export const DEFAULT_WARP: WarpConfig = {
@@ -286,6 +319,7 @@ export function defaultConfig(): EdgeConfig {
     proxyIPs: [],
     nat64Prefixes: ['[2602:fc59:11:64::]', '[2602:fc59:b0:64::]', '[2a02:898:146:64::]'],
     backend: { enabled: false, url: '', token: '', fallbackToEdge: true },
+    limits: { ...DEFAULT_LIMITS },
     chainProxy: '',
 
     fragment: { ...DEFAULT_FRAGMENT },

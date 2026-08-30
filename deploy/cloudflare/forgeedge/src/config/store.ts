@@ -106,6 +106,11 @@ export function migrateConfig(stored: Partial<EdgeConfig> | null): EdgeConfig {
     warp: { ...base.warp, ...(stored.warp ?? {}) },
     fragment: { ...base.fragment, ...(stored.fragment ?? {}) },
     backend: { ...base.backend, ...(stored.backend ?? {}) },
+    // Not for the missing-key case — the spread above already covers that. This
+    // is for a PARTIAL object: the panel writes whole top-level keys verbatim
+    // (internal/api/edge_config.go) from a JSON textarea, so `{"enabled":false}`
+    // would otherwise leave every bound `undefined` in the hot path.
+    limits: { ...base.limits, ...(stored.limits ?? {}) },
     version: CONFIG_VERSION,
   };
   return merged;
