@@ -846,6 +846,9 @@ func (s *Server) routes() {
 			// editor because it has a lifecycle the others do not: a device is
 			// registered with Cloudflare, a license may be attached to it, and
 			// the endpoint rotates without the account changing.
+			// REALITY dest probing: measured, not guessed.
+			admin.GET("/reality/dest-probe", s.handleRealityDestProbe)
+			admin.GET("/reality/dest-suggest", s.handleRealityDestSuggest)
 			admin.GET("/routing/warp", s.handleWarpStatus)
 			admin.POST("/routing/warp", s.handleWarpProvision)
 			admin.POST("/routing/warp/rotate", s.handleWarpRotate)
@@ -1272,10 +1275,19 @@ func doctor(n *model.Node) []PreviewFinding {
 		if dest == "" && len(n.Security.Reality.ServerNames) > 0 {
 			dest = n.Security.Reality.ServerNames[0]
 		}
-		badDests := []string{"microsoft.com", "www.microsoft.com", "bing.com", "amazon.com"}
-		for _, bad := range badDests {
+		// Named because they were MEASURED to fail, not because they look
+		// unlikely. www.microsoft.com serves an 8126-byte certificate chain and
+		// REALITY cannot relay a borrowed handshake that large: the client
+		// authenticates correctly and the tunnel then carries nothing, with
+		// every field of the config looking right. See internal/realityprobe.
+		//
+		// This stays a cheap static hint; /api/admin/reality/dest-probe is the
+		// authority and actually connects. The previous version of this list
+		// blocked www.amazon.com, which works fine.
+		measuredBad := []string{"microsoft.com", "www.microsoft.com"}
+		for _, bad := range measuredBad {
 			if strings.Contains(dest, bad) {
-				f = append(f, PreviewFinding{"warn", "REALITY dest '" + dest + "' is unreliable (redirects / no clean X25519). Use a proven steal-site: www.cloudflare.com, www.apple.com, dl.google.com, swift.org, or an Iran-domestic CDN (aparat.ir, digikala.com)."})
+				f = append(f, PreviewFinding{"warn", "REALITY dest '" + dest + "' has a certificate chain too large for REALITY to relay, so the tunnel will authenticate and then carry nothing. Use www.cloudflare.com, www.apple.com, gateway.icloud.com, addons.mozilla.org, www.amazon.com or dl.google.com — or probe your own with /api/admin/reality/dest-probe."})
 				break
 			}
 		}
