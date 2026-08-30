@@ -90,7 +90,14 @@ type Server struct {
 	// what a test must not do. It lives on the Server rather than in a package
 	// variable so two panels in one process cannot share one.
 	poolProber dns.Prober
-	stop       context.CancelFunc
+
+	// The last congestion-control outcome reported, so a host that refuses the
+	// sysctl does not repeat itself once a minute forever. On the Server for the
+	// same reason poolProber is: two panels in one process must not share it.
+	netTuneMu   sync.Mutex
+	netTuneLast string
+
+	stop context.CancelFunc
 
 	lifecycleMu sync.Mutex
 	closed      bool
@@ -224,6 +231,11 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	// or offline panel simply has nothing to start yet.
 	s.startBackground(s.reloadEngines)
 	s.startBackground(s.syncForgeDNS)
+	// The host's congestion control is not durable state: a /proc write is gone
+	// after a reboot, and this is the only code that runs on every panel start.
+	// Without it the BBR toggle is a one-shot that dies at the next restart of
+	// the machine while the panel keeps reporting it as on.
+	s.startBackground(s.applyNetTune)
 	// Cron scheduler: poll traffic, enforce quotas/expiry, reset by strategy.
 	s.sched = job.New(job.Config{
 		DB:         db,
@@ -820,6 +832,8 @@ func (s *Server) routes() {
 			admin.POST("/settings/egress/test", s.handleTestEgress)
 			admin.GET("/settings/subscription", s.handleGetSubSettings)
 			admin.POST("/settings/subscription", s.handleSetSubSettings)
+			admin.GET("/settings/nettune", s.handleGetNetTune)
+			admin.POST("/settings/nettune", s.handleSetNetTune)
 			admin.GET("/geoip", s.handleGeoIP)
 			admin.GET("/panel-address", s.handlePanelAddress)
 			admin.POST("/panel-address", s.handlePanelAddressUpdate)

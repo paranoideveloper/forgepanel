@@ -86,6 +86,69 @@
     }
   }
 
+  // Host network tuning (BBR + fq).
+  //
+  // Rendered from the LIVE host state, not from the stored toggle. A switch that
+  // says "on" over a host still running cubic is the exact failure this feature
+  // is about: the panel can be refused the sysctl by its own systemd hardening,
+  // or the kernel can have no BBR at all, and neither shows up anywhere else.
+  interface NetTune {
+    enabled: boolean;
+    congestion: string;
+    qdisc: string;
+    bbr_available: boolean;
+    active: boolean;
+    persisted: boolean;
+    kernel: string;
+    remediation?: string;
+  }
+  let netTune = $state<NetTune | null>(null);
+  // Bound to the checkbox, and deliberately not derived from netTune: when the
+  // host refuses the change the response value is the same one the checkbox
+  // started at, so a `checked={...}` expression would never re-render and the
+  // box would stay where the click left it — showing BBR on over a host that
+  // rejected it.
+  let netTuneWanted = $state(false);
+  let netTuneBusy = $state(false);
+  let netTuneErr = $state('');
+  let netTuneRemedy = $state('');
+  // An em dash for a value the host would not tell us — /proc is unreadable
+  // under some hardening, and a blank gap there reads as "fine".
+  const unreadable = '\u2014';
+  let netTuneCongestion = $derived(netTune?.congestion || unreadable);
+  let netTuneQdisc = $derived(netTune?.qdisc || unreadable);
+  let netTuneKernel = $derived(netTune?.kernel || unreadable);
+
+  async function loadNetTune() {
+    try {
+      netTune = await apiFetch<NetTune>('/admin/settings/nettune');
+      netTuneWanted = netTune.enabled;
+    } catch (_) { /* an older panel has no network tuning endpoint */ }
+  }
+
+  async function saveNetTune(enabled: boolean) {
+    netTuneBusy = true;
+    netTuneErr = '';
+    netTuneRemedy = '';
+    try {
+      netTune = await apiFetch<NetTune>('/admin/settings/nettune', {
+        method: 'POST',
+        body: JSON.stringify({ enabled })
+      });
+      netTuneWanted = netTune.enabled;
+      showToast(enabled ? tr('systemhealth.nettune_enabled') : tr('systemhealth.nettune_disabled'), 'success');
+    } catch (e: any) {
+      netTuneErr = e.message || tr('systemhealth.nettune_failed');
+      netTuneRemedy = e.remediation ?? '';
+      // Re-read so the checkbox goes back to what the host really is. Leaving it
+      // where the operator clicked would claim a change that did not happen.
+      await loadNetTune();
+      netTuneWanted = netTune?.enabled ?? false;
+    } finally {
+      netTuneBusy = false;
+    }
+  }
+
   // Panel Doctor
   let doctor = $state<any>(null);
   let doctorBusy = $state(false);
@@ -272,6 +335,7 @@
   onMount(() => {
     loadData();
     loadTelegram();
+    loadNetTune();
   });
 </script>
 
@@ -401,6 +465,31 @@
       {tg.running ? tr('systemhealth.telegram_running') : tr('systemhealth.telegram_not_running')}
       {#if tg.token_source === 'environment'}· {tr('systemhealth.telegram_from_env')}{/if}
     </p>
+  {/if}
+</div>
+
+<div class="card" data-testid="nettune-card">
+  <h3>{tr('systemhealth.nettune_title')}</h3>
+  <p class="hint">{tr('systemhealth.nettune_hint')}</p>
+  <label class="chk">
+    <input type="checkbox" data-testid="nettune-toggle" disabled={netTuneBusy}
+           bind:checked={netTuneWanted}
+           onchange={() => saveNetTune(netTuneWanted)} />
+    <span>{tr('systemhealth.nettune_enable')}</span>
+  </label>
+  {#if netTune}
+    <p class="hint" data-testid="nettune-status">
+      <span class="badge {netTune.active ? 'ok' : 'warn'}">{netTuneCongestion}</span>
+      {tr('systemhealth.nettune_current', { qdisc: netTuneQdisc, kernel: netTuneKernel })}
+      · {netTune.persisted ? tr('systemhealth.nettune_persisted') : tr('systemhealth.nettune_not_persisted')}
+    </p>
+    {#if !netTune.bbr_available && netTune.remediation}
+      <p class="hint" data-testid="nettune-unavailable">{netTune.remediation}</p>
+    {/if}
+  {/if}
+  {#if netTuneErr}
+    <p class="err-text" data-testid="nettune-error">{netTuneErr}</p>
+    {#if netTuneRemedy}<p class="hint" data-testid="nettune-remedy">{netTuneRemedy}</p>{/if}
   {/if}
 </div>
 

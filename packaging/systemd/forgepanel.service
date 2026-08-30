@@ -38,7 +38,11 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ProtectKernelTunables=true
+# ProtectKernelTunables=true remounts /proc/sys read-only for this unit, which
+# silently disables the panel's network tuning: the BBR toggle would write
+# nothing, surface nothing, and the host would stay on cubic. The panel already
+# runs as root with CAP_NET_ADMIN, so the setting bought little here.
+ProtectKernelTunables=false
 ProtectKernelModules=false
 ProtectControlGroups=true
 RestrictSUIDSGID=true
@@ -48,7 +52,12 @@ LockPersonality=true
 # serves (ufw persists rules to /etc/ufw/user.rules, which ProtectSystem=full
 # would otherwise make read-only — silently breaking auto-firewalling). The '-'
 # prefix makes it optional on hosts without ufw.
-ReadWritePaths=/var/lib/forgepanel /etc/forgepanel -/etc/ufw
+# /etc/sysctl.d is writable so the BBR/fq drop-in survives a reboot — that file
+# is the half of the tuning feature that outlives the process. Optional ('-')
+# because a unit whose ReadWritePaths names a missing directory refuses to start,
+# and a panel that will not boot is far worse than one that cannot persist a
+# sysctl.
+ReadWritePaths=/var/lib/forgepanel /etc/forgepanel -/etc/ufw -/etc/sysctl.d
 
 [Install]
 WantedBy=multi-user.target

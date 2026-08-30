@@ -956,7 +956,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ${protect_home}
-ProtectKernelTunables=true
+# ProtectKernelTunables=false: true remounts /proc/sys read-only for the unit,
+# which silently disables the panel's BBR/fq network tuning.
+ProtectKernelTunables=false
 # ProtectKernelModules disabled to allow AmneziaWG/WireGuard kernel modules
 ProtectKernelModules=false
 ProtectControlGroups=true
@@ -966,7 +968,10 @@ LockPersonality=true
 # /etc/ufw writable (optional via '-') so the panel can open the host firewall for
 # inbound ports at runtime; ufw persists rules there and ProtectSystem=full would
 # otherwise make it read-only, silently breaking auto-firewalling.
-ReadWritePaths=${DATA_DIR} ${ENV_DIR} -/etc/ufw
+# /etc/sysctl.d writable (optional via '-') so the BBR/fq drop-in survives a
+# reboot; ProtectSystem=full would otherwise make it read-only and the tuning
+# would be lost on every restart of the host.
+ReadWritePaths=${DATA_DIR} ${ENV_DIR} -/etc/ufw -/etc/sysctl.d
 
 [Install]
 WantedBy=multi-user.target

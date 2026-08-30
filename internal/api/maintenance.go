@@ -73,6 +73,7 @@ func (s *Server) runMaintenance() {
 	s.checkRotationPools()
 	s.sweepCertificates()
 	s.reconcileCores()
+	s.applyNetTune()
 	s.checkNodesReachable()
 }
 
