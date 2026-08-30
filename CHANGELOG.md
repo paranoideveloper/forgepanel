@@ -1,6 +1,77 @@
 # Changelog
 
-## v1.20.0 — ForgeEdge Bot: deploy Workers from Telegram, standalone
+## v1.20.0 — Remote nodes, two languages, and a panel that knows where it is running
+
+The largest release so far: 175 commits since v1.19.1. The headline is that
+ForgePanel stopped being a single-server panel — it now enrols and supervises
+other servers over an mTLS control plane, runs on managed platforms as well as a
+VPS, and speaks Persian.
+
+### Added — the panel itself
+
+- **Remote nodes with an mTLS control plane.** Enrol other servers and run
+  inbounds on them. The permanent enrol token is gone: each node gets a
+  client certificate, and the panel meters traffic per user on the node as it
+  does locally. Nodes run **sing-box as well as xray**, carry a lifecycle status
+  machine, and report *why* they are unhealthy rather than one bit.
+- **Persian, and right-to-left.** The whole panel is translated (EN/FA) with the
+  layout mirrored, guarded by tests that fail on any hard-coded string and on key
+  drift between the two catalogues.
+- **A light theme.** Colours are design tokens now rather than 531 literals
+  restated across 29 files, with a three-state switch (System / Light / Dark).
+- **Deployment-aware settings.** The panel detects Railway, Render, Fly and Koyeb
+  and *removes* the controls those platforms own — certificates, domains, ports,
+  host tuning — instead of showing controls that cannot work. Each removal says
+  why, and says how to get the capability back where that is possible.
+- **Cloudflare WARP as a managed outbound**, with WARP+ licence activation and
+  scheduled endpoint rotation.
+- **Scoped, hashed, expiring API tokens**, and a Prometheus scrape at
+  `/admin/metrics`.
+- **Webhooks** for lifecycle events, so alerts have a sink that is not a chat
+  app, plus Telegram push alerts that warn people *before* they are cut off.
+- **Wildcard certificates** via the DNS-01 challenge.
+- **Per-client WireGuard peers**, so several users can share one inbound.
+- **Per-inbound public endpoints (hosts)** and **saved plans**.
+- **Backups to S3**, because the only copies used to live on the machine being
+  backed up.
+- **A foreign-panel importer** that actually imports, and records provenance so a
+  re-import recognises what it already has.
+- **Reverse-tunnel backends (bridge)**, managed from the panel.
+- **Operator-selectable core versions**, with a real pin and a rollback target.
+- **Failover groups in routing**, so one dead relay no longer takes its users
+  with it.
+- Every subscription now leads with a **latency-tested group** ("Best Ping" /
+  `auto`), first in the selector and its default, so an untouched client picks
+  the fastest node instead of whichever was generated first. Verified against
+  sing-box 1.13.2 and Mihomo 1.19.21.
+
+### Added — setup that does not need fixing afterwards
+
+- **An IP-only install can still get a real certificate.** With no domain the
+  installer offers a magic-DNS hostname (`<ip>.sslip.io`), which Let's Encrypt
+  will issue for — so the panel opens with no browser warning on a server that
+  owns no domain. Offered rather than imposed, with its cost stated: sslip.io is
+  not on the Public Suffix List, so its certificate quota is shared globally.
+- **The preset wizard checks its prerequisites first.** Token, zone, zone SSL
+  mode, WebSockets and every CDN port are verified before anything is created,
+  so a failing setup is one round of fixes instead of one per attempt.
+- **The preset verifies the CDN half instead of announcing it.** Cloudflare's own
+  5xx codes are translated into the thing to fix — 521 nothing listening, 522 a
+  filtered port, 525 an origin not serving TLS, 526 Full (Strict) against a
+  self-signed origin.
+- **REALITY dests are measured, not guessed.** A hardcoded list of four names is
+  replaced by a probe that connects and reports TLS 1.3, X25519, ALPN and the
+  certificate chain size. That list was wrong in both directions: it blocked
+  `www.amazon.com`, which works, and allowed `www.microsoft.com`, which does not
+  — its 8126-byte certificate chain is too large for REALITY to relay, so the
+  client authenticates and the tunnel then carries nothing.
+
+### Added — ForgeEdge
+
+- **A real panel for the Cloudflare Worker.** Sixty-odd settings that were
+  reachable only through a raw JSON textarea now have grouped controls, search,
+  a light and dark theme, and a save bar; the raw JSON remains as an Expert tab.
+- **ForgeEdge Bot** — a new standalone single-binary Telegram bot
 
 ### Added
 - **ForgeEdge Bot** — a new standalone single-binary Telegram bot
@@ -29,6 +100,31 @@
 - On the panel side, `internal/edge` gained a config editor on the Worker client
   (`GetConfigRaw`/`PutConfigRaw`) plus clean-IP refresh/probe and external-sub
   refresh helpers, all authenticated by the machine push token.
+
+### Fixed — the ones worth naming
+
+- A **Railway deploy came up with no working config**, three ways at once; the
+  PaaS image also stopped building at one point and nothing in the suite could
+  see it. Both are now guarded by tests that read the Dockerfiles.
+- An **inbound the panel could not bind was dropped silently** — enabled in the
+  UI, nothing listening, and no log line anywhere.
+- **REALITY links carried an SNI the server refuses**, and an imported
+  subscription could kill the core.
+- **ShadowTLS clients connected, mimicked TLS perfectly, and carried nothing.**
+- **Brook inbounds that had crashed were reported as running**, and nothing
+  brought back an inbound that went away on its own.
+- **A wedged core was supervised forever as "running".**
+- The panel's **own outbound calls went direct**, failing on exactly the networks
+  the proxy exists for, and it would fetch any address an operator typed —
+  including the cloud metadata service.
+- **The navigation showed everyone everything**: the panel knew who was signed in
+  and offered every tab regardless of role.
+- **Telegram reported every send as successful**, and its token could only be set
+  by restarting.
+- The **TLS-fragment toggle was on and sing-box subscribers got no fragmentation**.
+- **Traffic accounting threw away the uplink/downlink split**, and one user
+  tripping a quota dropped every connection on the node.
+
 
 ## v1.19.1 — Telegram bot setup made discoverable
 

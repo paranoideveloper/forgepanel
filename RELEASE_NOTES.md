@@ -1,3 +1,99 @@
+# ForgePanel v1.20.0 — Release Notes
+
+> **Note on this file.** It stopped being maintained after v1.10.0; v1.11 through
+> v1.19 have no section here. `CHANGELOG.md` is the file that is current and
+> covers every release. This section resumes the practice rather than
+> back-filling nine versions from commit messages.
+
+175 commits since v1.19.1. Three of them are worth a longer explanation than a
+changelog line, because in each case the *diagnosis* is the useful part.
+
+## REALITY was never broken — the dest was
+
+Reported as "all REALITY configs are not working". Reproduced live, xray 26.3.27
+at both ends, using the panel's own renderers. With `dest=www.microsoft.com` the
+server logs:
+
+```
+REALITY remoteAddr: …  hs.c.AuthKey[:16]: […]        <- the client authenticated
+REALITY remoteAddr: …  hs.c.ClientVer: [26 3 27]
+len(s2cSaved): 4262    Certificate: 8273             <- wants 8273, has 4262
+hs.c.isHandshakeComplete.Load(): false
+REALITY: processed invalid connection: handshake did not complete successfully
+```
+
+REALITY does not terminate the client's TLS — it *relays* the borrowed site's
+handshake. Microsoft's certificate chain is too large to relay, so the client
+authenticates perfectly and the tunnel then carries nothing. Every field of the
+config is correct and the key pair verifies against xray's own `x25519` tool,
+which is exactly why this reads as "REALITY is broken".
+
+A/B on one server, changing only the dest:
+
+| dest | chain | result |
+|---|---|---|
+| www.microsoft.com | 8126 B | **fails** |
+| dl.google.com | 6683 B | works |
+| www.amazon.com | 5973 B | works |
+| addons.mozilla.org | 5704 B | works |
+| gateway.icloud.com | 4495 B | works |
+| www.apple.com | 4484 B | works |
+| www.cloudflare.com | 3536 B | works — 7.4 MB/s through the tunnel |
+
+The panel already defaulted to `www.cloudflare.com`, so a default install was
+never affected. What was wrong was how it judged a dest an operator typed: four
+hardcoded names, with a stated reason that was not the failure, and a list that
+blocked `www.amazon.com` (works) while allowing `www.microsoft.com` (does not).
+`internal/realityprobe` now connects and measures.
+
+## "The CDN configs don't work" is usually a 525 you cannot see
+
+Measured on a live Cloudflare zone, proxied record, port 8443:
+
+```
+plain-HTTP origin, tested directly   -> 200
+the same origin, through Cloudflare  -> 525
+```
+
+Cloudflare speaks HTTPS to the origin on **every** proxied HTTPS port. So an
+origin that answers perfectly when the operator tests it returns an error page to
+every client, and nothing on the origin side says so. Only six HTTPS ports are
+proxied at all — 443, 2053, 2083, 2087, 2096, 8443 — and an inbound on any other
+is unreachable through the CDN while its DNS record looks perfectly correct.
+
+The preset wizard now asks the edge after it builds, and translates Cloudflare's
+own 5xx codes into the thing to fix. It also checks the prerequisites *before*
+building, so a failing setup is one round of fixes rather than one per attempt —
+including the zone's SSL mode, because Flexible cannot work on a port other than
+443 and guarantees this exact failure.
+
+## An install with no domain can still end with a padlock
+
+A certificate authority will not issue for a bare IP on the ordinary profile, so
+"no domain" used to mean plain HTTP or a self-signed certificate and a browser
+warning. `sslip.io` resolves `<ip-with-dashes>.sslip.io` back to that IP, which
+is a real hostname pointing at the server and needs no registration — enough for
+Let's Encrypt over HTTP-01. Proven with the panel's own library against staging,
+on a server owning no domain:
+
+```
+ISSUED for [94-183-174-38.sslip.io]
+  issuer: (STAGING) Ersatz Emmer YR2
+  valid:  2026-08-30 -> 2026-11-28
+```
+
+Offered, never imposed, with the cost on screen: `sslip.io` is **not** on the
+Public Suffix List, so Let's Encrypt counts every `*.sslip.io` name against one
+registered-domain quota shared by every user of the service worldwide. Issuance
+can fail for reasons that have nothing to do with your server.
+
+The better long-term answer is known and not yet built: Let's Encrypt's
+`shortlived` profile issues for bare IP addresses (160-hour validity), which
+removes the third party entirely. `autocert` supports neither profiles nor IP
+identifiers, so it needs a raw `acme.Client` path.
+
+---
+
 # ForgePanel v1.10.0 — Release Notes
 
 ## Feature: "Pattern" (unsafe-uTLS) subscription variant — normal + patt

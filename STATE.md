@@ -1,4 +1,82 @@
-# ForgePanel Round-2 Remediation — STATE
+# ForgePanel — STATE
+
+Where the project actually is, for whoever picks it up next. Updated at v1.20.0.
+
+## Now
+
+**v1.20.0**, 175 commits past v1.19.1. `main` is the only branch that matters;
+the round-2 remediation work this file used to track finished long ago and its
+notes are kept below as history.
+
+What the panel is today: a single Go binary that supervises xray, sing-box and
+brook, serves 13 protocols, **enrols other servers as remote nodes over mTLS**,
+runs on a VPS *or* on Railway / Render / Fly / Koyeb, and speaks English and
+Persian with the layout mirrored.
+
+## The one command that means "green"
+
+    make check GO=/usr/local/go1.25/bin/go
+
+It runs `bun run check && bun run test` (svelte-check + vitest) BEFORE the Go
+suite. `go test ./...` alone is NOT the gate — it serves cached results and
+cannot see a frontend break or an i18n key drift, and this project has shipped
+red twice because of exactly that.
+
+Frontend tests are `bun run test`, not `bun test`.
+
+## Things that are true and non-obvious
+
+- **Node.Address is the BIND address; Node.Domain is what clients dial.**
+  Conflating them behind a CDN gives an inbound that either cannot bind or
+  advertises the raw origin IP. `substituteAddr` is what swaps one for the other
+  in exported links.
+- **REALITY fails on a dest whose certificate chain is too large.** It relays
+  the borrowed handshake, so `www.microsoft.com` (8126 bytes) authenticates the
+  client perfectly and then carries nothing. `internal/realityprobe` measures a
+  candidate instead of consulting a list.
+- **Cloudflare speaks HTTPS to the origin on every proxied HTTPS port.** A
+  plain-HTTP origin behind one answers 200 when you test it directly and 525
+  through the edge. `internal/cdncheck` translates the edge's 5xx codes into the
+  thing to fix.
+- **Only six HTTPS ports are proxied**: 443, 2053, 2083, 2087, 2096, 8443.
+- **The PaaS split is two truths**: the stored node keeps `hostname:443:TLS` so
+  links and QR codes stay correct, while the engine's copy binds loopback.
+- **Migrations are append-only** and versions are never renumbered.
+- `pkill -f <pattern>` matches the killing shell's own argv. Use PID files.
+
+## Where the subsystems live
+
+    internal/api          HTTP surface, ~200 endpoints (GET /admin/api-map)
+    internal/core         engine supervision, adapters, per-inbound reconcile
+    internal/protocol     model + render (xray/sing-box) + export (links/clash)
+    internal/deploy       what THIS deployment can do; drives UI removal
+    internal/realityprobe measure a REALITY dest
+    internal/cdncheck     ask Cloudflare why an origin is unreachable
+    internal/warp         Cloudflare WARP as a managed outbound
+    internal/edge         the ForgeEdge Worker client + embedded bundle
+    internal/nodeca       the node control plane's certificate authority
+    frontend/src          Svelte 5; i18n en+fa with guard tests
+    deploy/cloudflare/forgeedge   the Worker itself (bun; 371 tests)
+
+The Worker bundle is COMMITTED at `internal/edge/assets/forgeedge.worker.js` and
+embedded with `//go:embed`. Rebuild it with `make edge-bundle` after changing the
+Worker, using **bun 1.4.0** — CI compares the artifact byte for byte and bun's
+minifier renames identifiers between releases.
+
+## Open, and worth knowing
+
+- The **550-row gap ledger** lives at `/home/ubuntu/fp-program/docs/` with
+  `mark.py`. 264 done, 288 open at v1.20.0.
+- **RELEASE_NOTES.md stopped being maintained after v1.10.0.** CHANGELOG.md is
+  the one that is current.
+- Let's Encrypt's `shortlived` profile issues certificates for **bare IP
+  addresses** (160-hour validity). That would remove the third-party dependency
+  from the no-domain install path, but `autocert` supports neither profiles nor
+  IP identifiers, so it needs a raw `acme.Client` path and ~6-day renewal.
+
+---
+
+# History — round-2 remediation (finished)
 
 Branch: `fix/round2-remediation`. Working against **v1.3.2** (current `main`),
 not the `v1.1.0` the round-2 prompt was written against — see ADR-0001.
