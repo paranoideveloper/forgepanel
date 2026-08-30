@@ -30,3 +30,4 @@ dist/
 # material and not a credential to anything, and it still must never be in a
 # commit — least of all in the public mirror.
 internal/api/certs/
+.singbox-stage/

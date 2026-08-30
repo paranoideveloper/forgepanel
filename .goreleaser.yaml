@@ -25,7 +25,12 @@ before:
     # and their users' quotas cannot be enforced. The script pins the same
     # upstream version, keeps the official tag set, and builds reproducibly:
     # rebuild it yourself and the checksum matches.
-    - sh -c 'TARGETS="amd64 arm64" ./scripts/build-singbox.sh dist/singbox'
+    # Staged OUTSIDE dist/. goreleaser 2.x checks that dist is empty AFTER the
+    # before-hooks run, so a hook that writes into dist fails the build with
+    # "dist is not empty, remove it before running goreleaser or use the --clean
+    # flag" — advice that cannot help, because --clean is already in use and the
+    # hook repopulates dist after the clean.
+    - sh -c 'TARGETS="amd64 arm64" ./scripts/build-singbox.sh .singbox-stage'
 
 builds:
   - id: forgepanel
@@ -206,12 +211,12 @@ release:
     - glob: ./packaging/forgeedge-bot.env.example
     # The sing-box we build, per architecture, plus its checksums. install.sh
     # places it beside the panel binary, where binmgr finds and verifies it.
-    - glob: ./dist/singbox/sing-box-*-linux-*
-    - glob: ./dist/singbox/checksums.txt
+    - glob: ./.singbox-stage/sing-box-*-linux-*
+    - glob: ./.singbox-stage/checksums.txt
       name_template: singbox-checksums.txt
     # sing-box is GPL-3.0; conveying the binary requires its notices.
-    - glob: ./dist/singbox/sing-box-LICENSE
-    - glob: ./dist/singbox/sing-box-NOTICE.md
+    - glob: ./.singbox-stage/sing-box-LICENSE
+    - glob: ./.singbox-stage/sing-box-NOTICE.md
   prerelease: auto
   footer: |
     ## Install

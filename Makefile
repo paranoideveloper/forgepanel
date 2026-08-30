@@ -110,7 +110,7 @@ snapshot:
 	goreleaser release --snapshot --clean
 
 clean:
-	rm -rf $(BIN) dist
+	rm -rf $(BIN) dist .singbox-stage
 
 help:
 	@grep -E '^[a-z-]+:' $(MAKEFILE_LIST) | cut -d: -f1 | sort -u
