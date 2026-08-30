@@ -39,16 +39,16 @@ func (s *Server) handleSetupStatus(c *gin.Context) {
 // disables itself after completion, and the one-time token is invalidated.
 func (s *Server) handleSetupInit(c *gin.Context) {
 	if s.db == nil {
-		c.JSON(501, gin.H{"error": "this server has no user database"})
+		fail(c, 501, "this server has no user database")
 		return
 	}
 	ip := c.ClientIP()
 	if s.login != nil && !s.login.Allowed(ip) {
-		c.JSON(429, gin.H{"error": "too many attempts; try again later"})
+		fail(c, 429, "too many attempts; try again later")
 		return
 	}
 	if !s.setupRequired() {
-		c.JSON(409, gin.H{"error": "setup already completed"})
+		fail(c, 409, "setup already completed")
 		return
 	}
 	var req struct {
@@ -58,7 +58,7 @@ func (s *Server) handleSetupInit(c *gin.Context) {
 		PasswordConfirm string `json:"password_confirm"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	p := s.cfg.Panel()
@@ -68,37 +68,37 @@ func (s *Server) handleSetupInit(c *gin.Context) {
 		if s.login != nil {
 			s.login.Fail(ip)
 		}
-		c.JSON(401, gin.H{"error": "invalid setup token"})
+		fail(c, 401, "invalid setup token")
 		return
 	}
 	if exp, err := time.Parse(time.RFC3339, p.SetupExpires); err == nil && time.Now().After(exp) {
-		c.JSON(401, gin.H{"error": "setup token expired — restart the panel to mint a new one"})
+		fail(c, 401, "setup token expired — restart the panel to mint a new one")
 		return
 	}
 
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		c.JSON(400, gin.H{"error": "username is required"})
+		fail(c, 400, "username is required")
 		return
 	}
 	if req.Password != req.PasswordConfirm {
-		c.JSON(400, gin.H{"error": "passwords do not match"})
+		fail(c, 400, "passwords do not match")
 		return
 	}
 	if err := validatePasswordPolicy(req.Password); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "hash password"})
+		fail(c, 500, "hash password")
 		return
 	}
 	if err := s.db.CreateAdmin(&store.Admin{
 		Username: username, PasswordHash: hash, Role: store.RoleOwner,
 	}); err != nil {
-		c.JSON(500, gin.H{"error": "create admin"})
+		fail(c, 500, "create admin")
 		return
 	}
 

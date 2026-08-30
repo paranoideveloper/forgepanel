@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/forgepanel/forgepanel/internal/version"
@@ -38,13 +39,13 @@ func (s *Server) masterKey() string {
 func (s *Server) handleCreateBackup(c *gin.Context) {
 	master := s.masterKey()
 	if master == "" {
-		c.JSON(500, gin.H{"error": "this data directory has no master key, so nothing can be encrypted"})
+		fail(c, 500, "this data directory has no master key, so nothing can be encrypted")
 		return
 	}
 	files := backup.PanelFiles(s.cfg.DataDir)
 	blob, err := backup.CreateWithManifest(master, s.cfg.DataDir, files, s.backupManifest())
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	name := fmt.Sprintf("forgepanel-%s.fpbk", time.Now().UTC().Format("20060102-150405"))
@@ -62,42 +63,42 @@ func (s *Server) handleCreateBackup(c *gin.Context) {
 func (s *Server) handleVerifyBackup(c *gin.Context) {
 	master := s.masterKey()
 	if master == "" {
-		c.JSON(500, gin.H{"error": "this data directory has no master key"})
+		fail(c, 500, "this data directory has no master key")
 		return
 	}
 	file, err := c.FormFile("backup")
 	if err != nil {
-		c.JSON(400, gin.H{"error": "attach the backup as the form field 'backup'"})
+		fail(c, 400, "attach the backup as the form field 'backup'")
 		return
 	}
 	// A backup is a few MB; a much larger upload is not one, and reading it
 	// would be a memory exhaustion the panel does not need to accept.
 	const maxUpload = 256 << 20
 	if file.Size > maxUpload {
-		c.JSON(http.StatusRequestEntityTooLarge,
-			gin.H{"error": "that file is larger than any panel backup; refusing to read it"})
+		fail(c, http.StatusRequestEntityTooLarge,
+			"that file is larger than any panel backup; refusing to read it")
 		return
 	}
 	f, err := file.Open()
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	defer f.Close()
 	blob := make([]byte, file.Size)
 	if _, err := io.ReadFull(f, blob); err != nil {
-		c.JSON(400, gin.H{"error": "could not read the upload: " + err.Error()})
+		fail(c, 400, "could not read the upload: "+err.Error())
 		return
 	}
 
 	names, err := backup.Inspect(master, blob)
 	if err != nil {
 		// The most common cause by far, and the least obvious.
-		c.JSON(400, gin.H{
-			"error": "this backup could not be opened: " + err.Error() +
+		apierr.Fail(c, &apierr.Error{Op: "backup-restore", Kind: apierr.KindValidation,
+			Message: "this backup could not be opened: " + err.Error() +
 				". The usual cause is that it was taken on a different panel, whose master key this one does not have.",
-			"ok": false,
-		})
+			Cause:   err,
+			Details: map[string]any{"ok": false}})
 		return
 	}
 	s.audit(c, "backup.verify", fmt.Sprintf("%s (%d files)", file.Filename, len(names)))

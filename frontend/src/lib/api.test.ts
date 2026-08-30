@@ -82,6 +82,36 @@ describe('API Client', () => {
     }
   });
 
+  it('lifts kind and missing_scope, and puts the missing permission in the message', async () => {
+    // The backend types every refusal now — kind, remediation, and the exact
+    // provider permission that was missing. This layer used to lift only code,
+    // fields and remediation, so a Cloudflare refusal arrived carrying the one
+    // checkbox to tick and every caller showed "Forbidden" instead. The scope
+    // goes into `message` as well as onto the object because seventy-odd views
+    // toast `e.message` and none of them can be expected to know about a field
+    // that did not exist yesterday.
+    (globalThis as any).fetch = async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: 'your token cannot read zones',
+        kind: 'permission',
+        op: 'find-zone',
+        missing_scope: 'Zone → Zone → Read',
+        remediation: 'mint a new token with that permission'
+      })
+    } as unknown as Response);
+
+    try {
+      await apiFetch('/test');
+      throw new Error('should have rejected');
+    } catch (e: any) {
+      expect(e.kind).toBe('permission');
+      expect(e.missingScope).toBe('Zone → Zone → Read');
+      expect(e.message).toContain('Zone → Zone → Read');
+    }
+  });
+
   it('handles HTTP error responses when json parsing fails', async () => {
     (globalThis as any).fetch = async () => ({
       ok: false,

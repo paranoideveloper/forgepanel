@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/netegress"
 )
@@ -32,23 +33,22 @@ func (s *Server) handleSetEgressSettings(c *gin.Context) {
 		Proxy string `json:"proxy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// Validate BEFORE persisting. A stored proxy that cannot be parsed would be
 	// applied on the next boot and take every outbound call down with it, and
 	// the panel would come up looking healthy.
 	if err := netegress.Set(req.Proxy); err != nil {
-		c.JSON(400, gin.H{
-			"error":       err.Error(),
-			"remediation": "Use http://host:port, https://host:port, socks5://host:port or socks5h://host:port, optionally with user:password@.",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "egress-settings", Kind: apierr.KindValidation,
+			Message: err.Error(), Cause: err,
+			Remediation: "Use http://host:port, https://host:port, socks5://host:port or socks5h://host:port, optionally with user:password@."})
 		return
 	}
 	p := s.cfg.Panel()
 	p.EgressProxy = req.Proxy
 	if err := config.SavePanelSettings(s.cfg.DataDir, p); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "settings.egress_proxy", redactProxy(req.Proxy))

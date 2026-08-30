@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/job"
@@ -138,7 +139,8 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 // light-server mode, or tests). Every engine-dependent route uses this shape so
 // callers can branch on the code, and nothing ever dereferences a nil engine.
 func (s *Server) engineUnavailable(c *gin.Context) {
-	c.JSON(503, gin.H{"error": "proxy engine is not available on this server", "code": "engine_unavailable"})
+	apierr.Fail(c, &apierr.Error{Op: "engine-op", Kind: apierr.KindUnavailable,
+		Code: "engine_unavailable", Message: "proxy engine is not available on this server"})
 }
 
 // reloadEngines regenerates and hot-applies the engine configs for all enabled

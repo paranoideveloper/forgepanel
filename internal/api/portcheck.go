@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -433,9 +434,9 @@ func (s *Server) portCollisionGuard() gin.HandlerFunc {
 			}
 		}
 		if cf := s.portConflictFor(&n, exclude); cf != nil {
-			c.AbortWithStatusJSON(http.StatusConflict, gin.H{
-				"error": cf.Message, "code": "port_conflict", "conflict": cf,
-			})
+			abortFailWith(c, &apierr.Error{Op: "port-guard", Kind: apierr.KindConflict,
+				Code: "port_conflict", Message: cf.Message,
+				Details: map[string]any{"conflict": cf}})
 			return
 		}
 		c.Next()
@@ -455,7 +456,7 @@ func (s *Server) registerPortRoutes(g *gin.RouterGroup) {
 func (s *Server) handlePortCheck(c *gin.Context) {
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	var exclude uint
@@ -487,7 +488,7 @@ func (s *Server) handleListeningPorts(c *gin.Context) {
 	if v := c.Query("port"); v != "" {
 		p, err := strconv.Atoi(v)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "port must be a number"})
+			fail(c, 400, "port must be a number")
 			return
 		}
 		filtered := make([]firewall.Listener, 0, 2)

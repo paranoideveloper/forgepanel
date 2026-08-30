@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -24,7 +25,7 @@ const maxTokenLifetime = 5 * 365 * 24 * time.Hour
 func (s *Server) handleListAPITokens(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		fail(c, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	// An owner sees every token; anyone else sees only their own. A reseller
@@ -36,7 +37,7 @@ func (s *Server) handleListAPITokens(c *gin.Context) {
 	}
 	toks, err := s.db.ListAPITokens(scopeTo)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if toks == nil {
@@ -54,7 +55,7 @@ func (s *Server) handleListAPITokens(c *gin.Context) {
 func (s *Server) handleCreateAPIToken(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		fail(c, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	var req struct {
@@ -67,12 +68,12 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 		ExpiresIn string `json:"expires_in"` // Go duration, e.g. "720h"
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "a token needs a name: a list of anonymous credentials cannot be audited or safely revoked"})
+		fail(c, http.StatusBadRequest,
+			"a token needs a name: a list of anonymous credentials cannot be audited or safely revoked")
 		return
 	}
 	scope := store.TokenScope(req.Scope)
@@ -83,10 +84,9 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 		}
 	}
 	if !valid {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  fmt.Sprintf("unknown scope %q", req.Scope),
-			"scopes": store.ValidScopes(),
-		})
+		apierr.Fail(c, &apierr.Error{Op: "api-token-create", Kind: apierr.KindValidation,
+			Message: fmt.Sprintf("unknown scope %q", req.Scope),
+			Details: map[string]any{"scopes": store.ValidScopes()}})
 		return
 	}
 
@@ -94,13 +94,13 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 	if req.ExpiresIn != "" {
 		d, err := time.ParseDuration(req.ExpiresIn)
 		if err != nil || d <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "expires_in must be a positive Go duration, e.g. \"720h\" for 30 days"})
+			fail(c, http.StatusBadRequest,
+				"expires_in must be a positive Go duration, e.g. \"720h\" for 30 days")
 			return
 		}
 		if d > maxTokenLifetime {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("expires_in exceeds the %s maximum", maxTokenLifetime)})
+			fail(c, http.StatusBadRequest,
+				fmt.Sprintf("expires_in exceeds the %s maximum", maxTokenLifetime))
 			return
 		}
 		t := time.Now().Add(d)
@@ -109,7 +109,7 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 
 	plaintext, prefix, hash, err := auth.NewAPIToken()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	tok := &store.APIToken{
@@ -117,7 +117,7 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 		Prefix: prefix, Hash: hash, ExpiresAt: expires,
 	}
 	if err := s.db.CreateAPIToken(tok); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -137,17 +137,17 @@ func (s *Server) handleCreateAPIToken(c *gin.Context) {
 func (s *Server) handleRevokeAPIToken(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		fail(c, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token id"})
+		fail(c, http.StatusBadRequest, "invalid token id")
 		return
 	}
 	toks, err := s.db.ListAPITokens(0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	var found *store.APIToken
@@ -157,18 +157,18 @@ func (s *Server) handleRevokeAPIToken(c *gin.Context) {
 		}
 	}
 	if found == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such token"})
+		fail(c, http.StatusNotFound, "no such token")
 		return
 	}
 	// Anyone may revoke their own; only an owner may revoke someone else's.
 	// Revocation is the safe direction, so this is permissive on purpose — the
 	// dangerous mistake is being unable to kill a leaked credential quickly.
 	if found.AdminID != claims.AdminID && claims.Role != string(store.RoleOwner) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "this token belongs to another account"})
+		fail(c, http.StatusForbidden, "this token belongs to another account")
 		return
 	}
 	if err := s.db.RevokeAPIToken(found.ID, time.Now()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.auditNote(c, "apitoken.revoke", found.Name, "prefix: "+found.Prefix)

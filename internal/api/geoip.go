@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/geoip"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/gin-gonic/gin"
@@ -24,10 +25,9 @@ func (s *Server) handleGeoIP(c *gin.Context) {
 	defer cancel()
 	cc, err := geoip.LookupCountry(ctx, host)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error":       "country lookup failed: " + err.Error(),
-			"remediation": "the panel host may be unable to reach a geoip service; type the 2-letter code manually.",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "geoip-lookup", Kind: apierr.KindNetwork,
+			Message: "country lookup failed: " + err.Error(), Cause: err,
+			Remediation: "the panel host may be unable to reach a geoip service; type the 2-letter code manually."})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"country_code": cc, "flag": model.CountryFlag(cc), "host": host})

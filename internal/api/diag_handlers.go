@@ -38,7 +38,7 @@ func (s *Server) usedPortsExcept(exceptID uint) map[int]string {
 func (s *Server) handleValidateInbound(c *gin.Context) {
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	findings := diag.StaticValidate(&n, s.usedPortsExcept(0))
@@ -51,12 +51,12 @@ func (s *Server) handleVerifyInbound(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	n, err := in.Node()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)

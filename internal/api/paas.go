@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
@@ -566,7 +567,7 @@ func (s *Server) setPanelDomain(host string) error {
 //
 // Refusing at the door also means the reason arrives while the operator is
 // still looking at the form, instead of in a column they have to notice later.
-func (s *Server) paasCreateRefusal(n *model.Node) gin.H {
+func (s *Server) paasCreateRefusal(n *model.Node) *apierr.Error {
 	pa := s.cfg.PaaS()
 	if !pa.Enabled || n == nil {
 		return nil
@@ -578,15 +579,18 @@ func (s *Server) paasCreateRefusal(n *model.Node) gin.H {
 	if why == "" {
 		return nil
 	}
-	return gin.H{
-		"error": fmt.Sprintf("%s over %s cannot be served on %s: %s",
+	return &apierr.Error{
+		Op:     "inbound-write",
+		Kind:   apierr.KindValidation,
+		Status: http.StatusBadRequest,
+		Code:   "unsupported_on_platform",
+		Message: fmt.Sprintf("%s over %s cannot be served on %s: %s",
 			n.Protocol, transportLabel(n.Transport.Network), platformLabel(pa.Platform), why),
-		"code": "unsupported_on_platform",
-		"remediation": "This deployment reaches the internet through one shared HTTP port, so an inbound " +
+		Remediation: "This deployment reaches the internet through one shared HTTP port, so an inbound " +
 			"has to be one a URL path can route: VLESS, VMess or Trojan over ws, httpupgrade or xhttp. " +
 			"Use \"Create all platform configs\" to generate the whole set at once. " +
 			"For Hysteria2, TUIC, WireGuard, REALITY or any raw-TCP protocol, use a server that owns its ports.",
-		"supported": paasSupportedCombinations(),
+		Details: map[string]any{"supported": paasSupportedCombinations()},
 	}
 }
 

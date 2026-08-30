@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/nodeca"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -133,38 +134,42 @@ type bootstrapRequest struct {
 func (s *Server) handleNodeBootstrap(c *gin.Context) {
 	var req bootstrapRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Token) == "" || strings.TrimSpace(req.CSRPEM) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "token and csr_pem are both required"})
+		fail(c, http.StatusBadRequest, "token and csr_pem are both required")
 		return
 	}
 	n, err := s.db.NodeByBootstrapHash(hashBootstrap(req.Token))
 	if err != nil {
 		// One message for "no such token" and "expired": distinguishing them
 		// turns this into an oracle for which tokens ever existed.
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "the bootstrap token is not valid or has expired"})
+		fail(c, http.StatusUnauthorized, "the bootstrap token is not valid or has expired")
 		return
 	}
 	if n.BootstrapExpires == nil || time.Now().After(*n.BootstrapExpires) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "the bootstrap token is not valid or has expired"})
+		fail(c, http.StatusUnauthorized, "the bootstrap token is not valid or has expired")
 		return
 	}
 
 	block, _ := pem.Decode([]byte(req.CSRPEM))
 	if block == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "csr_pem is not PEM"})
+		fail(c, http.StatusBadRequest, "csr_pem is not PEM")
 		return
 	}
 	ca, err := s.nodeCA()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "the node CA is unavailable", "detail": err.Error()})
+		apierr.Fail(c, &apierr.Error{Op: "node-cert-sign", Kind: apierr.KindServer,
+			Message: "the node CA is unavailable", Cause: err,
+			Details: map[string]any{"detail": err.Error()}})
 		return
 	}
 	issued, err := ca.SignNodeCSR(block.Bytes, n.ID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "the certificate request was refused", "detail": err.Error()})
+		apierr.Fail(c, &apierr.Error{Op: "node-cert-sign", Kind: apierr.KindValidation,
+			Message: "the certificate request was refused", Cause: err,
+			Details: map[string]any{"detail": err.Error()}})
 		return
 	}
 
@@ -177,7 +182,7 @@ func (s *Server) handleNodeBootstrap(c *gin.Context) {
 	n.CertNotAfter = &issued.NotAfter
 	n.Enrolled = true
 	if err := s.db.SaveNode(n); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -199,32 +204,34 @@ func (s *Server) handleNodeRenew(c *gin.Context) {
 		if err != nil {
 			detail = err.Error()
 		}
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":  "renewal requires the node's current client certificate",
-			"detail": detail})
+		apierr.Fail(c, &apierr.Error{Op: "node-cert-renew", Kind: apierr.KindAuth,
+			Message: "renewal requires the node's current client certificate",
+			Details: map[string]any{"detail": detail}})
 		return
 	}
 	var req struct {
 		CSRPEM string `json:"csr_pem"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.CSRPEM) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "csr_pem is required"})
+		fail(c, http.StatusBadRequest, "csr_pem is required")
 		return
 	}
 	n, err := s.db.NodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "this certificate names a node that no longer exists"})
+		fail(c, http.StatusUnauthorized, "this certificate names a node that no longer exists")
 		return
 	}
 	block, _ := pem.Decode([]byte(req.CSRPEM))
 	if block == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "csr_pem is not PEM"})
+		fail(c, http.StatusBadRequest, "csr_pem is not PEM")
 		return
 	}
 	ca, _ := s.nodeCA()
 	issued, err := ca.SignNodeCSR(block.Bytes, n.ID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "the certificate request was refused", "detail": err.Error()})
+		apierr.Fail(c, &apierr.Error{Op: "node-cert-sign", Kind: apierr.KindValidation,
+			Message: "the certificate request was refused", Cause: err,
+			Details: map[string]any{"detail": err.Error()}})
 		return
 	}
 	// Revoke the certificate being replaced. Leaving it valid until it expires

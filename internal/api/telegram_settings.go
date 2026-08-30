@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/telegram"
 )
@@ -177,12 +179,12 @@ type telegramSettingsRequest struct {
 // handleSetTelegramSettings persists the token and chat ids and restarts the bot.
 func (s *Server) handleSetTelegramSettings(c *gin.Context) {
 	if s.db == nil {
-		c.JSON(501, gin.H{"error": "no store"})
+		fail(c, 501, "no store")
 		return
 	}
 	var req telegramSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 
@@ -195,18 +197,18 @@ func (s *Server) handleSetTelegramSettings(c *gin.Context) {
 	if req.ChatIDs != nil {
 		chats = parseChatIDs(*req.ChatIDs)
 		if strings.TrimSpace(*req.ChatIDs) != "" && len(chats) == 0 {
-			c.JSON(422, gin.H{
-				"error": "no usable chat id in that list",
-				"remediation": "a chat id is a whole number, negative for a group. " +
-					"Message @userinfobot from the account that should receive alerts to find yours.",
-			})
+			apierr.Fail(c, &apierr.Error{Op: "telegram-settings", Kind: apierr.KindValidation,
+				Status:  http.StatusUnprocessableEntity,
+				Message: "no usable chat id in that list",
+				Remediation: "a chat id is a whole number, negative for a group. " +
+					"Message @userinfobot from the account that should receive alerts to find yours."})
 			return
 		}
 	}
 
 	if req.Test {
 		if err := s.sendTelegramTest(token, chats); err != nil {
-			c.JSON(422, telegramFailure(err))
+			apierr.Fail(c, telegramFailure(err))
 			return
 		}
 	}
@@ -226,10 +228,12 @@ func (s *Server) handleSetTelegramSettings(c *gin.Context) {
 	if err := s.knobs().SetAll(pending); err != nil {
 		var ve *settings.ValidationError
 		if errors.As(err, &ve) {
-			c.JSON(400, gin.H{"error": ve.Error(), "fields": ve.Fields()})
+			// Per-input detail, so the UI can put each message under the field
+			// that caused it rather than one toast for the whole form.
+			failFields(c, 400, ve.Error(), ve.Fields())
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.restartBot()
@@ -260,7 +264,7 @@ func (s *Server) handleTestTelegram(c *gin.Context) {
 		chats = parseChatIDs(*req.ChatIDs)
 	}
 	if err := s.sendTelegramTest(token, chats); err != nil {
-		c.JSON(422, telegramFailure(err))
+		apierr.Fail(c, telegramFailure(err))
 		return
 	}
 	s.audit(c, "settings.telegram.test", fmt.Sprintf("%d chat(s)", len(chats)))
@@ -298,16 +302,21 @@ func (s *Server) sendTelegramTest(token string, chats []int64) error {
 }
 
 // telegramFailure turns a send error into a body that says what to do.
-func telegramFailure(err error) gin.H {
-	out := gin.H{"error": err.Error(), "ok": false}
-	var se *telegram.SendError
-	if errors.As(err, &se) {
-		if r := se.Remediation(); r != "" {
-			out["remediation"] = r
-		}
-		out["chat_id"] = se.ChatID
+//
+// The classification of a Bot API refusal (dead token vs. a chat nobody has
+// pressed Start in vs. a bot that was blocked) now lives in apierr alongside
+// every other adapter, so it reaches the UI as a kind rather than as prose only
+// this handler could interpret. The 422 is kept explicitly: "we could not
+// deliver your test message" is the answer to a settings save that was itself
+// well-formed, and the settings tests pin it.
+func telegramFailure(err error) *apierr.Error {
+	e := apierr.From(err)
+	e.Status = http.StatusUnprocessableEntity
+	if e.Details == nil {
+		e.Details = map[string]any{}
 	}
-	return out
+	e.Details["ok"] = false
+	return e
 }
 
 // --- off-box backup delivery ----------------------------------------------

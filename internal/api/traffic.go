@@ -26,13 +26,13 @@ func (s *Server) handleTrafficSeries(c *gin.Context) {
 	}
 	key := strings.TrimSpace(c.Query("key"))
 	if key == "" {
-		c.JSON(400, gin.H{"error": "key is required (a user id, node id or inbound id)"})
+		fail(c, 400, "key is required (a user id, node id or inbound id)")
 		return
 	}
 	// A reseller may only chart their own customers. Without this the series
 	// endpoint is a way to read another tenant's usage one key at a time.
 	if !s.mayReadTrafficFor(c, scope, key) {
-		c.JSON(403, gin.H{"error": "not your user"})
+		fail(c, 403, "not your user")
 		return
 	}
 
@@ -43,11 +43,11 @@ func (s *Server) handleTrafficSeries(c *gin.Context) {
 	}
 	var err error
 	if q.Since, err = parseAuditTime(c.Query("since")); err != nil {
-		c.JSON(400, gin.H{"error": "since: " + err.Error()})
+		fail(c, 400, "since: "+err.Error())
 		return
 	}
 	if q.Until, err = parseAuditTime(c.Query("until")); err != nil {
-		c.JSON(400, gin.H{"error": "until: " + err.Error()})
+		fail(c, 400, "until: "+err.Error())
 		return
 	}
 	if v := strings.TrimSpace(c.Query("limit")); v != "" {
@@ -57,7 +57,7 @@ func (s *Server) handleTrafficSeries(c *gin.Context) {
 	}
 	points, err := s.db.TrafficSeries(q)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	var total int64
@@ -78,12 +78,12 @@ func (s *Server) handleTopConsumers(c *gin.Context) {
 	period := strings.TrimSpace(c.Query("period"))
 	since, err := parseAuditTime(c.Query("since"))
 	if err != nil {
-		c.JSON(400, gin.H{"error": "since: " + err.Error()})
+		fail(c, 400, "since: "+err.Error())
 		return
 	}
 	until, err := parseAuditTime(c.Query("until"))
 	if err != nil {
-		c.JSON(400, gin.H{"error": "until: " + err.Error()})
+		fail(c, 400, "until: "+err.Error())
 		return
 	}
 	if since.IsZero() {
@@ -99,7 +99,7 @@ func (s *Server) handleTopConsumers(c *gin.Context) {
 	}
 	rows, err := s.db.TopConsumers(scope, period, since, until, limit)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	// A reseller sees only their own customers here too.

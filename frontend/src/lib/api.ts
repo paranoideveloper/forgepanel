@@ -8,6 +8,13 @@ export interface ApiError {
   fields?: Record<string, string>;
   /** What the API says to do about it. */
   remediation?: string;
+  /** Classification the whole API now agrees on — "not_found", "permission",
+   *  "no_credentials", "stale_write" — so a caller can branch on the reason
+   *  instead of pattern-matching the sentence or guessing from the status. */
+  kind?: string;
+  /** The exact provider permission that was missing, in the wording that
+   *  provider's own token editor uses, e.g. "Zone → DNS → Edit". */
+  missingScope?: string;
   /** The whole decoded body, for anything the fields above do not name —
    *  `members` on a group conflict, `missing_scope` on a Cloudflare refusal. */
   body?: Record<string, unknown>;
@@ -157,6 +164,21 @@ async function toError(response: Response): Promise<ApiError> {
       err.fields = body.fields as Record<string, string>;
     }
     if (typeof body.remediation === 'string') err.remediation = body.remediation;
+    // kind and missing_scope reached the browser and were dropped here.
+    //
+    // The backend now types every refusal, and the two most useful fields were
+    // the two nothing lifted: a Cloudflare rejection arrived carrying the exact
+    // checkbox to tick and the UI could only show its sentence. Reading them
+    // costs two lines and is the difference between "Forbidden" and "your API
+    // token is missing Zone → DNS → Edit".
+    if (typeof body.kind === 'string') err.kind = body.kind;
+    if (typeof body.missing_scope === 'string') {
+      err.missingScope = body.missing_scope;
+      // Also fold it into the message. Seventy-odd views toast `e.message` and
+      // nothing else; a field none of them read yet would leave the operator
+      // looking at "Forbidden" while the answer sat one property away.
+      err.message = `${message} — missing permission: ${body.missing_scope}`;
+    }
   }
   return err;
 }

@@ -35,7 +35,7 @@ func (s *Server) handleListNodes(c *gin.Context) {
 	q := parseListQuery(c)
 	ns, total, err := s.db.ListNodesPage(q)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	// Node.Healthy is only ever WRITTEN true — on register and on every
@@ -64,7 +64,7 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 		Address string `json:"address"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
-		c.JSON(400, gin.H{"error": "name required"})
+		fail(c, 400, "name required")
 		return
 	}
 	tok, _ := keygen.Password(24)
@@ -79,7 +79,7 @@ func (s *Server) handleEnrollNode(c *gin.Context) {
 		BootstrapHash: hashBootstrap(bootstrap), BootstrapExpires: &expires,
 	}
 	if err := s.db.CreateNode(n); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "node.enroll", req.Name)
@@ -133,7 +133,7 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 		CoreVersion string `json:"core_version"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// mTLS first, then the legacy token. The order matters: a node that holds a
@@ -141,7 +141,7 @@ func (s *Server) handleNodeRegister(c *gin.Context) {
 	// stops the node even while its old token row still exists.
 	n, err := s.authenticateNode(c, req.Token)
 	if err != nil {
-		c.JSON(401, gin.H{"error": err.Error()})
+		failErr(c, 401, err)
 		return
 	}
 	now := time.Now()
@@ -186,12 +186,12 @@ func (s *Server) handleNodeHeartbeat(c *gin.Context) {
 		SingboxStats bool   `json:"singbox_stats"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	n, err := s.authenticateNode(c, req.Token)
 	if err != nil {
-		c.JSON(401, gin.H{"error": "invalid token"})
+		fail(c, 401, "invalid token")
 		return
 	}
 	now := time.Now()
@@ -426,7 +426,7 @@ func (s *Server) handleDeleteNode(c *gin.Context) {
 		s.revokeNodeCert(n)
 	}
 	if err := s.db.DeleteNode(id); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "node.delete", "")

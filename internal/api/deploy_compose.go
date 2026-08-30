@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/deploy"
 )
 
@@ -35,7 +36,9 @@ func (s *Server) handleDeployCompose(c *gin.Context) {
 	if err != nil {
 		// The error names the valid profiles; echo the list too so a UI can
 		// render a picker without a second round trip.
-		c.JSON(400, gin.H{"error": err.Error(), "profiles": deploy.Profiles()})
+		apierr.Fail(c, &apierr.Error{Op: "compose-render", Kind: apierr.KindValidation,
+			Message: err.Error(), Cause: err,
+			Details: map[string]any{"profiles": deploy.Profiles()}})
 		return
 	}
 	c.Header("Content-Disposition", `attachment; filename="docker-compose.yml"`)

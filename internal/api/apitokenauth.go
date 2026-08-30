@@ -23,6 +23,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -58,25 +59,25 @@ func (s *Server) apiTokenAuth() gin.HandlerFunc {
 			return
 		}
 		if s.db == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "API tokens are unavailable"})
+			abortFail(c, http.StatusUnauthorized, "API tokens are unavailable")
 			return
 		}
 
 		prefix, secret, ok := auth.SplitAPIToken(raw)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "malformed API token"})
+			abortFail(c, http.StatusUnauthorized, "malformed API token")
 			return
 		}
 		tok, err := s.db.APITokenByPrefix(prefix)
 		if err != nil || tok == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown API token"})
+			abortFail(c, http.StatusUnauthorized, "unknown API token")
 			return
 		}
 		if !auth.APITokenMatches(secret, tok.Hash) {
 			// Deliberately the SAME message as an unknown prefix. Distinguishing
 			// "this token exists but you got the secret wrong" from "no such
 			// token" tells an attacker which prefixes are real.
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown API token"})
+			abortFail(c, http.StatusUnauthorized, "unknown API token")
 			return
 		}
 		now := time.Now()
@@ -88,30 +89,27 @@ func (s *Server) apiTokenAuth() gin.HandlerFunc {
 			if tok.RevokedAt != nil {
 				msg = "this API token has been revoked"
 			}
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": msg})
+			abortFail(c, http.StatusUnauthorized, msg)
 			return
 		}
 
 		owner, err := s.db.AdminByID(tok.AdminID)
 		if err != nil || owner == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "the account that owns this token no longer exists"})
+			abortFail(c, http.StatusUnauthorized, "the account that owns this token no longer exists")
 			return
 		}
 		if owner.Disabled {
 			// Disabling an account must take its machine credentials with it,
 			// or "disabled" means nothing for the half of access that is
 			// automated.
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "the account that owns this token is disabled"})
+			abortFail(c, http.StatusUnauthorized, "the account that owns this token is disabled")
 			return
 		}
 
 		if tok.Scope.ReadOnly() && !isSafeMethod(c.Request.Method) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "this token is read-only",
-				"scope": string(tok.Scope),
-			})
+			abortFailWith(c, &apierr.Error{Op: "api-token-auth", Kind: apierr.KindPermission,
+				Message: "this token is read-only",
+				Details: map[string]any{"scope": string(tok.Scope)}})
 			return
 		}
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
@@ -159,13 +160,13 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 		AccountID string `json:"cf_account_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	domain := strings.TrimSpace(strings.ToLower(req.Domain))
 	serverIP := s.publicServerIP()
 	if serverIP == "" {
-		c.JSON(500, gin.H{"error": "could not determine this server's public IPv4"})
+		fail(c, 500, "could not determine this server's public IPv4")
 		return
 	}
 
@@ -173,7 +174,7 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	// them present the same pbk/sid (a client can move between them freely).
 	kp, err := keygen.RealityKeys()
 	if err != nil {
-		c.JSON(500, gin.H{"error": "reality keygen: " + err.Error()})
+		fail(c, 500, "reality keygen: "+err.Error())
 		return
 	}
 	sid, _ := keygen.ShortID(8)
@@ -191,7 +192,12 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 		wctx.cdnHost = "edge-" + label + "." + domain
 		if req.CFToken != "" {
 			if err := s.wizardCreateCFRecord(req.CFToken, req.AccountID, domain, wctx.cdnHost, serverIP); err != nil {
-				warnings = append(warnings, "Cloudflare DNS: "+err.Error()+" — create an A record "+wctx.cdnHost+" → "+serverIP+" (proxied) manually")
+				// err.Error() on a *dns.Error is three lines: the message, the
+				// missing token permission, and the fix. The wizard renders each
+				// warning as one <p>, so HTML collapsed all three into a run-on
+				// sentence and the one actionable part — "tick Zone → DNS → Edit"
+				// — was buried mid-line. Rebuild it from the typed fields.
+				warnings = append(warnings, cfWizardWarning(err, wctx.cdnHost, serverIP))
 			}
 		} else {
 			warnings = append(warnings, "no Cloudflare token given — create an A record "+wctx.cdnHost+" → "+serverIP+" (proxied) so the CDN configs resolve")
@@ -279,4 +285,33 @@ func (s *Server) wizardCreateCFRecord(token, accountID, zone, host, ip string) e
 		Comment: "ForgePanel preset wizard",
 	})
 	return err
+}
+
+// cfWizardWarning renders a failed Cloudflare record creation as one legible
+// warning line.
+//
+// The wizard's warnings are plain strings rendered as a single <p> each, so a
+// multi-line err.Error() arrives with its newlines collapsed to spaces. That is
+// where the useful half of a *dns.Error goes to die: the missing token
+// permission and the fix become the tail of a run-on sentence. Reading the typed
+// fields back out puts the required scope first, where it is the first thing the
+// operator sees.
+func cfWizardWarning(err error, host, ip string) string {
+	e := apierr.From(err)
+	var b strings.Builder
+	b.WriteString("Cloudflare DNS: ")
+	b.WriteString(e.Message)
+	if e.MissingScope != "" {
+		b.WriteString(" — the API token is missing the permission ")
+		b.WriteString(e.MissingScope)
+	} else if e.Remediation != "" {
+		b.WriteString(" — ")
+		b.WriteString(e.Remediation)
+	}
+	b.WriteString(". Or create an A record ")
+	b.WriteString(host)
+	b.WriteString(" → ")
+	b.WriteString(ip)
+	b.WriteString(" (proxied) manually.")
+	return b.String()
 }

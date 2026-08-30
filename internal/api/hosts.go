@@ -94,12 +94,12 @@ func (r hostRequest) apply(h *store.InboundHost) {
 func (s *Server) handleListHosts(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid inbound id"})
+		fail(c, http.StatusBadRequest, "invalid inbound id")
 		return
 	}
 	hosts, err := s.db.HostsForInbound(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if hosts == nil {
@@ -112,20 +112,20 @@ func (s *Server) handleListHosts(c *gin.Context) {
 func (s *Server) handleCreateHost(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid inbound id"})
+		fail(c, http.StatusBadRequest, "invalid inbound id")
 		return
 	}
 	if _, err := s.db.InboundByID(uint(id)); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such inbound"})
+		fail(c, http.StatusNotFound, "no such inbound")
 		return
 	}
 	var req hostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if msg := req.validate(); msg != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		fail(c, http.StatusBadRequest, msg)
 		return
 	}
 	// New endpoints are live unless the caller says otherwise: adding one and
@@ -133,7 +133,7 @@ func (s *Server) handleCreateHost(c *gin.Context) {
 	h := &store.InboundHost{InboundID: uint(id), Enabled: true}
 	req.apply(h)
 	if err := s.db.CreateHost(h); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "inbound.host.create", h.Label)
@@ -144,27 +144,27 @@ func (s *Server) handleCreateHost(c *gin.Context) {
 func (s *Server) handleUpdateHost(c *gin.Context) {
 	hid, err := strconv.ParseUint(c.Param("hostID"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid host id"})
+		fail(c, http.StatusBadRequest, "invalid host id")
 		return
 	}
 	h, err := s.db.HostByID(uint(hid))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such host"})
+		fail(c, http.StatusNotFound, "no such host")
 		return
 	}
 	var req hostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if msg := req.validate(); msg != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		fail(c, http.StatusBadRequest, msg)
 		return
 	}
 	before, _ := json.Marshal(h)
 	req.apply(h)
 	if err := s.db.SaveHost(h); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	after, _ := json.Marshal(h)
@@ -179,16 +179,16 @@ func (s *Server) handleUpdateHost(c *gin.Context) {
 func (s *Server) handleDeleteHost(c *gin.Context) {
 	hid, err := strconv.ParseUint(c.Param("hostID"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid host id"})
+		fail(c, http.StatusBadRequest, "invalid host id")
 		return
 	}
 	h, err := s.db.HostByID(uint(hid))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such host"})
+		fail(c, http.StatusNotFound, "no such host")
 		return
 	}
 	if err := s.db.DeleteHost(uint(hid)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "inbound.host.delete", h.Label)

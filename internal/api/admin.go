@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/job"
@@ -23,7 +24,7 @@ import (
 // handleLogin authenticates an admin and returns an access+refresh token pair.
 func (s *Server) handleLogin(c *gin.Context) {
 	if s.db == nil {
-		c.JSON(501, gin.H{"error": "this server has no user database"})
+		fail(c, 501, "this server has no user database")
 		return
 	}
 	var req struct {
@@ -33,7 +34,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 		RecoveryCode string `json:"recovery_code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	ip := c.ClientIP()
@@ -41,19 +42,19 @@ func (s *Server) handleLogin(c *gin.Context) {
 	// account and does nothing about a credential list tried against one
 	// username from a thousand addresses — the attack that actually works.
 	if !s.loginAllowed(ip, req.Username) {
-		c.JSON(429, gin.H{"error": "too many attempts; try again later"})
+		fail(c, 429, "too many attempts; try again later")
 		return
 	}
 	admin, err := s.db.AdminByUsername(req.Username)
 	if err != nil || admin.Disabled {
 		s.loginFailed(ip, req.Username)
-		c.JSON(401, gin.H{"error": "invalid credentials"})
+		fail(c, 401, "invalid credentials")
 		return
 	}
 	ok, _ := auth.VerifyPassword(req.Password, admin.PasswordHash)
 	if !ok {
 		s.loginFailed(ip, req.Username)
-		c.JSON(401, gin.H{"error": "invalid credentials"})
+		fail(c, 401, "invalid credentials")
 		return
 	}
 	if admin.TOTPSecret != "" {
@@ -70,7 +71,9 @@ func (s *Server) handleLogin(c *gin.Context) {
 			}
 			if !ok {
 				s.loginFailed(ip, req.Username)
-				c.JSON(401, gin.H{"error": "invalid 2fa code", "totp_required": true})
+				apierr.Fail(c, &apierr.Error{Op: "admin-login", Kind: apierr.KindAuth,
+					Message: "invalid 2fa code",
+					Details: map[string]any{"totp_required": true}})
 				return
 			}
 		case req.RecoveryCode != "":
@@ -79,7 +82,9 @@ func (s *Server) handleLogin(c *gin.Context) {
 			})
 			if err != nil || !used {
 				s.loginFailed(ip, req.Username)
-				c.JSON(401, gin.H{"error": "invalid or already-used recovery code", "totp_required": true})
+				apierr.Fail(c, &apierr.Error{Op: "admin-login", Kind: apierr.KindAuth,
+					Message: "invalid or already-used recovery code",
+					Details: map[string]any{"totp_required": true}})
 				return
 			}
 			// A recovery-code login means the owner lost their authenticator, which
@@ -91,7 +96,9 @@ func (s *Server) handleLogin(c *gin.Context) {
 			s.db.Audit(&store.AuditLog{AdminID: admin.ID, Actor: admin.Username, IP: c.ClientIP(), Action: "sessions.revoke"})
 			c.Header("X-Recovery-Codes-Remaining", strconv.Itoa(remaining))
 		default:
-			c.JSON(401, gin.H{"error": "2fa/totp code required", "totp_required": true})
+			apierr.Fail(c, &apierr.Error{Op: "admin-login", Kind: apierr.KindAuth,
+				Message: "2fa/totp code required",
+				Details: map[string]any{"totp_required": true}})
 			return
 		}
 	}
@@ -103,7 +110,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 	epoch, _ := s.db.AdminSessionEpoch(admin.ID)
 	access, refresh, err := s.signer.IssueAt(admin.ID, admin.Username, string(admin.Role), epoch)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.db.Audit(&store.AuditLog{AdminID: admin.ID, Actor: admin.Username, IP: c.ClientIP(), Action: "login"})
@@ -116,23 +123,23 @@ func (s *Server) handleRefresh(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	claims, err := s.signer.Verify(req.RefreshToken)
 	if err != nil || claims.Kind != "refresh" {
-		c.JSON(401, gin.H{"error": "invalid refresh token"})
+		fail(c, 401, "invalid refresh token")
 		return
 	}
 	// A revoked session must not be able to mint itself a fresh access token —
 	// otherwise the refresh endpoint would quietly undo every invalidation.
 	if !s.signer.SessionValid(claims) {
-		c.JSON(401, gin.H{"error": "session revoked; sign in again"})
+		fail(c, 401, "session revoked; sign in again")
 		return
 	}
 	access, refresh, err := s.signer.IssueAt(claims.AdminID, claims.Username, claims.Role, claims.SessionEpoch)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{"access_token": access, "refresh_token": refresh})
@@ -165,7 +172,7 @@ func (s *Server) handleListInbounds(c *gin.Context) {
 	q := parseListQuery(c)
 	ins, total, err := s.db.ListInboundsPage(q)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	reach := firewall.Reachability()
@@ -197,7 +204,7 @@ func (s *Server) handleListInbounds(c *gin.Context) {
 func (s *Server) handleCreateInbound(c *gin.Context) {
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// Refuse a protocol no core can LISTEN on, before it is stored. SSH is
@@ -206,37 +213,36 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 	// sat in the database, failed to render on every reload, and served nobody —
 	// with a default credential minted for it, which made it look configured.
 	if !render.ServesInbound(n.Protocol) {
-		c.JSON(400, gin.H{
-			"error": fmt.Sprintf("%s cannot be served as an inbound: no core in this panel implements an %s server",
+		apierr.Fail(c, apierr.Validation("inbound-create",
+			fmt.Sprintf("%s cannot be served as an inbound: no core in this panel implements an %s server",
 				n.Protocol, n.Protocol),
-			"remediation": "SSH can be used as an egress hop on another inbound's relay chain. " +
-				"For SSH tunnelling to this host, use the system's own sshd, which the panel does not manage.",
-		})
+			"SSH can be used as an egress hop on another inbound's relay chain. "+
+				"For SSH tunnelling to this host, use the system's own sshd, which the panel does not manage."))
 		return
 	}
 	// Behind a platform edge, refuse what the platform can never carry rather
 	// than storing a row that looks configured and moves nothing.
 	if bad := s.paasCreateRefusal(&n); bad != nil {
-		c.JSON(400, bad)
+		apierr.Fail(c, bad)
 		return
 	}
 	applyCreateDefaults(&n)   // panel fills in keys/dest/flow/creds so it "just works"
 	s.applyDomain(&n)         // inherit default domain + cascade to SNI/Host/etc.
 	s.applyPaaSAddressing(&n) // behind a platform edge the address is not ours to choose
 	if err := n.Validate(); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// A hop range that swallows another inbound's port silently reroutes THAT
 	// inbound's traffic here. The operator is looking at this one; the one that
 	// breaks is a different one, with no error anywhere.
 	if msg := s.portHopConflict(&n, 0); msg != "" {
-		c.JSON(409, gin.H{"error": msg, "code": "port_hop_conflict"})
+		apierr.Fail(c, apierr.Conflict("inbound-write", "port_hop_conflict", msg))
 		return
 	}
 	in, err := s.db.CreateInbound(&n)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.create", in.Remark)
@@ -248,43 +254,42 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	var n model.Node
 	if err := c.ShouldBindJSON(&n); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if bad := s.paasCreateRefusal(&n); bad != nil {
-		c.JSON(400, bad)
+		apierr.Fail(c, bad)
 		return
 	}
 	applyCreateDefaults(&n)
 	s.applyDomain(&n)         // inherit default domain + cascade
 	s.applyPaaSAddressing(&n) // an edit must not reintroduce an address the platform will not serve
 	if err := n.Validate(); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// A row a profile binding owns is rewritten on the next sync, so a direct
 	// edit here would be silently reverted — the operator watches it succeed and
 	// finds out later. Refuse, and say where the change belongs.
 	if b, err := s.db.BindingByInbound(id); err == nil && b != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "this inbound is managed by a config profile; editing it here would be " +
+		apierr.Fail(c, &apierr.Error{Op: "inbound-update", Kind: apierr.KindConflict,
+			Code: "profile_managed",
+			Message: "this inbound is managed by a config profile; editing it here would be " +
 				"overwritten by the next profile sync",
-			"code":       "profile_managed",
-			"profile_id": b.ProfileID,
-			"remediation": "edit the profile to change every node at once, or the binding to change " +
+			Remediation: "edit the profile to change every node at once, or the binding to change " +
 				"this node's port or public host",
-		})
+			Details: map[string]any{"profile_id": b.ProfileID}})
 		return
 	}
 	// Excluding this inbound's own id, or widening a range on an existing
 	// inbound would report it as conflicting with itself.
 	if msg := s.portHopConflict(&n, id); msg != "" {
-		c.JSON(409, gin.H{"error": msg, "code": "port_hop_conflict"})
+		apierr.Fail(c, apierr.Conflict("inbound-write", "port_hop_conflict", msg))
 		return
 	}
 
@@ -297,11 +302,11 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 	if old != nil {
 		breaking := inboundBreakingChanges(old, &n)
 		if len(breaking) > 0 && !boolParam(c, "confirm") {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "this change invalidates existing client configurations",
-				"code":  "breaking_edit", "breaking": breaking,
-				"hint": "re-send with ?confirm=true to apply. Add ?keep_old=true to keep the current inbound alive (disabled) as a migration copy so existing clients are not cut off immediately.",
-			})
+			apierr.Fail(c, &apierr.Error{Op: "inbound-update", Kind: apierr.KindConflict,
+				Code:    "breaking_edit",
+				Message: "this change invalidates existing client configurations",
+				Details: map[string]any{"breaking": breaking,
+					"hint": "re-send with ?confirm=true to apply. Add ?keep_old=true to keep the current inbound alive (disabled) as a migration copy so existing clients are not cut off immediately."}})
 			return
 		}
 		if len(breaking) > 0 && boolParam(c, "keep_old") {
@@ -319,11 +324,11 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 
 	in.PrevNodeJSON = in.NodeJSON // capture for one-level undo
 	if err := in.SetNode(&n); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if err := s.db.SaveInbound(in); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	// PrevNodeJSON is captured above for one-level undo, and it is exactly the
@@ -345,13 +350,13 @@ func (s *Server) handleUpdateInbound(c *gin.Context) {
 // manual commands the operator can run themselves.
 func (s *Server) handlePortHop(c *gin.Context) {
 	if s.engine == nil {
-		c.JSON(501, gin.H{"error": "engine not available"})
+		fail(c, 501, "engine not available")
 		return
 	}
 	id := parseID(c)
 	ins, err := s.db.ListInbounds()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	var n *model.Node
@@ -362,7 +367,7 @@ func (s *Server) handlePortHop(c *gin.Context) {
 		}
 	}
 	if n == nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	spec := ""
@@ -380,7 +385,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 	id := parseID(c)
 	ins, err := s.db.ListInbounds()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	var n *model.Node
@@ -391,7 +396,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 		}
 	}
 	if n == nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	for i := range ins {
@@ -417,7 +422,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 	if n.Protocol == model.ProtoWireGuard {
 		conf, err := export.WireGuardConf(n, n.Address)
 		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 		c.JSON(200, gin.H{"kind": "wireguard", "filename": safeName(n.Remark, n.Port) + ".conf", "config": conf})
@@ -426,7 +431,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 	if n.Protocol == model.ProtoAmneziaWG {
 		conf, err := export.AmneziaWGConf(n, n.Address)
 		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 		c.JSON(200, gin.H{"kind": "amneziawg", "filename": safeName(n.Remark, n.Port) + ".conf", "config": conf})
@@ -434,7 +439,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 	}
 	uri, err := export.URI(n)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	c.JSON(200, gin.H{"kind": "uri", "uri": uri})
@@ -457,7 +462,7 @@ func safeName(remark string, port int) string {
 func (s *Server) handleDeleteInbound(c *gin.Context) {
 	id := parseID(c)
 	if err := s.db.DeleteInbound(id); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.delete", strconv.FormatUint(uint64(id), 10))
@@ -470,7 +475,7 @@ func (s *Server) handleDeleteInbound(c *gin.Context) {
 func (s *Server) handleListGroups(c *gin.Context) {
 	gs, err := s.db.ListGroups()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gs)
@@ -483,13 +488,13 @@ func (s *Server) handleCreateGroup(c *gin.Context) {
 		InboundIDs  []uint `json:"inbound_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
-		c.JSON(400, gin.H{"error": "name and inbound_ids required"})
+		fail(c, 400, "name and inbound_ids required")
 		return
 	}
 	g := &store.Group{Name: req.Name, Description: req.Description,
 		InboundIDs: store.IntSlice(req.InboundIDs)}
 	if err := s.db.CreateGroup(g); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "group.create", g.Name)
@@ -511,7 +516,7 @@ func (s *Server) handleListUsers(c *gin.Context) {
 	q := parseListQuery(c)
 	us, total, err := s.db.ListUsersPage(owner, q)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if !q.Paged() {
@@ -527,7 +532,7 @@ func (s *Server) handleQuota(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	admin, err := s.db.AdminByID(claims.AdminID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	unlimited := admin.Role == store.RoleOwner || admin.Role == store.RoleAdmin
@@ -571,7 +576,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 		ExpireDays int    `json:"expire_days"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" {
-		c.JSON(400, gin.H{"error": "username required"})
+		fail(c, 400, "username required")
 		return
 	}
 	pw, _ := keygen.Password(16)
@@ -582,7 +587,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 	}
 	if req.DataLimit != nil {
 		if *req.DataLimit < 0 {
-			c.JSON(400, gin.H{"error": "data_limit must not be negative"})
+			fail(c, 400, "data_limit must not be negative")
 			return
 		}
 		u.DataLimit = *req.DataLimit
@@ -598,10 +603,12 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 	if err := s.db.CreateUserEnforcingQuota(u, owner); err != nil {
 		var qe *store.QuotaError
 		if errors.As(err, &qe) {
-			c.JSON(409, gin.H{"error": qe.Error(), "code": "quota_exceeded", "limit": qe.Limit})
+			apierr.Fail(c, &apierr.Error{Op: "user-create", Kind: apierr.KindQuotaExceeded,
+				Code: "quota_exceeded", Message: qe.Error(), Cause: err,
+				Details: map[string]any{"limit": qe.Limit}})
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "user.create", u.Username)
@@ -613,7 +620,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 func (s *Server) handleDeleteUser(c *gin.Context) {
 	id := parseID(c)
 	if err := s.db.DeleteUserCascade(id); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "user.delete", strconv.FormatUint(uint64(id), 10))
@@ -628,7 +635,7 @@ func (s *Server) handleDeleteUser(c *gin.Context) {
 func (s *Server) handleStats(c *gin.Context) {
 	ins, us, gs, err := s.db.Counts()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{"inbounds": ins, "users": us, "groups": gs})

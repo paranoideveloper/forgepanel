@@ -49,11 +49,11 @@ func (s *Server) handleListAudit(c *gin.Context) {
 	// happened.
 	var err error
 	if f.Since, err = parseAuditTime(c.Query("since")); err != nil {
-		c.JSON(400, gin.H{"error": "since: " + err.Error()})
+		fail(c, 400, "since: "+err.Error())
 		return
 	}
 	if f.Until, err = parseAuditTime(c.Query("until")); err != nil {
-		c.JSON(400, gin.H{"error": "until: " + err.Error()})
+		fail(c, 400, "until: "+err.Error())
 		return
 	}
 	if v := strings.TrimSpace(c.Query("limit")); v != "" {
@@ -69,7 +69,7 @@ func (s *Server) handleListAudit(c *gin.Context) {
 
 	entries, total, err := s.db.ListAuditLogs(f)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	limit := f.Limit
@@ -90,7 +90,7 @@ func (s *Server) handleListAudit(c *gin.Context) {
 func (s *Server) handleAuditActions(c *gin.Context) {
 	actions, err := s.db.AuditActions()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{"actions": actions})

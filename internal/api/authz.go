@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/store"
 	"github.com/gin-gonic/gin"
@@ -255,7 +256,7 @@ func (s *Server) authz() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, ok := auth.ClaimsFrom(c)
 		if !ok || claims == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			abortFail(c, http.StatusUnauthorized, "not authenticated")
 			return
 		}
 		// FullPath is the registered pattern ("/api/admin/users/:id"). It is
@@ -267,9 +268,8 @@ func (s *Server) authz() gin.HandlerFunc {
 		}
 		allowed := rolesForRoute(c.Request.Method, path)
 		if len(allowed) == 0 {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "this endpoint has no authorisation policy and is therefore denied",
-			})
+			abortFail(c, http.StatusForbidden,
+				"this endpoint has no authorisation policy and is therefore denied")
 			return
 		}
 		for _, r := range allowed {
@@ -280,10 +280,8 @@ func (s *Server) authz() gin.HandlerFunc {
 		}
 		// Say what was needed. A 403 that does not explain which role is
 		// required just produces a support ticket.
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"error":          "insufficient role",
-			"your_role":      claims.Role,
-			"required_roles": allowed,
-		})
+		abortFailWith(c, &apierr.Error{Op: "authorize", Kind: apierr.KindPermission,
+			Message: "insufficient role",
+			Details: map[string]any{"your_role": claims.Role, "required_roles": allowed}})
 	}
 }

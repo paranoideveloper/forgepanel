@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/migrate"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -66,25 +67,24 @@ func (s *Server) planFromRequest(c *gin.Context) (*migrate.Plan, bool) {
 		Panel string `json:"panel"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return nil, false
 	}
 	if req.Path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "path to the foreign panel's SQLite database is required",
-			"hint":  "3x-ui keeps it at /etc/x-ui/x-ui.db",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "migrate-import", Kind: apierr.KindValidation,
+			Message: "path to the foreign panel's SQLite database is required",
+			Details: map[string]any{"hint": "3x-ui keeps it at /etc/x-ui/x-ui.db"}})
 		return nil, false
 	}
 	if st, err := os.Stat(req.Path); err != nil || st.IsDir() {
 		// Named separately from a parse failure: "the file is not there" and
 		// "the file is not a panel database" have completely different fixes.
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no readable file at " + req.Path})
+		fail(c, http.StatusBadRequest, "no readable file at "+req.Path)
 		return nil, false
 	}
 	res, err := migrate.ImportPanelDB(req.Path)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return nil, false
 	}
 	// The source panel names the provenance keys, so importing from two different
@@ -130,7 +130,7 @@ func (s *Server) handleMigrateApply(c *gin.Context) {
 			}
 			tok, err := keygen.Password(26)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				failErr(c, http.StatusInternalServerError, err)
 				return
 			}
 			// A FRESH subscription token. The foreign panel's is not ours, and
@@ -157,10 +157,9 @@ func (s *Server) handleMigrateApply(c *gin.Context) {
 		// The whole import rolled back, so the panel is exactly as it was. Saying
 		// so matters: an operator who thinks a partial import landed will go
 		// looking for what to clean up.
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-			"note":  "nothing was imported; the whole plan was rolled back and the panel is unchanged",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "migrate-import", Kind: apierr.KindValidation,
+			Message: err.Error(), Cause: err,
+			Details: map[string]any{"note": "nothing was imported; the whole plan was rolled back and the panel is unchanged"}})
 		return
 	}
 	s.auditNote(c, "migrate.import", "foreign panel",

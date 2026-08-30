@@ -449,16 +449,16 @@ type SwitchPreviewResponse struct {
 func (s *Server) handleProtocolSwitchPreview(c *gin.Context) {
 	var req SwitchPreviewRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "bad JSON: " + err.Error()})
+		fail(c, 400, "bad JSON: "+err.Error())
 		return
 	}
 	if req.Node == nil {
-		c.JSON(400, gin.H{"error": "node is required"})
+		fail(c, 400, "node is required")
 		return
 	}
 	target := model.Protocol(strings.ToLower(strings.TrimSpace(string(req.TargetProtocol))))
 	if !knownProtocol(target) {
-		c.JSON(400, gin.H{"error": "unknown target protocol: " + string(req.TargetProtocol)})
+		fail(c, 400, "unknown target protocol: "+string(req.TargetProtocol))
 		return
 	}
 	preview, sum := SwitchProtocol(req.Node, target)

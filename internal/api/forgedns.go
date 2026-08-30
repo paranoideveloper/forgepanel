@@ -256,7 +256,7 @@ func (s *Server) handleForgeDNSUpstreamAdapters(c *gin.Context) {
 func (s *Server) handleForgeDNSList(c *gin.Context) {
 	zones, err := s.db.ListZones()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, zones)
@@ -364,7 +364,7 @@ func validateZone(z *store.ForgeDNSZone) error {
 func (s *Server) handleForgeDNSCreate(c *gin.Context) {
 	var req zoneReq
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Zone) == "" {
-		c.JSON(400, gin.H{"error": "zone required"})
+		fail(c, 400, "zone required")
 		return
 	}
 	if req.Adapter == "" {
@@ -373,7 +373,7 @@ func (s *Server) handleForgeDNSCreate(c *gin.Context) {
 	key, _ := keygen.Password(12)
 	encKey, err := upstream.GenerateKey()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	z := &store.ForgeDNSZone{
@@ -398,11 +398,11 @@ func (s *Server) handleForgeDNSCreate(c *gin.Context) {
 		z.Cipher = d.DefaultCipher
 	}
 	if err := validateZone(z); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if err := s.db.CreateZone(z); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "forgedns.zone.create", z.Zone)
@@ -415,12 +415,12 @@ func (s *Server) handleForgeDNSCreate(c *gin.Context) {
 func (s *Server) handleForgeDNSUpdate(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	var req zoneReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	applyZoneReq(z, &req)
@@ -430,11 +430,11 @@ func (s *Server) handleForgeDNSUpdate(c *gin.Context) {
 		}
 	}
 	if err := validateZone(z); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if err := s.db.SaveZone(z); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "forgedns.zone.update", z.Zone)
@@ -446,7 +446,7 @@ func (s *Server) handleForgeDNSUpdate(c *gin.Context) {
 func (s *Server) handleForgeDNSToggle(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	z.Enabled = !z.Enabled
@@ -460,7 +460,7 @@ func (s *Server) handleForgeDNSToggle(c *gin.Context) {
 func (s *Server) handleForgeDNSDelete(c *gin.Context) {
 	z, _ := s.db.ZoneByID(parseID(c))
 	if err := s.db.DeleteZone(parseID(c)); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if z != nil {
@@ -483,7 +483,7 @@ func (s *Server) handleForgeDNSStatus(c *gin.Context) {
 func (s *Server) handleForgeDNSSessions(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	if s.fdns == nil {
@@ -499,17 +499,17 @@ func (s *Server) handleForgeDNSSessions(c *gin.Context) {
 func (s *Server) handleForgeDNSInstall(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	mgr := s.upstreamManager()
 	if mgr == nil {
-		c.JSON(503, gin.H{"error": "forgedns upstream manager unavailable"})
+		fail(c, 503, "forgedns upstream manager unavailable")
 		return
 	}
 	d, err := upstream.Lookup(z.Adapter)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	tag := strings.TrimSpace(c.Query("tag"))
@@ -520,7 +520,7 @@ func (s *Server) handleForgeDNSInstall(c *gin.Context) {
 	}
 	in, err := mgr.Installer().Ensure(d, tag)
 	if err != nil {
-		c.JSON(502, gin.H{"error": err.Error()})
+		failErr(c, 502, err)
 		return
 	}
 	z.PinnedTag = in.Tag
@@ -538,7 +538,7 @@ func (s *Server) handleForgeDNSInstall(c *gin.Context) {
 func (s *Server) handleForgeDNSBundle(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	// The upstream may have rewritten its key (see adoptUpstreamKeys); reconcile
@@ -553,7 +553,7 @@ func (s *Server) handleForgeDNSBundle(c *gin.Context) {
 	}
 	b, err := s.buildBundle(z, ip, c.Query("resolvers"))
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	s.audit(c, "forgedns.zone.bundle", z.Zone)
@@ -594,14 +594,14 @@ func (s *Server) upstreamManager() *upstream.Manager {
 func (s *Server) handleForgeDNSClientConfig(c *gin.Context) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return
 	}
 	serverIP := c.Query("ip")
 	if upstream.IsUpstream(z.Adapter) {
 		b, err := s.buildBundle(z, serverIP, c.Query("resolvers"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 		s.audit(c, "forgedns.zone.bundle", z.Zone)

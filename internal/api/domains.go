@@ -24,7 +24,7 @@ func (s *Server) handleNSWizard(c *gin.Context) {
 	ip := c.Query("ip")
 	records, err := domain.NSDelegation(zone, ip)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	nsHost := ""
@@ -42,12 +42,12 @@ func (s *Server) handleCertImport(c *gin.Context) {
 		Key  string `json:"key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	imp, err := s.certs.Import([]byte(req.Cert), []byte(req.Key))
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	s.audit(c, "cert.import", imp.Domains[0])

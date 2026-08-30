@@ -83,7 +83,7 @@ func (s *Server) handleListBridgeBackends(c *gin.Context) {
 func (s *Server) handleListBridges(c *gin.Context) {
 	rows, err := s.db.ListBridges()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	live := map[string]bridge.Status{}
@@ -115,11 +115,11 @@ func (s *Server) handleListBridges(c *gin.Context) {
 func (s *Server) handleCreateBridge(c *gin.Context) {
 	var req bridgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		fail(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a bridge needs a name"})
+		fail(c, http.StatusBadRequest, "a bridge needs a name")
 		return
 	}
 	if strings.TrimSpace(req.Token) == "" {
@@ -128,7 +128,7 @@ func (s *Server) handleCreateBridge(c *gin.Context) {
 		// tunnel's authentication.
 		tok, err := keygen.Password(32)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			failErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		req.Token = tok
@@ -137,17 +137,17 @@ func (s *Server) handleCreateBridge(c *gin.Context) {
 		TunnelPort: req.TunnelPort, Transport: req.Transport,
 		Token: req.Token, Services: req.Services}
 	if err := spec.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	enc, err := s.bridgeSealer()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	sealed, err := enc.Encrypt([]byte(req.Token))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	svcJSON, _ := json.Marshal(spec.Services)
@@ -157,7 +157,7 @@ func (s *Server) handleCreateBridge(c *gin.Context) {
 		TokenEnc: sealed, Services: svcJSON, Enabled: req.Enabled == nil || *req.Enabled,
 	}
 	if err := s.db.CreateBridge(row); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		failErr(c, http.StatusConflict, err)
 		return
 	}
 	s.audit(c, "bridge.create", row.Name+" ("+row.Backend+")")
@@ -173,7 +173,7 @@ func (s *Server) handleCreateBridge(c *gin.Context) {
 	}
 	bundle, err := bridge.Bundle(spec)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"id": row.ID, "name": row.Name, "bundle": bundle,
@@ -208,17 +208,17 @@ func (s *Server) startBridgeAsync(id uint, name string, spec bridge.Spec) {
 func (s *Server) handleBridgeBundle(c *gin.Context) {
 	row, err := s.db.BridgeByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such bridge"})
+		fail(c, http.StatusNotFound, "no such bridge")
 		return
 	}
 	spec, err := s.specFor(row)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	bundle, err := bridge.Bundle(spec)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, bundle)
@@ -228,12 +228,12 @@ func (s *Server) handleBridgeBundle(c *gin.Context) {
 func (s *Server) handleDeleteBridge(c *gin.Context) {
 	row, err := s.db.BridgeByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such bridge"})
+		fail(c, http.StatusNotFound, "no such bridge")
 		return
 	}
 	s.bridgeManager().Stop(row.Name)
 	if err := s.db.DeleteBridge(row.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "bridge.delete", row.Name)
@@ -244,19 +244,19 @@ func (s *Server) handleDeleteBridge(c *gin.Context) {
 func (s *Server) handleRestartBridge(c *gin.Context) {
 	row, err := s.db.BridgeByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such bridge"})
+		fail(c, http.StatusNotFound, "no such bridge")
 		return
 	}
 	spec, err := s.specFor(row)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if err := s.bridgeManager().Start(c.Request.Context(), row.Name, spec); err != nil {
 		row.LastError = err.Error()
 		row.LastState = string(bridge.StateFailed)
 		_ = s.db.SaveBridge(row)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadGateway, err)
 		return
 	}
 	s.audit(c, "bridge.restart", row.Name)

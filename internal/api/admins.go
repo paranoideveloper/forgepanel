@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -68,7 +69,7 @@ func (s *Server) adminToView(a store.Admin) adminView {
 func (s *Server) handleListAdmins(c *gin.Context) {
 	admins, err := s.db.ListAdmins()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	out := make([]adminView, 0, len(admins))
@@ -87,16 +88,16 @@ func (s *Server) handleCreateAdmin(c *gin.Context) {
 		TrafficCredit int64  `json:"traffic_credit"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		c.JSON(400, gin.H{"error": "a username is required"})
+		fail(c, 400, "a username is required")
 		return
 	}
 	if len(req.Password) < 8 {
-		c.JSON(400, gin.H{"error": "the password must be at least 8 characters"})
+		fail(c, 400, "the password must be at least 8 characters")
 		return
 	}
 	role := store.Role(strings.TrimSpace(req.Role))
@@ -107,17 +108,17 @@ func (s *Server) handleCreateAdmin(c *gin.Context) {
 		// An unknown role matches no authorization rule and fails closed, so the
 		// account would exist, sign in, and be able to do nothing — with nothing
 		// anywhere explaining why.
-		c.JSON(400, gin.H{"error": "unknown role " + strconv.Quote(string(role)) +
-			"; valid roles are owner, admin, reseller, viewer"})
+		fail(c, 400, "unknown role "+strconv.Quote(string(role))+
+			"; valid roles are owner, admin, reseller, viewer")
 		return
 	}
 	if existing, _ := s.db.AdminByUsername(username); existing != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "an admin named " + strconv.Quote(username) + " already exists"})
+		fail(c, http.StatusConflict, "an admin named "+strconv.Quote(username)+" already exists")
 		return
 	}
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "could not hash the password: " + err.Error()})
+		fail(c, 500, "could not hash the password: "+err.Error())
 		return
 	}
 	a := &store.Admin{
@@ -125,7 +126,7 @@ func (s *Server) handleCreateAdmin(c *gin.Context) {
 		UserQuota: req.UserQuota, TrafficCredit: req.TrafficCredit,
 	}
 	if err := s.db.CreateAdmin(a); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "admin.create", username+" as "+string(role))
@@ -139,7 +140,7 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 	}
 	a, err := s.db.AdminByID(id)
 	if err != nil || a == nil {
-		c.JSON(404, gin.H{"error": "no such admin"})
+		fail(c, 404, "no such admin")
 		return
 	}
 	// Snapshot BEFORE the handler edits a in place. This is the most
@@ -158,7 +159,7 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 		Password      *string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 
@@ -168,7 +169,7 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 	if req.Role != nil {
 		role := store.Role(strings.TrimSpace(*req.Role))
 		if !store.ValidRole(role) {
-			c.JSON(400, gin.H{"error": "unknown role " + strconv.Quote(string(role))})
+			fail(c, 400, "unknown role "+strconv.Quote(string(role)))
 			return
 		}
 		if role != a.Role {
@@ -180,7 +181,7 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 		if *req.Disabled && a.ID == claims.AdminID {
 			// Locking yourself out is never the intent, and the panel cannot
 			// undo it for you.
-			c.JSON(400, gin.H{"error": "you cannot disable your own account"})
+			fail(c, 400, "you cannot disable your own account")
 			return
 		}
 		if *req.Disabled != a.Disabled {
@@ -196,12 +197,12 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 	}
 	if req.Password != nil {
 		if len(*req.Password) < 8 {
-			c.JSON(400, gin.H{"error": "the password must be at least 8 characters"})
+			fail(c, 400, "the password must be at least 8 characters")
 			return
 		}
 		hash, err := auth.HashPassword(*req.Password)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "could not hash the password: " + err.Error()})
+			fail(c, 500, "could not hash the password: "+err.Error())
 			return
 		}
 		a.PasswordHash = hash
@@ -210,15 +211,13 @@ func (s *Server) handleUpdateAdmin(c *gin.Context) {
 
 	if err := s.db.SaveAdminChecked(a); err != nil {
 		if errors.Is(err, store.ErrLastOwner) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "this is the last owner: demoting, disabling or deleting it would leave " +
-					"nobody able to administer the panel, and no account could grant the role back. " +
-					"Promote another account to owner first.",
-				"code": "last_owner",
-			})
+			apierr.Fail(c, apierr.Conflict("admin-update", "last_owner",
+				"this is the last owner: demoting, disabling or deleting it would leave "+
+					"nobody able to administer the panel, and no account could grant the role back. "+
+					"Promote another account to owner first."))
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 
@@ -240,12 +239,12 @@ func (s *Server) handleDeleteAdmin(c *gin.Context) {
 	}
 	claims, _ := auth.ClaimsFrom(c)
 	if id == claims.AdminID {
-		c.JSON(400, gin.H{"error": "you cannot delete your own account"})
+		fail(c, 400, "you cannot delete your own account")
 		return
 	}
 	a, err := s.db.AdminByID(id)
 	if err != nil || a == nil {
-		c.JSON(404, gin.H{"error": "no such admin"})
+		fail(c, 404, "no such admin")
 		return
 	}
 
@@ -256,7 +255,7 @@ func (s *Server) handleDeleteAdmin(c *gin.Context) {
 	if v := strings.TrimSpace(c.Query("reassign_to")); v != "" {
 		n, convErr := strconv.ParseUint(v, 10, 32)
 		if convErr != nil {
-			c.JSON(400, gin.H{"error": "reassign_to must be an admin id"})
+			fail(c, 400, "reassign_to must be an admin id")
 			return
 		}
 		reassign = uint(n)
@@ -265,21 +264,18 @@ func (s *Server) handleDeleteAdmin(c *gin.Context) {
 	if err := s.db.DeleteAdmin(id, reassign); err != nil {
 		switch {
 		case errors.Is(err, store.ErrLastOwner):
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "this is the last owner; promote another account to owner first",
-				"code":  "last_owner",
-			})
+			apierr.Fail(c, apierr.Conflict("admin-delete", "last_owner",
+				"this is the last owner; promote another account to owner first"))
 		case errors.Is(err, store.ErrAdminOwnsUsers):
 			owned, _ := s.db.CountUsersOwnedBy(id)
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "this admin still owns " + strconv.FormatInt(owned, 10) +
+			apierr.Fail(c, &apierr.Error{Op: "admin-delete", Kind: apierr.KindConflict,
+				Code: "owns_users",
+				Message: "this admin still owns " + strconv.FormatInt(owned, 10) +
 					" user(s). Pass ?reassign_to=<admin id> to move them, or they would belong to " +
 					"nobody: no reseller could see them and nothing could manage them.",
-				"code":        "owns_users",
-				"users_owned": owned,
-			})
+				Details: map[string]any{"users_owned": owned}})
 		default:
-			c.JSON(500, gin.H{"error": err.Error()})
+			failErr(c, 500, err)
 		}
 		return
 	}
@@ -290,7 +286,7 @@ func (s *Server) handleDeleteAdmin(c *gin.Context) {
 func adminIDParam(c *gin.Context) (uint, bool) {
 	n, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil || n == 0 {
-		c.JSON(400, gin.H{"error": "invalid admin id"})
+		fail(c, 400, "invalid admin id")
 		return 0, false
 	}
 	return uint(n), true

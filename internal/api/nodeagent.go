@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"io"
 	"net/http"
 	"os"
@@ -117,13 +118,12 @@ func agentSHA256(path string) (string, error) {
 func (s *Server) handleNodeAgent(c *gin.Context) {
 	want := strings.TrimSpace(c.Query("arch"))
 	if want != "" && want != runtime.GOARCH {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": fmt.Sprintf(
+		apierr.Fail(c, &apierr.Error{Op: "node-agent-download", Kind: apierr.KindConflict,
+			Message: fmt.Sprintf(
 				"this panel runs on %s and can only serve a %s agent, but the node reports %s. "+
 					"Install the matching forgenode build on the node manually, then re-run enrollment.",
 				runtime.GOARCH, runtime.GOARCH, want),
-			"panel_arch": runtime.GOARCH, "node_arch": want,
-		})
+			Details: map[string]any{"panel_arch": runtime.GOARCH, "node_arch": want}})
 		return
 	}
 	dataDir := ""
@@ -134,10 +134,10 @@ func (s *Server) handleNodeAgent(c *gin.Context) {
 	if err != nil {
 		// A 503 with the reason, not a 404: the endpoint exists, the panel just
 		// has nothing to serve, and the operator needs to know which it is.
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "this panel has no forgenode executable to hand out: " + err.Error() +
+		apierr.Fail(c, &apierr.Error{Op: "node-agent-download", Kind: apierr.KindUnavailable,
+			Message: "this panel has no forgenode executable to hand out: " + err.Error() +
 				". Install the agent on the node manually, or place forgenode next to the panel binary.",
-		})
+			Cause: err})
 		return
 	}
 	if sum, err := agentSHA256(path); err == nil {
@@ -159,12 +159,12 @@ func (s *Server) handleNodeAgentDigest(c *gin.Context) {
 	}
 	path, err := agentBinaryPath(dataDir)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		failErr(c, http.StatusServiceUnavailable, err)
 		return
 	}
 	sum, err := agentSHA256(path)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(200, gin.H{"sha256": sum, "arch": runtime.GOARCH})

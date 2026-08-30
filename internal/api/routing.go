@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/job"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -110,7 +111,7 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 	outs, rules, groups := s.routingSpecs()
 	bundle, err := engine.BuildMultiWithRouting(s.candidateSpecs(), 0, "", "", outs, rules, groups)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return false
 	}
 
@@ -126,10 +127,9 @@ func (s *Server) validateRoutingOrFail(c *gin.Context) bool {
 	// configurable, and the reload path validates before applying regardless, so
 	// nothing unvalidated ever reaches a running core.
 	if err := s.engine.ValidateGenerated(bundle); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-			"hint":  "the core rejected this configuration; a geosite:/geoip: name that does not exist is the usual cause",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "routing-apply", Kind: apierr.KindValidation,
+			Message: err.Error(), Cause: err,
+			Details: map[string]any{"hint": "the core rejected this configuration; a geosite:/geoip: name that does not exist is the usual cause"}})
 		return false
 	}
 	return true
@@ -162,7 +162,7 @@ func jsonOrNil(v any) []byte {
 func (s *Server) handleListOutbounds(c *gin.Context) {
 	out, err := s.db.ListOutbounds()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if out == nil {
@@ -179,13 +179,13 @@ func (s *Server) handleListOutbounds(c *gin.Context) {
 func (s *Server) handleSaveOutbound(c *gin.Context) {
 	var o store.Outbound
 	if err := c.ShouldBindJSON(&o); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if id := c.Param("id"); id != "" {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid outbound id"})
+			fail(c, http.StatusBadRequest, "invalid outbound id")
 			return
 		}
 		o.ID = uint(n)
@@ -196,7 +196,7 @@ func (s *Server) handleSaveOutbound(c *gin.Context) {
 	// row back rather than leaving a config the next reload will reject.
 	prev, _ := s.db.OutboundByID(o.ID)
 	if err := s.db.SaveOutbound(&o); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if !s.validateRoutingOrFail(c) {
@@ -220,19 +220,19 @@ func (s *Server) rollbackOutbound(prev *store.Outbound, id uint) {
 func (s *Server) handleDeleteOutbound(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid outbound id"})
+		fail(c, http.StatusBadRequest, "invalid outbound id")
 		return
 	}
 	o, err := s.db.OutboundByID(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
+		fail(c, http.StatusNotFound, "outbound not found")
 		return
 	}
 	if err := s.db.DeleteOutbound(uint(id)); err != nil {
 		// The store refuses while a rule still points at it, because deleting it
 		// anyway leaves the core rejecting the whole config — one delete taking
 		// every inbound down.
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		failErr(c, http.StatusConflict, err)
 		return
 	}
 	s.audit(c, "routing.outbound.deleted", o.Tag)
@@ -245,7 +245,7 @@ func (s *Server) handleDeleteOutbound(c *gin.Context) {
 func (s *Server) handleListRoutingRules(c *gin.Context) {
 	rules, err := s.db.ListRoutingRules()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if rules == nil {
@@ -268,13 +268,13 @@ func (s *Server) handleListRoutingRules(c *gin.Context) {
 func (s *Server) handleSaveRoutingRule(c *gin.Context) {
 	var r store.RoutingRule
 	if err := c.ShouldBindJSON(&r); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if id := c.Param("id"); id != "" {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule id"})
+			fail(c, http.StatusBadRequest, "invalid rule id")
 			return
 		}
 		r.ID = uint(n)
@@ -282,7 +282,7 @@ func (s *Server) handleSaveRoutingRule(c *gin.Context) {
 
 	prev, _ := s.db.RoutingRuleByID(r.ID)
 	if err := s.db.SaveRoutingRule(&r); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if !s.validateRoutingOrFail(c) {
@@ -301,16 +301,16 @@ func (s *Server) handleSaveRoutingRule(c *gin.Context) {
 func (s *Server) handleDeleteRoutingRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule id"})
+		fail(c, http.StatusBadRequest, "invalid rule id")
 		return
 	}
 	r, err := s.db.RoutingRuleByID(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		fail(c, http.StatusNotFound, "rule not found")
 		return
 	}
 	if err := s.db.DeleteRoutingRule(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "routing.rule.deleted", r.Name)
@@ -323,11 +323,11 @@ func (s *Server) handleReorderRoutingRules(c *gin.Context) {
 		IDs []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if len(req.IDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no order given"})
+		fail(c, http.StatusBadRequest, "no order given")
 		return
 	}
 	// Every existing rule must appear exactly once. A partial list would leave
@@ -335,7 +335,7 @@ func (s *Server) handleReorderRoutingRules(c *gin.Context) {
 	// nobody designed — live, on a first-match routing table.
 	existing, err := s.db.ListRoutingRules()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	want := make(map[uint]bool, len(existing))
@@ -345,24 +345,23 @@ func (s *Server) handleReorderRoutingRules(c *gin.Context) {
 	seen := make(map[uint]bool, len(req.IDs))
 	for _, id := range req.IDs {
 		if !want[id] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown rule id in the new order"})
+			fail(c, http.StatusBadRequest, "unknown rule id in the new order")
 			return
 		}
 		if seen[id] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "a rule appears twice in the new order"})
+			fail(c, http.StatusBadRequest, "a rule appears twice in the new order")
 			return
 		}
 		seen[id] = true
 	}
 	if len(seen) != len(want) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "the new order must list every rule; omitting one leaves it at an arbitrary position",
-		})
+		fail(c, http.StatusBadRequest,
+			"the new order must list every rule; omitting one leaves it at an arbitrary position")
 		return
 	}
 
 	if err := s.db.ReorderRoutingRules(req.IDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	s.audit(c, "routing.rules.reordered", strconv.Itoa(len(req.IDs))+" rules")

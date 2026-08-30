@@ -47,7 +47,7 @@ func (s *Server) handle2FASetup(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	secret, err := auth.GenerateTOTPSecret()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	// Stash the pending secret in settings until confirmed. A write that fails
@@ -69,21 +69,21 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 		Code string `json:"code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	secret := s.knobs().String("pending_totp_" + claims.Username)
 	if secret == "" {
-		c.JSON(400, gin.H{"error": "run 2fa/setup first"})
+		fail(c, 400, "run 2fa/setup first")
 		return
 	}
 	if !auth.VerifyTOTP(secret, req.Code, time.Now()) {
-		c.JSON(400, gin.H{"error": "invalid code"})
+		fail(c, 400, "invalid code")
 		return
 	}
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	admin.TOTPSecret = secret
@@ -92,7 +92,7 @@ func (s *Server) handle2FAEnable(c *gin.Context) {
 	// Persist HASHES of the recovery codes; return the plaintext exactly once.
 	codes, err := s.generateRecoveryCodes(admin.ID, 8)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "could not generate recovery codes"})
+		fail(c, 500, "could not generate recovery codes")
 		return
 	}
 	// Adding a factor changes what an authenticated session means, so sessions
@@ -120,7 +120,7 @@ func (s *Server) handle2FADisable(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if admin.TOTPSecret == "" {
@@ -128,7 +128,7 @@ func (s *Server) handle2FADisable(c *gin.Context) {
 		return
 	}
 	if !auth.VerifyTOTP(admin.TOTPSecret, req.Code, time.Now()) {
-		c.JSON(400, gin.H{"error": "invalid code"})
+		fail(c, 400, "invalid code")
 		return
 	}
 	admin.TOTPSecret = ""
@@ -150,7 +150,7 @@ func (s *Server) handle2FARecoveryStatus(c *gin.Context) {
 	claims, _ := auth.ClaimsFrom(c)
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{
@@ -171,11 +171,11 @@ func (s *Server) handle2FARecoveryRegenerate(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if admin.TOTPSecret == "" {
-		c.JSON(400, gin.H{"error": "enable 2FA first"})
+		fail(c, 400, "enable 2FA first")
 		return
 	}
 	reauthed := false
@@ -187,12 +187,12 @@ func (s *Server) handle2FARecoveryRegenerate(c *gin.Context) {
 		}
 	}
 	if !reauthed {
-		c.JSON(401, gin.H{"error": "reauthentication required: provide a current 2FA code or your password"})
+		fail(c, 401, "reauthentication required: provide a current 2FA code or your password")
 		return
 	}
 	codes, err := s.generateRecoveryCodes(admin.ID, 8)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "could not generate recovery codes"})
+		fail(c, 500, "could not generate recovery codes")
 		return
 	}
 	s.audit(c, "2fa.recovery.regenerate", claims.Username)
@@ -207,21 +207,21 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 		New string `json:"new"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.New) < 8 {
-		c.JSON(400, gin.H{"error": "new password must be >= 8 chars"})
+		fail(c, 400, "new password must be >= 8 chars")
 		return
 	}
 	admin, err := s.db.AdminByUsername(claims.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if ok, _ := auth.VerifyPassword(req.Old, admin.PasswordHash); !ok {
-		c.JSON(401, gin.H{"error": "current password incorrect"})
+		fail(c, 401, "current password incorrect")
 		return
 	}
 	hash, err := auth.HashPassword(req.New)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	admin.PasswordHash = hash

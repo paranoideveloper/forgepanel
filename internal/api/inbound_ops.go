@@ -46,19 +46,19 @@ func (s *Server) handleCloneInbound(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	n, err := in.Node()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	n.Port = freeHighPort()
 	n.Remark = in.Remark + " (copy)"
 	clone, err := s.db.CreateInbound(n)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	// A clone starts disabled: it shares everything but the port, and the
@@ -74,12 +74,12 @@ func (s *Server) handleToggleInbound(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	in.Enabled = !in.Enabled
 	if err := s.db.SaveInbound(in); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.toggle", strconv.FormatUint(uint64(id), 10))
@@ -94,11 +94,11 @@ func (s *Server) handleUndoInbound(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	if in.PrevNodeJSON == "" {
-		c.JSON(409, gin.H{"error": "nothing to undo for this inbound"})
+		fail(c, 409, "nothing to undo for this inbound")
 		return
 	}
 	in.NodeJSON, in.PrevNodeJSON = in.PrevNodeJSON, in.NodeJSON
@@ -107,7 +107,7 @@ func (s *Server) handleUndoInbound(c *gin.Context) {
 		in.Remark, in.Protocol, in.Port = n.Remark, string(n.Protocol), n.Port
 	}
 	if err := s.db.SaveInbound(in); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.undo", strconv.FormatUint(uint64(id), 10))
@@ -125,19 +125,19 @@ func (s *Server) handleBulkInbounds(c *gin.Context) {
 		Domain string `json:"domain"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	switch req.Action {
 	case "enable", "disable", "delete", "set-domain":
 	default:
-		c.JSON(400, gin.H{"error": "action must be one of enable, disable, delete, set-domain"})
+		fail(c, 400, "action must be one of enable, disable, delete, set-domain")
 		return
 	}
 	if req.Action == "set-domain" {
 		req.Domain = settings.NormalizeDomain(req.Domain)
 		if req.Domain != "" && !settings.ValidDomain(req.Domain) {
-			c.JSON(422, gin.H{"error": "invalid domain"})
+			fail(c, 422, "invalid domain")
 			return
 		}
 	}

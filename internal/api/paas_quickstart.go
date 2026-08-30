@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -105,23 +106,21 @@ var paasQuickstartSet = []paasQuickstartEntry{
 // call, and returns each with its link and what can dial it.
 func (s *Server) handlePaaSQuickstart(c *gin.Context) {
 	if s.db == nil {
-		c.JSON(501, gin.H{"error": "this server has no database"})
+		fail(c, 501, "this server has no database")
 		return
 	}
 	pa := s.cfg.PaaS()
 	if !pa.Enabled {
-		c.JSON(409, gin.H{
-			"error": "this panel is not running behind a platform edge",
-			"remediation": "This creates the set of configs that a single shared HTTP port can carry. " +
-				"On a server that owns its ports, create inbounds normally — every protocol is available there.",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "paas-quickstart", Kind: apierr.KindConflict,
+			Message: "this panel is not running behind a platform edge",
+			Remediation: "This creates the set of configs that a single shared HTTP port can carry. " +
+				"On a server that owns its ports, create inbounds normally — every protocol is available there."})
 		return
 	}
 	if pa.Domain == "" {
-		c.JSON(409, gin.H{
-			"error":       "this service has no public hostname yet",
-			"remediation": "Generate a domain on the platform first; every link would otherwise be unreachable.",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "paas-quickstart", Kind: apierr.KindConflict,
+			Message:     "this service has no public hostname yet",
+			Remediation: "Generate a domain on the platform first; every link would otherwise be unreachable."})
 		return
 	}
 

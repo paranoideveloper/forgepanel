@@ -24,6 +24,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/bridge"
 	"github.com/forgepanel/forgepanel/internal/cert"
@@ -962,7 +963,7 @@ func (s *Server) serveSPA(entry []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p := strings.TrimPrefix(path.Clean(c.Request.URL.Path), "/")
 		if strings.HasPrefix(p, "api/") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			fail(c, http.StatusNotFound, "not found")
 			return
 		}
 		// SvelteKit references its content-hashed bundle relatively ("./_app/…"),
@@ -1200,13 +1201,20 @@ func (s *Server) handleKeygen(c *gin.Context) {
 		seed, err := keygen.MLDSA65Seed()
 		respond(c, gin.H{"seed": seed}, err)
 	default:
-		c.JSON(400, gin.H{"error": "unknown keygen kind: " + req.Kind})
+		fail(c, 400, "unknown keygen kind: "+req.Kind)
 	}
 }
 
+// respond answers with v, or with err.
+//
+// It used to answer EVERY error 400 with a bare string. That flattened a typed
+// failure — a *dns.Error that knows it is a missing zone and knows which token
+// permission would have found it — into "Bad Request" with the remediation
+// deleted. The status now comes from the error itself; 400 is only the fallback
+// for an error that carries no classification of its own.
 func respond(c *gin.Context, v any, err error) {
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		apierr.FailStatus(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(200, v)
@@ -1219,7 +1227,7 @@ func (s *Server) handleImport(c *gin.Context) {
 		Text string `json:"text"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	nodes, errs := ImportAny(req.Text)

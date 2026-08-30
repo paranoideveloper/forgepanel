@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/settings"
 )
@@ -140,7 +141,7 @@ func (s *Server) handlePanelAddress(c *gin.Context) {
 func (s *Server) handlePanelDNSCheck(c *gin.Context) {
 	domain := normalizeDomain(c.Query("domain"))
 	if !validDomain(domain) {
-		c.JSON(400, gin.H{"error": "invalid domain"})
+		fail(c, 400, "invalid domain")
 		return
 	}
 	v4, v6, err := resolveDomain(domain)
@@ -170,7 +171,7 @@ func (s *Server) handlePanelDNSCheck(c *gin.Context) {
 func (s *Server) handlePanelPortCheck(c *gin.Context) {
 	port, err := strconv.Atoi(c.Query("port"))
 	if err != nil || port < 1 || port > 65535 {
-		c.JSON(400, gin.H{"error": "port must be an integer in 1..65535"})
+		fail(c, 400, "port must be an integer in 1..65535")
 		return
 	}
 	// The port the panel is currently bound to is "in use" by us but still valid.
@@ -193,7 +194,7 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		VerifyDNS    bool    `json:"verify_dns"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	// Saving a panel domain implies you want a real (ACME) certificate for it:
@@ -213,7 +214,7 @@ func (s *Server) handlePanelAddressUpdate(c *gin.Context) {
 		HTTPSEnabled: req.HTTPSEnabled, ACMEEmail: req.ACMEEmail, VerifyDNS: req.VerifyDNS,
 	})
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if req.Domain != nil {
@@ -329,21 +330,21 @@ func (s *Server) recordACMEOutcome(domain string, issueErr error) {
 func (s *Server) handlePanelCertRenew(c *gin.Context) {
 	release, err := config.LockSettings(s.cfg.DataDir)
 	if err != nil {
-		c.JSON(409, gin.H{"error": err.Error()})
+		failErr(c, 409, err)
 		return
 	}
 	defer release()
 	if err := s.cfg.ReloadPanel(); err != nil {
-		c.JSON(500, gin.H{"error": "reload panel settings: " + err.Error()})
+		fail(c, 500, "reload panel settings: "+err.Error())
 		return
 	}
 	p := s.cfg.Panel()
 	if p.Domain == "" {
-		c.JSON(400, gin.H{"error": "configure a panel domain first (Panel → Address)"})
+		fail(c, 400, "configure a panel domain first (Panel → Address)")
 		return
 	}
 	if s.certs == nil {
-		c.JSON(501, gin.H{"error": "certificate manager unavailable"})
+		fail(c, 501, "certificate manager unavailable")
 		return
 	}
 	// Force-Renew must take the same branch startup does, or the button quietly
@@ -363,7 +364,9 @@ func (s *Server) handlePanelCertRenew(c *gin.Context) {
 	}
 	_ = s.cfg.SavePanel()
 	if err != nil {
-		c.JSON(502, gin.H{"error": "issuance failed: " + err.Error(), "cert": s.certStatusFor(p.Domain)})
+		apierr.Fail(c, &apierr.Error{Op: "panel-cert-issue", Kind: apierr.KindNetwork,
+			Message: "issuance failed: " + err.Error(), Cause: err,
+			Details: map[string]any{"cert": s.certStatusFor(p.Domain)}})
 		return
 	}
 	c.JSON(200, gin.H{"ok": true, "cert": s.certStatusFor(p.Domain)})

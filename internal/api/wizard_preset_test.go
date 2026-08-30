@@ -1,8 +1,11 @@
 package api
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
@@ -63,5 +66,36 @@ func TestPresetWizardPlansAreValidAndRenderable(t *testing.T) {
 		if p.cdn && n.Domain != w.cdnHost {
 			t.Errorf("%s: CDN inbound not fronted behind %s", p.remark, w.cdnHost)
 		}
+	}
+}
+
+// The wizard's warnings render as one <p> each, so a multi-line err.Error()
+// arrives with its newlines collapsed: the missing Cloudflare permission — the
+// only part the operator can act on — ends up mid-sentence. This checks the
+// typed fields are read back out instead.
+func TestCFWizardWarningLeadsWithTheMissingScope(t *testing.T) {
+	w := cfWizardWarning(&dns.Error{
+		Provider:     "cloudflare",
+		Op:           "create-record",
+		Kind:         dns.KindPermission,
+		Message:      "the token cannot write DNS records in this zone",
+		MissingScope: "Zone → DNS → Edit",
+		Remediation:  "add that permission to the token",
+	}, "edge-ab12.example.com", "203.0.113.7")
+
+	if strings.Contains(w, "\n") {
+		t.Errorf("warning is multi-line, so HTML will collapse it into a run-on sentence:\n%s", w)
+	}
+	if !strings.Contains(w, "Zone → DNS → Edit") {
+		t.Errorf("the missing permission is absent; that is the only actionable part:\n%s", w)
+	}
+	if !strings.Contains(w, "edge-ab12.example.com") || !strings.Contains(w, "203.0.113.7") {
+		t.Errorf("the manual fallback lost the record it is telling the operator to create:\n%s", w)
+	}
+
+	// A plain error has no typed fields to read; the line must still be usable.
+	plain := cfWizardWarning(errors.New("dial tcp: i/o timeout"), "edge-ab12.example.com", "203.0.113.7")
+	if !strings.Contains(plain, "i/o timeout") || !strings.Contains(plain, "edge-ab12.example.com") {
+		t.Errorf("untyped error lost its message or the fallback instruction:\n%s", plain)
 	}
 }

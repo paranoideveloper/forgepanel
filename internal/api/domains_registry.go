@@ -2,12 +2,12 @@ package api
 
 import (
 	"errors"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/settings"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -34,7 +34,7 @@ func (s *Server) applyDomain(n *model.Node) {
 func (s *Server) handleListDomains(c *gin.Context) {
 	ds, err := s.db.ListDomains()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, ds)
@@ -49,21 +49,23 @@ func (s *Server) handleCreateDomain(c *gin.Context) {
 		Note      string `json:"note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	name := settings.NormalizeDomain(req.Name)
 	if !settings.ValidDomain(name) {
-		c.JSON(422, gin.H{"error": "not a valid domain name", "fields": gin.H{"name": "must be a hostname like vpn.example.com"}})
+		apierr.Fail(c, &apierr.Error{Op: "domain-add", Kind: apierr.KindValidation, Status: 422,
+			Message: "not a valid domain name",
+			Fields:  map[string]string{"name": "must be a hostname like vpn.example.com"}})
 		return
 	}
 	d := &store.Domain{Name: name, Provider: req.Provider, TLSMode: req.TLSMode, IsDefault: req.IsDefault, Note: req.Note}
 	if err := s.db.CreateDomain(d); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
-			c.JSON(409, gin.H{"error": "that domain already exists"})
+			fail(c, 409, "that domain already exists")
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "domain.create", d.Name)
@@ -77,7 +79,7 @@ func (s *Server) handleUpdateDomain(c *gin.Context) {
 	before, _ := s.db.DomainByID(id)
 	var req map[string]any
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// is_default is toggled through its own transactional endpoint.
@@ -88,7 +90,7 @@ func (s *Server) handleUpdateDomain(c *gin.Context) {
 			target = id
 		}
 		if err := s.db.SetDefaultDomain(target); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 	}
@@ -101,7 +103,7 @@ func (s *Server) handleUpdateDomain(c *gin.Context) {
 	}
 	if len(fields) > 0 {
 		if err := s.db.UpdateDomainFields(id, fields); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 	}
@@ -116,13 +118,12 @@ func (s *Server) handleDeleteDomain(c *gin.Context) {
 	force := c.Query("force") == "true"
 	if err := s.db.DeleteDomain(id, force); err != nil {
 		if errors.Is(err, store.ErrDomainInUse) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": err.Error(), "code": "domain_in_use",
-				"hint": "some inbounds still use this domain; ret:?force=true to delete anyway (their links keep the bare domain string).",
-			})
+			apierr.Fail(c, &apierr.Error{Op: "domain-delete", Kind: apierr.KindConflict,
+				Code: "domain_in_use", Message: err.Error(), Cause: err,
+				Details: map[string]any{"hint": "some inbounds still use this domain; ret:?force=true to delete anyway (their links keep the bare domain string)."}})
 			return
 		}
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	s.audit(c, "domain.delete", strconv.FormatUint(uint64(id), 10))
@@ -208,12 +209,12 @@ func (s *Server) handleRealityQuickstart(c *gin.Context) {
 	applyCreateDefaults(&n) // mints REALITY keypair, shortId, dest, uuid
 	s.applyPaaSAddressing(&n)
 	if err := n.Validate(); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	in, err := s.db.CreateInbound(&n)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.reality_quickstart", in.Remark)
@@ -252,12 +253,12 @@ func (s *Server) handleInboundOneClickTLS(c *gin.Context) {
 	id := parseID(c)
 	in, err := s.db.InboundByID(id)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "inbound not found"})
+		fail(c, 404, "inbound not found")
 		return
 	}
 	n, err := in.Node()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	var req struct {
@@ -266,12 +267,13 @@ func (s *Server) handleInboundOneClickTLS(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	domain := settings.NormalizeDomain(firstNonEmpty(req.Domain, n.Domain, s.db.DefaultDomain()))
 	if domain == "" {
-		c.JSON(422, gin.H{"error": "no domain to issue a certificate for",
-			"hint": "add a domain in the Domains section, set it on this inbound, or pass {\"domain\":\"vpn.example.com\"}"})
+		apierr.Fail(c, &apierr.Error{Op: "cert-issue", Kind: apierr.KindValidation, Status: 422,
+			Message: "no domain to issue a certificate for",
+			Details: map[string]any{"hint": "add a domain in the Domains section, set it on this inbound, or pass {\"domain\":\"vpn.example.com\"}"}})
 		return
 	}
 	if !settings.ValidDomain(domain) {
-		c.JSON(422, gin.H{"error": "invalid domain: " + domain})
+		fail(c, 422, "invalid domain: "+domain)
 		return
 	}
 
@@ -298,15 +300,15 @@ func (s *Server) handleInboundOneClickTLS(c *gin.Context) {
 	n.Security.ServerName = domain
 	n.ApplyDomainCascade()
 	if err := n.Validate(); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if err := in.SetNode(n); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	if err := s.db.SaveInbound(in); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "inbound.tls.oneclick", domain)

@@ -135,11 +135,11 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		CleanIPs     *string `json:"clean_ips"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	if s.db == nil {
-		c.JSON(501, gin.H{"error": "no store"})
+		fail(c, 501, "no store")
 		return
 	}
 	// Collected first and written once, by the registry. Every one of these
@@ -173,8 +173,8 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 			pending["sub_name_template"] = th.Template
 			pending["sub_front_mode"] = string(th.Front)
 		} else {
-			c.JSON(400, gin.H{"error": "unknown fancy theme: " + id,
-				"fields": gin.H{"fancy_theme": "no theme with that id"}})
+			failFields(c, 400, "unknown fancy theme: "+id,
+				map[string]string{"fancy_theme": "no theme with that id"})
 			return
 		}
 	}

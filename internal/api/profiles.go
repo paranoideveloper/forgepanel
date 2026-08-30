@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/profile"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -34,7 +35,7 @@ type profileView struct {
 func (s *Server) handleListProfiles(c *gin.Context) {
 	ps, err := s.db.ListProfiles()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	out := make([]profileView, 0, len(ps))
@@ -60,15 +61,15 @@ func (s *Server) handleSaveProfile(c *gin.Context) {
 		Template *model.Node `json:"template"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a profile needs a name"})
+		fail(c, http.StatusBadRequest, "a profile needs a name")
 		return
 	}
 	if req.Template == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a profile needs a template"})
+		fail(c, http.StatusBadRequest, "a profile needs a template")
 		return
 	}
 
@@ -76,12 +77,12 @@ func (s *Server) handleSaveProfile(c *gin.Context) {
 	if id := c.Param("id"); id != "" {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile id"})
+			fail(c, http.StatusBadRequest, "invalid profile id")
 			return
 		}
 		existing, err := s.db.ProfileByID(uint(n))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no such profile"})
+			fail(c, http.StatusNotFound, "no such profile")
 			return
 		}
 		p = existing
@@ -97,23 +98,25 @@ func (s *Server) handleSaveProfile(c *gin.Context) {
 	// Validate the template ONCE here rather than discovering it is unusable
 	// separately on each of N bindings.
 	if _, err := profile.Materialise(tpl, req.Name, profile.Binding{NodeName: "validation"}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	raw, err := json.Marshal(tpl)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	p.TemplateJSON = string(raw)
 
 	if err := s.db.SaveProfile(p); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	applied, syncErr := s.syncProfile(p.ID)
 	if syncErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": syncErr.Error(), "profile": p})
+		apierr.Fail(c, &apierr.Error{Op: "profile-sync", Kind: apierr.KindValidation,
+			Message: syncErr.Error(), Cause: syncErr,
+			Details: map[string]any{"profile": p}})
 		return
 	}
 	s.audit(c, "profile.save", p.Name)
@@ -124,17 +127,17 @@ func (s *Server) handleSaveProfile(c *gin.Context) {
 func (s *Server) handleDeleteProfile(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile id"})
+		fail(c, http.StatusBadRequest, "invalid profile id")
 		return
 	}
 	p, err := s.db.ProfileByID(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such profile"})
+		fail(c, http.StatusNotFound, "no such profile")
 		return
 	}
 	orphaned, err := s.db.DeleteProfile(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	// The rows the bindings owned go WITH the profile. Leaving them would keep
@@ -160,15 +163,15 @@ func (s *Server) handleSaveBinding(c *gin.Context) {
 		Enabled    *bool  `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.ProfileID == 0 || req.NodeID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a binding needs both a profile and a node"})
+		fail(c, http.StatusBadRequest, "a binding needs both a profile and a node")
 		return
 	}
 	if _, err := s.db.ProfileByID(req.ProfileID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such profile"})
+		fail(c, http.StatusNotFound, "no such profile")
 		return
 	}
 
@@ -179,7 +182,7 @@ func (s *Server) handleSaveBinding(c *gin.Context) {
 	if id := c.Param("id"); id != "" {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid binding id"})
+			fail(c, http.StatusBadRequest, "invalid binding id")
 			return
 		}
 		b.ID = uint(n)
@@ -197,12 +200,12 @@ func (s *Server) handleSaveBinding(c *gin.Context) {
 		b.Enabled = *req.Enabled
 	}
 	if err := s.db.SaveBinding(b); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	applied, syncErr := s.syncProfile(req.ProfileID)
 	if syncErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": syncErr.Error()})
+		failErr(c, http.StatusBadRequest, syncErr)
 		return
 	}
 	s.audit(c, "profile.binding.save", strconv.FormatUint(uint64(req.ProfileID), 10))
@@ -213,12 +216,12 @@ func (s *Server) handleSaveBinding(c *gin.Context) {
 func (s *Server) handleDeleteBinding(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid binding id"})
+		fail(c, http.StatusBadRequest, "invalid binding id")
 		return
 	}
 	inboundID, err := s.db.DeleteBinding(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such binding"})
+		fail(c, http.StatusNotFound, "no such binding")
 		return
 	}
 	if inboundID != 0 {

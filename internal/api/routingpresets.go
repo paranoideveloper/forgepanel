@@ -173,13 +173,13 @@ func (s *Server) handleApplyRoutingPreset(c *gin.Context) {
 		}
 	}
 	if preset == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("no preset named %q", name)})
+		fail(c, http.StatusNotFound, fmt.Sprintf("no preset named %q", name))
 		return
 	}
 
 	existing, err := s.db.ListRoutingRules()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	have := make(map[string]bool, len(existing))
@@ -208,7 +208,7 @@ func (s *Server) handleApplyRoutingPreset(c *gin.Context) {
 			for _, id := range added {
 				_ = s.db.DeleteRoutingRule(id)
 			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s: %v", r.Name, err)})
+			fail(c, http.StatusBadRequest, fmt.Sprintf("%s: %v", r.Name, err))
 			return
 		}
 		added = append(added, rule.ID)

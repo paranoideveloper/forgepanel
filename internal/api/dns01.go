@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/dns"
 )
@@ -153,8 +154,9 @@ type certIssueRequest struct {
 func (s *Server) handleCertIssueDNS01(c *gin.Context) {
 	var req certIssueRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body",
-			"detail": `send {"domains":["example.com"],"wildcard":true}`})
+		apierr.Fail(c, &apierr.Error{Op: "cert-issue-dns01", Kind: apierr.KindValidation,
+			Message: "invalid request body", Cause: err,
+			Details: map[string]any{"detail": `send {"domains":["example.com"],"wildcard":true}`}})
 		return
 	}
 	names := req.Domains
@@ -168,7 +170,7 @@ func (s *Server) handleCertIssueDNS01(c *gin.Context) {
 		}
 	}
 	if len(names) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no domains were requested"})
+		fail(c, http.StatusBadRequest, "no domains were requested")
 		return
 	}
 
@@ -181,7 +183,9 @@ func (s *Server) handleCertIssueDNS01(c *gin.Context) {
 
 	imported, err := s.issueDNS01(ctx, names...)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "certificate issuance failed", "detail": err.Error()})
+		apierr.Fail(c, &apierr.Error{Op: "cert-issue-dns01", Kind: apierr.KindNetwork,
+			Message: "certificate issuance failed", Cause: err,
+			Details: map[string]any{"detail": err.Error()}})
 		return
 	}
 	s.audit(c, "cert.issue.dns01", strings.Join(names, ","))

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/forgedns/upstream"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -34,7 +35,7 @@ import (
 func (s *Server) handleForgeDNSAdapterOptions(c *gin.Context) {
 	m, err := upstream.ManifestFor(c.Param("adapter"))
 	if err != nil {
-		c.JSON(404, gin.H{"error": err.Error()})
+		failErr(c, 404, err)
 		return
 	}
 	c.JSON(200, gin.H{
@@ -58,12 +59,12 @@ func scopeOf(raw string) upstream.Scope {
 func (s *Server) upstreamZone(c *gin.Context) (*store.ForgeDNSZone, upstream.Descriptor, bool) {
 	z, err := s.db.ZoneByID(parseID(c))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "zone not found"})
+		fail(c, 404, "zone not found")
 		return nil, upstream.Descriptor{}, false
 	}
 	d, err := upstream.Lookup(z.Adapter)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "advanced config applies to upstream adapters only: " + err.Error()})
+		fail(c, 400, "advanced config applies to upstream adapters only: "+err.Error())
 		return nil, upstream.Descriptor{}, false
 	}
 	return z, d, true
@@ -80,12 +81,12 @@ func (s *Server) handleForgeDNSZoneConfig(c *gin.Context) {
 	cfg := upstreamConfig(z)
 	server, err := s.configView(m, d, cfg, upstream.ScopeServer, z.OverrideTOML)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	client, err := s.configView(m, d, cfg, upstream.ScopeClient, z.ClientOverrideTOML)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	c.JSON(200, gin.H{
@@ -167,7 +168,7 @@ func (s *Server) handleForgeDNSZoneOverride(c *gin.Context) {
 	}
 	var req overrideReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	scope := scopeOf(req.Scope)
@@ -183,13 +184,14 @@ func (s *Server) handleForgeDNSZoneOverride(c *gin.Context) {
 	}
 	doc, warnings, err := upstream.ValidateOverrideTOML(m, scope, req.TOML)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error(), "detail": err})
+		apierr.Fail(c, &apierr.Error{Kind: apierr.KindValidation, Status: 400,
+			Message: err.Error(), Cause: err, Details: map[string]any{"detail": err}})
 		return
 	}
 	doc = upstream.UnmaskDocument(doc, prev)
 	text, err := upstream.RenderOverride(m, scope, doc)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 
@@ -203,11 +205,12 @@ func (s *Server) handleForgeDNSZoneOverride(c *gin.Context) {
 	}
 	e, err := effectiveFor(d, cfg, scope)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if err := upstream.ValidateComplete(m, scope, e.Values); err != nil {
-		c.JSON(400, gin.H{"error": err.Error(), "detail": err})
+		apierr.Fail(c, &apierr.Error{Kind: apierr.KindValidation, Status: 400,
+			Message: err.Error(), Cause: err, Details: map[string]any{"detail": err}})
 		return
 	}
 
@@ -217,7 +220,7 @@ func (s *Server) handleForgeDNSZoneOverride(c *gin.Context) {
 		z.OverrideTOML = text
 	}
 	if err := s.db.SaveZone(z); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "forgedns.zone.override", z.Zone+" "+string(scope))
@@ -240,23 +243,24 @@ func (s *Server) handleForgeDNSZoneImport(c *gin.Context) {
 	}
 	var req overrideReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid payload"})
+		fail(c, 400, "invalid payload")
 		return
 	}
 	scope := scopeOf(req.Scope)
 	imported, override, err := importFor(scope, req.TOML)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error(), "detail": err})
+		apierr.Fail(c, &apierr.Error{Kind: apierr.KindValidation, Status: 400,
+			Message: err.Error(), Cause: err, Details: map[string]any{"detail": err}})
 		return
 	}
 	m, err := upstream.ManifestFor(imported.Adapter)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	text, err := upstream.RenderOverride(m, scope, override)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	result := gin.H{
@@ -279,12 +283,12 @@ func (s *Server) handleForgeDNSZoneImport(c *gin.Context) {
 	}
 	cfg.Normalize(d)
 	if err := cfg.Validate(); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	applyUpstreamConfig(z, cfg)
 	if err := s.db.SaveZone(z); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	result["applied"] = true

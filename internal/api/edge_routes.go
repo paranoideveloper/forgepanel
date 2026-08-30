@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/edge"
 	"github.com/forgepanel/forgepanel/internal/store"
 )
@@ -29,20 +30,19 @@ func (s *Server) handleEdgeFeed(c *gin.Context) {
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
 	want := s.knobs().String(edgeFeedPullTokenKey)
 	if want == "" {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":       "the pull feed is not enabled on this panel",
-			"remediation": "mint a token with GET /api/admin/edge/feed-token, then set feedPullURL and feedPullToken in the Worker's config.",
-		})
+		apierr.Fail(c, &apierr.Error{Op: "edge-feed-pull", Kind: apierr.KindNotFound,
+			Message:     "the pull feed is not enabled on this panel",
+			Remediation: "mint a token with GET /api/admin/edge/feed-token, then set feedPullURL and feedPullToken in the Worker's config."})
 		return
 	}
 	got := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
 	if !constantTimeEqualString(got, want) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid feed pull token"})
+		fail(c, http.StatusUnauthorized, "invalid feed pull token")
 		return
 	}
 	doc, err := s.EdgeFeed()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	// The raw document, not an envelope: the Worker feeds the response straight
@@ -58,7 +58,7 @@ func (s *Server) handleEdgeFeedToken(c *gin.Context) {
 	if tok == "" || rotate {
 		tok = randHex(24)
 		if err := s.knobs().Set(edgeFeedPullTokenKey, tok); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			failErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		s.audit(c, "edge.feed-token.rotate", "edge")
@@ -71,7 +71,7 @@ func (s *Server) handleEdgeFeedToken(c *gin.Context) {
 func (s *Server) handleEdgePreviewFeed(c *gin.Context) {
 	doc, err := s.EdgeFeed()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, doc)
@@ -82,7 +82,7 @@ func (s *Server) handleEdgePreviewFeed(c *gin.Context) {
 func (s *Server) handleListEdgeDeployments(c *gin.Context) {
 	deps, err := s.db.ListEdgeDeployments()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	out := make([]gin.H, 0, len(deps))
@@ -112,8 +112,10 @@ func (s *Server) handleRegisterEdgeDeployment(c *gin.Context) {
 		AccountID  string `json:"account_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "could not parse the request body: " + err.Error(),
-			"remediation": `send {"name":"forgeedge-a1b2c3","origin":"https://forgeedge-a1b2c3.acme.workers.dev","secure_path":"<24 chars>","push_token":"<from the Worker's status page>"}`})
+		apierr.Fail(c, &apierr.Error{Op: "edge-register", Kind: apierr.KindValidation,
+			Message:     "could not parse the request body: " + err.Error(),
+			Cause:       err,
+			Remediation: `send {"name":"forgeedge-a1b2c3","origin":"https://forgeedge-a1b2c3.acme.workers.dev","secure_path":"<24 chars>","push_token":"<from the Worker's status page>"}`})
 		return
 	}
 	d := &store.EdgeDeployment{
@@ -121,7 +123,7 @@ func (s *Server) handleRegisterEdgeDeployment(c *gin.Context) {
 		SecurePath: req.SecurePath, PushToken: req.PushToken, AccountID: req.AccountID,
 	}
 	if err := s.db.CreateEdgeDeployment(d); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	s.audit(c, "edge.deployment.register", d.Name)
@@ -134,7 +136,7 @@ func (s *Server) handleRegisterEdgeDeployment(c *gin.Context) {
 // click kill every subscription the edge serves.
 func (s *Server) handleDeleteEdgeDeployment(c *gin.Context) {
 	if err := s.db.DeleteEdgeDeployment(parseID(c)); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		fail(c, http.StatusNotFound, "no such edge deployment")
 		return
 	}
 	s.audit(c, "edge.deployment.delete", c.Param("id"))
@@ -147,21 +149,21 @@ func (s *Server) handleDeleteEdgeDeployment(c *gin.Context) {
 func (s *Server) handleEdgePush(c *gin.Context) {
 	doc, err := s.EdgeFeed()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	var results []EdgePushResult
 	if idStr := c.Param("id"); idStr != "" {
 		d, err := s.db.EdgeDeploymentByID(parseID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+			fail(c, http.StatusNotFound, "no such edge deployment")
 			return
 		}
 		results = []EdgePushResult{s.pushFeedTo(d, doc)}
 	} else {
 		deps, err := s.db.ListEdgeDeployments()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			failErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		for i := range deps {
@@ -191,7 +193,7 @@ func (s *Server) handleEdgePush(c *gin.Context) {
 func (s *Server) handleEdgeStatus(c *gin.Context) {
 	d, err := s.db.EdgeDeploymentByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		fail(c, http.StatusNotFound, "no such edge deployment")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -212,14 +214,13 @@ func (s *Server) handleEdgeStatus(c *gin.Context) {
 func (s *Server) handleEdgeWarpRegister(c *gin.Context) {
 	d, err := s.db.EdgeDeploymentByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		fail(c, http.StatusNotFound, "no such edge deployment")
 		return
 	}
 	if d.PushToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":       "no push token is stored for this edge, so the panel cannot drive it",
-			"remediation": "re-deploy from the panel (new deploys store the token), or open the Worker's own panel and register WARP there.",
-		})
+		apierr.Fail(c, apierr.Validation("edge-warp",
+			"no push token is stored for this edge, so the panel cannot drive it",
+			"re-deploy from the panel (new deploys store the token), or open the Worker's own panel and register WARP there."))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
@@ -253,11 +254,11 @@ func (s *Server) handleEdgeWarpRegister(c *gin.Context) {
 func (s *Server) handleEdgeWarpConf(c *gin.Context) {
 	d, err := s.db.EdgeDeploymentByID(parseID(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no such edge deployment"})
+		fail(c, http.StatusNotFound, "no such edge deployment")
 		return
 	}
 	if d.PushToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no push token is stored for this edge, so the panel cannot fetch its .conf"})
+		fail(c, http.StatusBadRequest, "no push token is stored for this edge, so the panel cannot fetch its .conf")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -472,34 +473,12 @@ func constantTimeEqualString(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// edgeFail writes a typed edge error with the HTTP status its kind implies.
+// edgeFail writes a typed edge error. It kept its name because sixteen call
+// sites use it, but its kind->status switch — the second of three copies of the
+// same table — now lives in internal/apierr, so an edge failure and a DNS
+// failure reach the browser in the same shape.
 func edgeFail(c *gin.Context, err error) {
-	e, ok := edge.AsError(err)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	status := http.StatusInternalServerError
-	switch e.Kind {
-	case edge.KindValidation:
-		status = http.StatusBadRequest
-	case edge.KindAuth:
-		status = http.StatusUnauthorized
-	case edge.KindPermission:
-		status = http.StatusForbidden
-	case edge.KindNotFound:
-		status = http.StatusNotFound
-	case edge.KindConflict:
-		status = http.StatusConflict
-	case edge.KindRateLimit:
-		status = http.StatusTooManyRequests
-	case edge.KindNetwork:
-		status = http.StatusBadGateway
-	case edge.KindNoCredentials:
-		status = http.StatusPreconditionRequired
-	}
-	c.JSON(status, gin.H{"error": e.Message, "kind": string(e.Kind), "op": e.Op,
-		"remediation": e.Remediation, "missing_scope": e.MissingScope})
+	apierr.Fail(c, err)
 }
 
 // applyEdgeProxyIP writes the operator's proxy IP into a freshly deployed

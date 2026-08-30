@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/auth"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -105,18 +106,18 @@ func (s *Server) userOr404(c *gin.Context) (*store.User, *auth.Claims, bool) {
 	claims, _ := auth.ClaimsFrom(c)
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "invalid user id"})
+		fail(c, 400, "invalid user id")
 		return nil, nil, false
 	}
 	u, err := s.db.UserByID(uint(id))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "user not found"})
+		fail(c, 404, "user not found")
 		return nil, nil, false
 	}
 	if !s.scopeOK(claims, u) {
 		// Same response as "not found": a reseller should not be able to probe
 		// which user IDs exist outside their tenancy.
-		c.JSON(404, gin.H{"error": "user not found"})
+		fail(c, 404, "user not found")
 		return nil, nil, false
 	}
 	return u, claims, true
@@ -131,7 +132,7 @@ func (s *Server) handleGetUser(c *gin.Context) {
 	}
 	a, err := s.db.UserAssignments(u.ID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{
@@ -154,7 +155,7 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 	}
 	var req map[string]any
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 
@@ -189,20 +190,21 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 		fields[col] = val
 	}
 	if len(fieldErrs) > 0 {
-		c.JSON(422, gin.H{"error": "validation failed", "fields": fieldErrs})
+		apierr.Fail(c, apierr.FieldErrors("user-update", fieldErrs))
 		return
 	}
 	if len(fields) == 0 {
-		c.JSON(400, gin.H{"error": "no editable fields supplied"})
+		fail(c, 400, "no editable fields supplied")
 		return
 	}
 
 	if err := s.db.UpdateUserFields(u.ID, fields, ifUnchanged); err != nil {
 		switch {
 		case errors.Is(err, store.ErrStaleWrite):
-			c.JSON(409, gin.H{"error": err.Error(), "code": "stale_write"})
+			apierr.Fail(c, &apierr.Error{Op: "user-update", Kind: apierr.KindStaleWrite,
+				Code: "stale_write", Message: err.Error(), Cause: err})
 		default:
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 		}
 		return
 	}
@@ -284,15 +286,15 @@ func (s *Server) handleSetUserInbounds(c *gin.Context) {
 		InboundIDs []uint `json:"inbound_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	if err := s.db.SetUserInbounds(u.ID, req.InboundIDs, s.assignableInbounds(claims)); err != nil {
 		if errors.Is(err, store.ErrForbiddenRef) {
-			c.JSON(403, gin.H{"error": err.Error()})
+			failErr(c, 403, err)
 			return
 		}
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	s.audit(c, "user.inbounds.set", u.Username)
@@ -316,7 +318,7 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 	if !req.UUID && !req.Password && !req.SubToken {
-		c.JSON(400, gin.H{"error": "specify at least one of uuid, password, sub_token"})
+		fail(c, 400, "specify at least one of uuid, password, sub_token")
 		return
 	}
 	fields := map[string]any{}
@@ -326,7 +328,7 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 	if req.Password {
 		pw, err := keygen.Password(16)
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			failErr(c, 500, err)
 			return
 		}
 		fields["password"] = pw
@@ -335,7 +337,7 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 		fields["sub_token"] = token26()
 	}
 	if err := s.db.UpdateUserFields(u.ID, fields, time.Time{}); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	// WHICH credentials, never their values. "credentials reset" alone cannot
@@ -363,17 +365,17 @@ func (s *Server) handleResetUserCredentials(c *gin.Context) {
 func (s *Server) groupOr404(c *gin.Context) (*store.Group, bool) {
 	claims, _ := auth.ClaimsFrom(c)
 	if claims == nil || claims.Role == string(store.RoleReseller) || claims.Role == string(store.RoleViewer) {
-		c.JSON(403, gin.H{"error": "insufficient role"})
+		fail(c, 403, "insufficient role")
 		return nil, false
 	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "invalid group id"})
+		fail(c, 400, "invalid group id")
 		return nil, false
 	}
 	g, err := s.db.GroupByID(uint(id))
 	if err != nil {
-		c.JSON(404, gin.H{"error": "group not found"})
+		fail(c, 404, "group not found")
 		return nil, false
 	}
 	return g, true
@@ -407,13 +409,13 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 		UpdatedAt   *time.Time `json:"updated_at"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	fields := map[string]any{}
 	if req.Name != nil {
 		if *req.Name == "" {
-			c.JSON(422, gin.H{"error": "validation failed", "fields": gin.H{"name": "must not be empty"}})
+			apierr.Fail(c, apierr.FieldErrors("group-update", map[string]string{"name": "must not be empty"}))
 			return
 		}
 		fields["name"] = *req.Name
@@ -439,10 +441,11 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 	if len(fields) > 0 {
 		if err := s.db.UpdateGroupFields(g.ID, fields, ifUnchanged); err != nil {
 			if errors.Is(err, store.ErrStaleWrite) {
-				c.JSON(409, gin.H{"error": err.Error(), "code": "stale_write"})
+				apierr.Fail(c, &apierr.Error{Op: "group-update", Kind: apierr.KindStaleWrite,
+					Code: "stale_write", Message: err.Error(), Cause: err})
 				return
 			}
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 	}
@@ -452,7 +455,7 @@ func (s *Server) handleUpdateGroup(c *gin.Context) {
 			target = g.ID
 		}
 		if err := s.db.SetDefaultGroup(target); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
+			failErr(c, 400, err)
 			return
 		}
 	}
@@ -479,17 +482,15 @@ func (s *Server) handleDeleteGroup(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, store.ErrGroupInUse) {
 			members, _ := s.db.UsersInGroup(g.ID)
-			c.JSON(http.StatusConflict, gin.H{
-				"error":   err.Error(),
-				"code":    "group_in_use",
-				"members": members,
-				"hint": "pass ?reassign_to=<group id> to move them, or " +
-					"?remove_members_from_group=true to leave them with no group. " +
-					"Members are never deleted.",
-			})
+			apierr.Fail(c, &apierr.Error{Op: "group-delete", Kind: apierr.KindConflict,
+				Code: "group_in_use", Message: err.Error(), Cause: err,
+				Details: map[string]any{"members": members,
+					"hint": "pass ?reassign_to=<group id> to move them, or " +
+						"?remove_members_from_group=true to leave them with no group. " +
+						"Members are never deleted."}})
 			return
 		}
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	s.audit(c, "group.delete", g.Name)
@@ -514,7 +515,7 @@ func (s *Server) handleSetSubRevoked(c *gin.Context) {
 		Revoked bool `json:"revoked"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "send {\"revoked\": true} or {\"revoked\": false}"})
+		fail(c, http.StatusBadRequest, "send {\"revoked\": true} or {\"revoked\": false}")
 		return
 	}
 	if req.Revoked {
@@ -524,7 +525,7 @@ func (s *Server) handleSetSubRevoked(c *gin.Context) {
 		u.SubRevoked = nil
 	}
 	if err := s.db.SaveUser(u); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	action := "user.sub.restore"

@@ -35,6 +35,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/edge"
 )
 
@@ -85,10 +86,10 @@ func (s *Server) workerClientFor(id uint) (*edge.WorkerClient, string, bool) {
 func (s *Server) handleEdgeGetConfig(c *gin.Context) {
 	wc, name, ok := s.workerClientFor(parseID(c))
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "this deployment has no push token stored, so the panel cannot reach its configuration",
-			"remediation": "re-register the deployment with its push token, or read the token from the " +
-				"Worker's own status page and save it against " + name})
+		apierr.Fail(c, apierr.Validation("edge-config-read",
+			"this deployment has no push token stored, so the panel cannot reach its configuration",
+			"re-register the deployment with its push token, or read the token from the "+
+				"Worker's own status page and save it against "+name))
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -127,19 +128,20 @@ func (s *Server) handleEdgeGetConfig(c *gin.Context) {
 func (s *Server) handleEdgeUpdateConfig(c *gin.Context) {
 	wc, name, ok := s.workerClientFor(parseID(c))
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":       "this deployment has no push token stored, so the panel cannot write its configuration",
-			"remediation": "re-register the deployment with its push token against " + name})
+		apierr.Fail(c, apierr.Validation("edge-config-write",
+			"this deployment has no push token stored, so the panel cannot write its configuration",
+			"re-register the deployment with its push token against "+name))
 		return
 	}
 	var patch map[string]any
 	if err := c.ShouldBindJSON(&patch); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body",
-			"detail": `send an object of the fields to change, e.g. {"fingerprint":"firefox"}`})
+		apierr.Fail(c, &apierr.Error{Op: "edge-config-write", Kind: apierr.KindValidation,
+			Message: "invalid request body", Cause: err,
+			Details: map[string]any{"detail": `send an object of the fields to change, e.g. {"fingerprint":"firefox"}`}})
 		return
 	}
 	if len(patch) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields were supplied"})
+		fail(c, http.StatusBadRequest, "no fields were supplied")
 		return
 	}
 
