@@ -226,6 +226,16 @@ func NewWithStore(cfg *config.Config) (*Server, error) {
 	// notify" pattern is how a stale copy of a config lingers.
 	s.engine.SetRoutingSource(s.routingSpecs)
 
+	// Apply the operator's stored core pins before anything reloads. Skipping
+	// this is how the whole feature dies quietly across a restart: the API keeps
+	// reporting the selected version while every adapter goes on exec'ing the
+	// one this build was compiled against. Non-fatal — a panel that cannot read
+	// its pins must still start, on the shipped cores, so the operator can reach
+	// the UI and see why.
+	if err := s.applyStoredCorePins(); err != nil {
+		fmt.Fprintln(os.Stderr, "forgepanel: core pins:", err)
+	}
+
 	// Outbound webhooks. Built eagerly rather than on first use: its only caller
 	// is the emit seam below, and a lazily built sink is a nil sink at exactly
 	// the moment the first event fires.
@@ -852,6 +862,11 @@ func (s *Server) routes() {
 			admin.GET("/stats", s.handleStats)
 			admin.GET("/overview", s.handleOverview)
 			admin.GET("/engines", s.handleEngines)
+			// Operator-selectable core versions (FP-ADAPT-014). A cores.go with
+			// no admin. line here is the whole defect class this row exists in.
+			admin.GET("/cores", s.handleListCores)
+			admin.POST("/cores/:engine/pin", s.handlePinCore)
+			admin.POST("/cores/:engine/rollback", s.handleRollbackCore)
 			// Brook and AmneziaWG are not supervised subprocesses, so they do
 			// not appear in /engines. Their status functions existed with no
 			// route at all, which is why an operator running either of them saw

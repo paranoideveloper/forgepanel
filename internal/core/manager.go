@@ -131,6 +131,20 @@ func ensureSelfSignedFor(dataDir string) (string, string, error) {
 // serves which protocol instead of the panel and the operator guessing.
 func (c *Controller) Registry() *adapter.Registry { return c.registry }
 
+// Bins exposes the binary manager, so the API can report the version the panel
+// is actually resolving rather than the constant it was compiled with.
+func (c *Controller) Bins() *binmgr.Manager { return c.bins }
+
+// SetCorePins re-points the shared binary manager at an operator-selected set of
+// core versions.
+//
+// One mutation point is enough because c.bins is THE manager: the adapter
+// registry is handed it at dispatch.go (Bins: c.bins) and so is BrookManager
+// just below, and adapter.DefaultRegistry only builds a Manager of its own when
+// Options.Bins is nil. So a pin applied here is applied everywhere a core is
+// resolved.
+func (c *Controller) SetCorePins(p map[binmgr.Engine]binmgr.Pin) error { return c.bins.SetPins(p) }
+
 // SetCertResolver wires the certificate store into config generation, so an
 // inbound whose SNI the panel holds a real certificate for is served with that
 // certificate instead of the self-signed fallback.

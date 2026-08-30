@@ -463,7 +463,14 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 //
 // Three models landed in the same batch, so no single branch's digest is the
 // merged one; this is recomputed at the merge.
-const modelSchemaFingerprintPinned = "054cbf6fd8bd39a4e4ee78a161e22465dcf80af7312f37e3655a417568f08453"
+
+// core_pins came with migVCorePins: the operator's own (engine, version, asset)
+// checksums, which is what lets a panel move off the core version it was
+// compiled against. It has to be a table because a version needs one digest per
+// platform asset, and it has to carry the digest at all because binmgr refuses
+// to install an artifact it cannot verify — a version with no checksum is not a
+// smaller feature, it is an unverified proxy core.
+const modelSchemaFingerprintPinned = "c0f25b830e74df4159fb1fbaa3d9d3c8286b024f2346e78a75f4811ebf168077"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

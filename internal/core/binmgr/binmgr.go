@@ -19,7 +19,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,18 +44,99 @@ const (
 // httpClient bounds download time so a boot never hangs forever.
 var httpClient = netegress.Client(5 * time.Minute)
 
+// Pin is an operator-selected core version plus the digests that make it
+// installable. The version above is what this build shipped with; a Pin is how
+// an operator moves off it without a rebuild — a CVE fix upstream published this
+// morning, or a rollback to the release that did not break their transport.
+//
+// SHA256 is not optional. Every path that writes a core binary goes through
+// verifyPinned, and a version whose asset has no digest is refused by SetPins
+// rather than downloaded and hoped about.
+type Pin struct {
+	Version string
+	SHA256  map[string]string // release filename -> hex SHA-256
+}
+
 // Manager resolves and caches core binaries under BinDir.
 type Manager struct {
 	BinDir string
+	// Pins overrides the compiled version and digests, per engine. Safe to
+	// assign directly at construction, before the Manager is shared; after that
+	// use SetPins, which takes the lock this field is guarded by.
+	//
+	// Nil is the ordinary state and means "the versions this build shipped
+	// with", so every caller that never pins is unaffected by any of this.
+	Pins map[Engine]Pin
+	mu   sync.RWMutex
 }
 
 // New returns a Manager rooted at dataDir/bin.
 func New(dataDir string) *Manager { return &Manager{BinDir: filepath.Join(dataDir, "bin")} }
 
+// pin returns the operator's selection for e, if there is one.
+func (m *Manager) pin(e Engine) (Pin, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.Pins[e]
+	return p, ok && p.Version != ""
+}
+
+// version is the version this manager will actually resolve for e: the
+// operator's selection when there is one, otherwise the compiled constant.
+func (m *Manager) version(e Engine) string {
+	if p, ok := m.pin(e); ok {
+		return p.Version
+	}
+	return versionFor(e)
+}
+
+// Version exposes the effective version so the API can report the core the panel
+// is really running rather than the one it was compiled against.
+func (m *Manager) Version(e Engine) string { return m.version(e) }
+
+// digest resolves an asset's expected SHA-256: an operator pin first, then the
+// compiled table. Pins never write into pinnedSHA256 — that map is the record of
+// what THIS BUILD verified, and TestTablesAndPinsAgree holds it to being
+// reachable from a platform table.
+func (m *Manager) digest(asset string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, p := range m.Pins {
+		if want, ok := p.SHA256[asset]; ok {
+			return want, true
+		}
+	}
+	return compiledDigest(asset)
+}
+
+// digestFn snapshots the digest resolver so the install path — which spends
+// minutes inside a download — never holds the lock a SetPins is waiting on.
+func (m *Manager) digestFn() func(string) (string, bool) {
+	m.mu.RLock()
+	snapshot := make(map[string]string)
+	for _, p := range m.Pins {
+		for asset, want := range p.SHA256 {
+			snapshot[asset] = want
+		}
+	}
+	m.mu.RUnlock()
+	return func(asset string) (string, bool) {
+		if want, ok := snapshot[asset]; ok {
+			return want, true
+		}
+		return compiledDigest(asset)
+	}
+}
+
 // Path returns the on-disk path a resolved engine binary would have (whether or
 // not it is present yet).
+//
+// The version in the directory name is the EFFECTIVE one, which is what makes a
+// pin reach the running cores at all: Ensure installs into this path and every
+// adapter execs it. It is also what makes rollback free — the previous version's
+// directory is still on disk under its own name.
 func (m *Manager) Path(e Engine) string {
-	return filepath.Join(m.BinDir, string(e)+"-"+versionFor(e), binaryName(e, runtime.GOOS))
+	return filepath.Join(m.BinDir, string(e)+"-"+m.version(e), binaryName(e, runtime.GOOS))
 }
 
 // binaryName is the file name a core has on disk AND inside its release archive.
@@ -119,7 +202,7 @@ func (m *Manager) Ensure(e Engine) (string, error) {
 		// per-user traffic for the protocols sing-box serves. Falling back to
 		// upstream is deliberate — the panel works either way, those protocols
 		// are simply unmetered, and the metering health subsystem says so.
-		if adopted, err := adoptForgePanelSingbox(p, runtime.GOARCH); err != nil {
+		if adopted, err := adoptForgePanelSingboxPin(p, runtime.GOARCH, m.version(EngineSingbox), m.digestFn()); err != nil {
 			return "", err
 		} else if adopted {
 			return p, nil
@@ -131,6 +214,10 @@ func (m *Manager) Ensure(e Engine) (string, error) {
 		return "", fmt.Errorf("binmgr: unknown engine %q", e)
 	}
 }
+
+// ShippedVersion is the version this build was compiled against, which is what
+// an engine falls back to with no operator pin.
+func ShippedVersion(e Engine) string { return versionFor(e) }
 
 func versionFor(e Engine) string {
 	switch e {
@@ -208,10 +295,24 @@ var pinnedSHA256 = map[string]string{
 	"sing-box-1.13.15-linux-arm64": "f163bae1ac31e80fed67a9e51463ef943ed4a13ffba35db591546220073eab0a",
 }
 
+// compiledDigest reads the table above: the digests this build was shipped with.
+func compiledDigest(asset string) (string, bool) {
+	want, ok := pinnedSHA256[asset]
+	return want, ok
+}
+
 // verifyPinned enforces the mandatory checksum: it fails if the artifact has no
 // pinned entry (unknown filename) or if the SHA-256 does not match.
 func verifyPinned(asset string, data []byte) error {
-	want, ok := pinnedSHA256[asset]
+	return verifyPinnedWith(asset, data, compiledDigest)
+}
+
+// verifyPinnedWith is verifyPinned against a caller-supplied digest source, so
+// an operator-pinned version is verified by exactly the same code — and refused
+// by exactly the same message — as a compiled one. There is deliberately no
+// second, laxer checksum path for pinned versions to slip through.
+func verifyPinnedWith(asset string, data []byte, digest func(string) (string, bool)) error {
+	want, ok := digest(asset)
 	if !ok {
 		return fmt.Errorf("binmgr: no pinned checksum for %q — refusing to install unverified artifact", asset)
 	}
@@ -227,8 +328,8 @@ func verifyPinned(asset string, data []byte) error {
 // temp path via extract, checks its self-reported version, then atomically swaps
 // it into place — so a failed or tampered download never replaces a known-good
 // binary, and temp files are cleaned up on any failure.
-func finalizeInstall(dst, asset string, data []byte, extract func(tmp string) error, wantVersion string) error {
-	if err := verifyPinned(asset, data); err != nil {
+func finalizeInstall(dst, asset string, data []byte, extract func(tmp string) error, wantVersion string, digest func(string) (string, bool)) error {
+	if err := verifyPinnedWith(asset, data, digest); err != nil {
 		return err
 	}
 	tmp := dst + ".tmp"
@@ -252,19 +353,24 @@ func finalizeInstall(dst, asset string, data []byte, extract func(tmp string) er
 // SHA-256, and atomically installs the binary.
 func (m *Manager) installXray(dst string) error {
 	host := hostPlatform()
-	asset, err := assetFor(EngineXray, host)
+	ver, dg := m.version(EngineXray), m.digestFn()
+	asset, err := assetForPin(EngineXray, host, ver, dg)
 	if err != nil {
 		return err
 	}
 	member := binaryName(EngineXray, host.os)
-	base := "https://github.com/XTLS/Xray-core/releases/download/" + XrayVersion + "/"
+	base := "https://github.com/XTLS/Xray-core/releases/download/" + ver + "/"
 	zipBytes, err := download(base + asset)
 	if err != nil {
 		return fmt.Errorf("download xray: %w", err)
 	}
+	// The effective version reaches verifyVersion too, not just the URL: a
+	// pinned v25.1.1 binary self-reports v25.1.1, so checking it against the
+	// compiled constant would fail every pinned install with a message about a
+	// version mismatch that nobody asked for.
 	if err := finalizeInstall(dst, asset, zipBytes,
 		func(tmp string) error { return extractZipFile(zipBytes, member, tmp) },
-		"Xray "+strings.TrimPrefix(XrayVersion, "v")); err != nil {
+		"Xray "+strings.TrimPrefix(ver, "v"), dg); err != nil {
 		return err
 	}
 	return installGeodata(filepath.Dir(dst), zipBytes)
@@ -339,12 +445,13 @@ func (m *Manager) GeoAssetsPresent(e Engine) bool {
 // reported version.
 func (m *Manager) installSingbox(dst string) error {
 	host := hostPlatform()
-	asset, err := assetFor(EngineSingbox, host)
+	ver, dg := m.version(EngineSingbox), m.digestFn()
+	asset, err := assetForPin(EngineSingbox, host, ver, dg)
 	if err != nil {
 		return err
 	}
 	member := binaryName(EngineSingbox, host.os)
-	url := fmt.Sprintf("https://github.com/SagerNet/sing-box/releases/download/v%s/%s", SingboxVersion, asset)
+	url := fmt.Sprintf("https://github.com/SagerNet/sing-box/releases/download/v%s/%s", ver, asset)
 	archive, err := download(url)
 	if err != nil {
 		return fmt.Errorf("download sing-box: %w", err)
@@ -356,7 +463,7 @@ func (m *Manager) installSingbox(dst string) error {
 	if strings.HasSuffix(asset, ".zip") {
 		extract = func(tmp string) error { return extractZipFile(archive, member, tmp) }
 	}
-	return finalizeInstall(dst, asset, archive, extract, "sing-box version "+SingboxVersion)
+	return finalizeInstall(dst, asset, archive, extract, "sing-box version "+ver, dg)
 }
 
 // platform is the OS/CPU pair a release asset is published for.
@@ -471,12 +578,17 @@ var singboxAssets = map[platform]string{
 	{"windows", "arm64"}: "windows-arm64.zip",
 }
 
-func singboxAsset(p platform) (string, bool) {
+func singboxAsset(p platform) (string, bool) { return singboxAssetVer(p, SingboxVersion) }
+
+// singboxAssetVer splices an arbitrary version into the release name. sing-box
+// is the one engine whose asset FILENAME carries the version, so an operator pin
+// changes the name here and not only the URL.
+func singboxAssetVer(p platform, ver string) (string, bool) {
 	tail, ok := singboxAssets[p]
 	if !ok {
 		return "", false
 	}
-	return "sing-box-" + SingboxVersion + "-" + tail, true
+	return "sing-box-" + ver + "-" + tail, true
 }
 
 // brookAssets maps a host platform to brook's bare-binary release name. brook
@@ -509,6 +621,14 @@ var brookAssets = map[platform]string{
 // of the speed with nobody the wiser. An explicit error naming the platform is
 // the only honest answer for a combination upstream does not publish.
 func assetFor(e Engine, p platform) (string, error) {
+	return assetForPin(e, p, versionFor(e), compiledDigest)
+}
+
+// assetNameFor resolves the release FILENAME only, with no opinion about whether
+// anything can verify it. It is split out because the pin API has to tell an
+// operator which file to supply a digest for, and at that moment there is by
+// definition no digest yet.
+func assetNameFor(e Engine, p platform, ver string) (string, error) {
 	var (
 		name string
 		ok   bool
@@ -517,24 +637,121 @@ func assetFor(e Engine, p platform) (string, error) {
 	case EngineXray:
 		name, ok = xrayAssets[p]
 	case EngineSingbox:
-		name, ok = singboxAsset(p)
+		name, ok = singboxAssetVer(p, ver)
 	case EngineBrook:
 		name, ok = brookAssets[p]
 	default:
 		return "", fmt.Errorf("binmgr: unknown engine %q", e)
 	}
 	if !ok {
-		return "", fmt.Errorf("binmgr: upstream publishes no %s %s build for %s", e, versionFor(e), p)
+		return "", fmt.Errorf("binmgr: upstream publishes no %s %s build for %s", e, ver, p)
+	}
+	return name, nil
+}
+
+// assetForPin is assetFor for an arbitrary version and digest source. The
+// refusal below is the one thing an operator pin must never be able to route
+// around, so it lives here rather than in the compiled-only wrapper.
+func assetForPin(e Engine, p platform, ver string, digest func(string) (string, bool)) (string, error) {
+	name, err := assetNameFor(e, p, ver)
+	if err != nil {
+		return "", err
 	}
 	// Refuse before downloading rather than after. verifyPinned would catch an
 	// unpinned asset anyway, but only once ~20MB had already been fetched, and
 	// its message ("no pinned checksum for X") reads like tampering when the real
 	// cause is that this build of ForgePanel never pinned that platform.
-	if _, pinned := pinnedSHA256[name]; !pinned {
+	if _, pinned := digest(name); !pinned {
 		return "", fmt.Errorf("binmgr: %s has no pinned checksum in this build of ForgePanel — "+
 			"refusing to download a %s core for %s that it cannot verify", name, e, p)
 	}
 	return name, nil
+}
+
+// HostAssetName is the release file this host would download for e at ver. The
+// pin API serves it so an operator is told the exact filename to hash instead of
+// guessing at the platform naming of three different upstream projects.
+func HostAssetName(e Engine, ver string) (string, error) {
+	if ver == "" {
+		ver = versionFor(e)
+	}
+	return assetNameFor(e, hostPlatform(), ver)
+}
+
+// ValidatePins reports whether every pin could actually be installed ON THIS
+// HOST: upstream must publish a build for this platform, and the operator must
+// have supplied the digest for it.
+//
+// Separate from SetPins so the API can refuse a bad pin BEFORE it writes any
+// rows. Persisting a selection that the manager will then reject leaves the
+// database claiming a version the panel is not running, which is the exact lie
+// this feature exists to stop telling.
+func ValidatePins(pins map[Engine]Pin) error {
+	for e, p := range pins {
+		if p.Version == "" {
+			return fmt.Errorf("binmgr: %s pin has no version", e)
+		}
+		digest := func(asset string) (string, bool) {
+			want, ok := p.SHA256[asset]
+			return want, ok
+		}
+		if _, err := assetForPin(e, hostPlatform(), p.Version, digest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetPins replaces the operator's version selection wholesale.
+//
+// It REFUSES a pin with no digest for the asset this host would download, so an
+// unverifiable version can never reach finalizeInstall. The map is replaced
+// rather than mutated because a reload goroutine may be inside Path or Ensure
+// reading the old one.
+func (m *Manager) SetPins(pins map[Engine]Pin) error {
+	if err := ValidatePins(pins); err != nil {
+		return err
+	}
+	next := make(map[Engine]Pin, len(pins))
+	for e, p := range pins {
+		sums := make(map[string]string, len(p.SHA256))
+		for k, v := range p.SHA256 {
+			sums[k] = v
+		}
+		next[e] = Pin{Version: p.Version, SHA256: sums}
+	}
+	m.mu.Lock()
+	m.Pins = next
+	m.mu.Unlock()
+	return nil
+}
+
+// InstalledVersions lists the versions of e already present under BinDir, sorted
+// so the list is stable between calls.
+//
+// This is what makes rollback free: Path keys the cache directory by version, so
+// the version an operator moved off is still there and Ensure returns it with no
+// download at all.
+func (m *Manager) InstalledVersions(e Engine) []string {
+	entries, err := os.ReadDir(m.BinDir)
+	if err != nil {
+		return nil
+	}
+	prefix := string(e) + "-"
+	bin := binaryName(e, runtime.GOOS)
+	var out []string
+	for _, ent := range entries {
+		if !ent.IsDir() || !strings.HasPrefix(ent.Name(), prefix) {
+			continue
+		}
+		fi, err := os.Stat(filepath.Join(m.BinDir, ent.Name(), bin))
+		if err != nil || fi.Mode()&0o111 == 0 {
+			continue
+		}
+		out = append(out, strings.TrimPrefix(ent.Name(), prefix))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func download(url string) ([]byte, error) {
@@ -633,16 +850,19 @@ func firstLine(s string) string {
 
 // installBrook downloads the raw brook binary (a single ELF, not an archive).
 func (m *Manager) installBrook(dst string) error {
-	asset, err := assetFor(EngineBrook, hostPlatform())
+	ver, dg := m.version(EngineBrook), m.digestFn()
+	asset, err := assetForPin(EngineBrook, hostPlatform(), ver, dg)
 	if err != nil {
 		return err
 	}
-	url := "https://github.com/txthinking/brook/releases/download/" + BrookVersion + "/" + asset
+	url := "https://github.com/txthinking/brook/releases/download/" + ver + "/" + asset
 	raw, err := download(url)
 	if err != nil {
 		return fmt.Errorf("download brook: %w", err)
 	}
+	// brook's self-report carries no version, so unlike the other two there is
+	// nothing here to thread the pinned version into.
 	return finalizeInstall(dst, asset, raw,
 		func(tmp string) error { return writeExec(tmp, bytesReader(raw)) },
-		"Brook version")
+		"Brook version", dg)
 }

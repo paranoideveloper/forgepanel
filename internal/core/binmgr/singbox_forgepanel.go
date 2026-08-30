@@ -39,7 +39,14 @@ import (
 // It intentionally does NOT collide with the upstream archive name: the two are
 // different artifacts and must never share a checksum entry.
 func ForgePanelSingboxAsset(goarch string) string {
-	return fmt.Sprintf("sing-box-%s-linux-%s", SingboxVersion, goarch)
+	return forgePanelSingboxAssetVer(goarch, SingboxVersion)
+}
+
+// forgePanelSingboxAssetVer names the shipped artifact for an arbitrary version,
+// so an operator-pinned sing-box looks for the shipped build of THAT version
+// rather than of the compiled one.
+func forgePanelSingboxAssetVer(goarch, ver string) string {
+	return fmt.Sprintf("sing-box-%s-linux-%s", ver, goarch)
 }
 
 // forgepanelSingboxCandidates lists where a shipped sing-box may be found,
@@ -49,7 +56,12 @@ func ForgePanelSingboxAsset(goarch string) string {
 // installs forgepanel and its cores side by side, so that copy is the one
 // guaranteed to match this build.
 func forgepanelSingboxCandidates(goarch string) []string {
-	name := ForgePanelSingboxAsset(goarch)
+	return forgepanelSingboxCandidatesNamed(ForgePanelSingboxAsset(goarch))
+}
+
+// forgepanelSingboxCandidatesNamed takes the resolved asset name so a pinned
+// version searches for its own file.
+func forgepanelSingboxCandidatesNamed(name string) []string {
 	var out []string
 	if exe, err := os.Executable(); err == nil {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
@@ -76,8 +88,20 @@ func forgepanelSingboxCandidates(goarch string) []string {
 // and silently ignoring it to fall back to upstream would hide exactly the event
 // worth noticing.
 func adoptForgePanelSingbox(dst, goarch string) (bool, error) {
-	asset := ForgePanelSingboxAsset(goarch)
-	for _, src := range forgepanelSingboxCandidates(goarch) {
+	return adoptForgePanelSingboxPin(dst, goarch, SingboxVersion, compiledDigest)
+}
+
+// adoptForgePanelSingboxPin is adoptForgePanelSingbox for the version the
+// manager has actually resolved.
+//
+// Threading this is not cosmetic. Ensure calls adopt BEFORE installSingbox, so
+// on the unthreaded version an operator who pinned sing-box 1.14 got the SHIPPED
+// 1.13 build copied into bin/sing-box-1.14/ and Ensure returned success — the
+// panel reporting, in /api/capabilities and to every operator reading it, a
+// version it was demonstrably not running.
+func adoptForgePanelSingboxPin(dst, goarch, ver string, digest func(string) (string, bool)) (bool, error) {
+	asset := forgePanelSingboxAssetVer(goarch, ver)
+	for _, src := range forgepanelSingboxCandidatesNamed(asset) {
 		info, err := os.Stat(src)
 		if err != nil || info.IsDir() {
 			continue
@@ -88,7 +112,7 @@ func adoptForgePanelSingbox(dst, goarch string) (bool, error) {
 		}
 		sum := sha256.Sum256(data)
 		got := hex.EncodeToString(sum[:])
-		want, pinned := pinnedSHA256[asset]
+		want, pinned := digest(asset)
 		if !pinned {
 			return false, fmt.Errorf("binmgr: %s has no pinned checksum — refusing to install "+
 				"an unverified proxy core", asset)

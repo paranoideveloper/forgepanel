@@ -305,7 +305,8 @@ func AllModels() []any {
 		&ForgeDNSZone{}, &UserInbound{}, &Domain{}, &EdgeDeployment{}, &TrafficSnapshot{}, &TrafficRollup{},
 		&InboundHost{}, &WGPeer{}, &Bridge{}, &GroupInbound{},
 		&Outbound{}, &RoutingRule{}, &OutboundGroup{}, &APIToken{},
-		&Profile{}, &ProfileBinding{}, &WebhookEndpoint{}, &SubRequest{}, &UserTemplate{}}
+		&Profile{}, &ProfileBinding{}, &WebhookEndpoint{}, &SubRequest{}, &UserTemplate{},
+		&CorePin{}}
 }
 
 // Node is a remote ForgePanel node agent (spec §10). The panel is the source of

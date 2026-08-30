@@ -139,6 +139,10 @@ type engineSpec struct {
 // install itself. Healthchecks invoke the engine's own version subcommand --
 // the same liveness signal binmgr.verifyVersion uses -- because these runtime
 // images are distroless and have no shell, curl or nc to probe a socket with.
+// The image tags stay on binmgr's COMPILED constants even though an operator can
+// now pin a different core version: compose generation deploys upstream
+// container images and never goes through binmgr at all, so a panel-local pin
+// has no bearing on which image tag is correct here.
 func specs() map[string]engineSpec {
 	return map[string]engineSpec{
 		ProfileXray: {

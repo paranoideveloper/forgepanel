@@ -543,6 +543,19 @@ func (p *Process) Stop() {
 }
 
 // Status snapshots the process state.
+// BinPath reports the executable this process will run.
+//
+// Exported because it is the one piece of the spec that can go stale: the spec
+// is copied by value at construction, so a binary manager repointed later — an
+// operator pinning a core version — moves what the ADAPTER resolves without
+// moving what this process execs. A caller that memoises a Process has to be
+// able to notice.
+func (p *Process) BinPath() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.spec.BinPath
+}
+
 func (p *Process) Status() Status {
 	p.mu.Lock()
 	defer p.mu.Unlock()

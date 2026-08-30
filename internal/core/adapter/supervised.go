@@ -146,7 +146,27 @@ func (a *supervised) spec() supervisor.EngineSpec {
 func (a *supervised) process() *supervisor.Process {
 	if a.proc == nil {
 		a.proc = supervisor.NewProcess(a.spec())
+		return a.proc
 	}
+	// Rebuild when the resolved binary has moved under us.
+	//
+	// The supervisor copies the spec BY VALUE at construction, so BinPath is
+	// frozen at whatever the resolver returned the first time this core ran.
+	// An operator pinning a core version repoints the binary manager and
+	// nothing here noticed: Apply downloaded the pinned core and then restarted
+	// the OLD one, while the API reported the new version — the panel lying in
+	// precisely the way the pin exists to prevent. It only reproduces on a panel
+	// that has already served an inbound, which is every real one.
+	//
+	// The old process is stopped first. Dropping the reference without stopping
+	// would leave the previous core running, unsupervised and still holding the
+	// ports the replacement is about to bind.
+	want := a.bins.Path(a.binEngine)
+	if a.proc.BinPath() == want {
+		return a.proc
+	}
+	a.proc.Stop()
+	a.proc = supervisor.NewProcess(a.spec())
 	return a.proc
 }
 

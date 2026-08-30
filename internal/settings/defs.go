@@ -185,6 +185,23 @@ func buildRegistry() *Registry {
 		Key: "pending_totp_", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true, Prefix: true,
 		Help: "Per-admin TOTP secret held between 2FA setup and confirmation, then cleared.",
 	})
+	// Operator-selected core versions, and the version each one displaced so a
+	// rollback has a target. Empty means "the version this build shipped with".
+	//
+	// ScopeInternal on purpose: a ScopePanel key would be listed by
+	// GET /api/admin/settings/registry as a plain string field, advertising a way
+	// to set a core version WITHOUT a digest — which is precisely the path
+	// /api/admin/cores/:engine/pin exists to keep closed.
+	for _, e := range []string{"xray", "sing-box", "brook"} {
+		r.Register(Def{
+			Key: "core_version_" + e, Kind: KindString, Scope: ScopeInternal, Default: "",
+			Help: "Operator-selected " + e + " version. Empty uses the version this build shipped with.",
+		})
+		r.Register(Def{
+			Key: "core_version_prev_" + e, Kind: KindString, Scope: ScopeInternal, Default: "",
+			Help: "The " + e + " version the current selection displaced, and the target of a rollback.",
+		})
+	}
 
 	return r
 }
