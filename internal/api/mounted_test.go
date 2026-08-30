@@ -164,6 +164,8 @@ func TestRoutesTheUIDependsOnExist(t *testing.T) {
 		// and tests green behind a path the router never learned.
 		"PATCH /api/admin/nodes/:id",
 		"GET /api/admin/nodes/:id/logs",
+		// The Updates card on System Health.
+		"GET /api/admin/update",
 	} {
 		if !registered[want] {
 			t.Errorf("the UI calls %q and the router does not serve it", want)

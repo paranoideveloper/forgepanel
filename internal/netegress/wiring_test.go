@@ -23,7 +23,6 @@ import (
 var loopbackOnly = map[string]string{
 	"internal/core/singboxapi/singboxapi.go": "talks to the local sing-box API over a unix/loopback socket",
 	"internal/diag/verify.go":                "dials the loopback SOCKS port of a client core it just spawned itself",
-	"cmd/forgectl/local.go":                  "talks to the panel on this machine",
 	"cmd/forgenode/main.go":                  "the node agent's mTLS client to its own panel, pinned to a certificate",
 	"internal/forgedns/upstream/manager.go":  "health-checks the local ForgeDNS upstream process",
 	"cmd/forgectl/health.go":                 "probes the panel on this machine, with TLS trust deliberately not pinned",

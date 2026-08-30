@@ -948,6 +948,12 @@ func (s *Server) routes() {
 			admin.GET("/panel-address/dns-check", s.handlePanelDNSCheck)
 			admin.GET("/panel-address/port-check", s.handlePanelPortCheck)
 			admin.POST("/panel-address/cert/renew", s.handlePanelCertRenew)
+			// Panel self-update. Read and STAGE only: applying stays with the
+			// installer because ProtectSystem=full makes /usr/local/bin
+			// read-only to this process (packaging/systemd/forgepanel.service).
+			admin.GET("/update", s.handleUpdateCheck)
+			admin.POST("/update/channel", s.handleUpdateChannel)
+			admin.POST("/update/stage", s.handleUpdateStage)
 		}
 	}
 
