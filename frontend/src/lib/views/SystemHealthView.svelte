@@ -87,6 +87,99 @@
     }
   }
 
+  // Off-box backups to an S3-compatible bucket.
+  //
+  // The scheduled backup was written to a directory on the machine it had just
+  // backed up, which covers a bad migration and nothing else: losing the disk
+  // loses the panel and every backup of it at once.
+  interface BackupS3Settings {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    access_key: string;
+    has_secret_key: boolean;
+    path_style: boolean;
+    configured: boolean;
+    key_fingerprint: string;
+  }
+  let s3 = $state<BackupS3Settings | null>(null);
+  let s3Enabled = $state(false);
+  let s3Endpoint = $state('');
+  let s3Region = $state('');
+  let s3Bucket = $state('');
+  let s3Prefix = $state('');
+  let s3AccessKey = $state('');
+  let s3SecretKey = $state('');
+  let s3PathStyle = $state(true);
+  let s3Busy = $state(false);
+  let s3Err = $state('');
+  let s3Remedy = $state('');
+
+  async function loadBackupS3() {
+    try {
+      s3 = await apiFetch<BackupS3Settings>('/admin/settings/backup/s3');
+      s3Enabled = !!s3.enabled;
+      s3Endpoint = s3.endpoint ?? '';
+      s3Region = s3.region ?? '';
+      s3Bucket = s3.bucket ?? '';
+      s3Prefix = s3.prefix ?? '';
+      s3AccessKey = s3.access_key ?? '';
+      s3PathStyle = !!s3.path_style;
+      // The secret key is never sent back, so the field starts empty and an
+      // empty field means "keep what is stored" rather than "clear it".
+      s3SecretKey = '';
+    } catch (_) { /* an older panel has no S3 backup endpoint */ }
+  }
+
+  function s3Body() {
+    return JSON.stringify({
+      enabled: s3Enabled,
+      endpoint: s3Endpoint.trim(),
+      region: s3Region.trim(),
+      bucket: s3Bucket.trim(),
+      prefix: s3Prefix.trim(),
+      access_key: s3AccessKey.trim(),
+      // Only send a key when one was typed: an empty field must not wipe a
+      // working credential the panel deliberately never showed back.
+      ...(s3SecretKey.trim() ? { secret_key: s3SecretKey.trim() } : {}),
+      path_style: s3PathStyle
+    });
+  }
+
+  async function saveBackupS3() {
+    s3Busy = true;
+    s3Err = '';
+    s3Remedy = '';
+    try {
+      await apiFetch('/admin/settings/backup/s3', { method: 'POST', body: s3Body() });
+      s3SecretKey = '';
+      showToast(tr('systemhealth.s3_saved'), 'success');
+      await loadBackupS3();
+    } catch (e: any) {
+      s3Err = e.message || tr('systemhealth.s3_failed');
+      s3Remedy = e.remediation ?? '';
+    } finally {
+      s3Busy = false;
+    }
+  }
+
+  async function testBackupS3() {
+    s3Busy = true;
+    s3Err = '';
+    s3Remedy = '';
+    try {
+      await apiFetch('/admin/settings/backup/s3/test', { method: 'POST', body: s3Body() });
+      showToast(tr('systemhealth.s3_test_uploaded'), 'success');
+    } catch (e: any) {
+      s3Err = e.message || tr('systemhealth.s3_failed');
+      s3Remedy = e.remediation ?? '';
+    } finally {
+      s3Busy = false;
+    }
+  }
+
   // Host network tuning (BBR + fq).
   //
   // Rendered from the LIVE host state, not from the stored toggle. A switch that
@@ -336,6 +429,7 @@
   onMount(() => {
     loadData();
     loadTelegram();
+    loadBackupS3();
     loadNetTune();
   });
 </script>
@@ -465,6 +559,44 @@
     <p class="hint" data-testid="tg-status">
       {tg.running ? tr('systemhealth.telegram_running') : tr('systemhealth.telegram_not_running')}
       {#if tg.token_source === 'environment'}· {tr('systemhealth.telegram_from_env')}{/if}
+    </p>
+  {/if}
+</div>
+
+<div class="card" data-testid="backup-s3-card">
+  <h3>{tr('systemhealth.s3_title')}</h3>
+  <p class="hint">{tr('systemhealth.s3_hint')}</p>
+  <label class="chk">
+    <input type="checkbox" bind:checked={s3Enabled} data-testid="s3-enabled" />
+    <span>{tr('systemhealth.s3_enable')}</span>
+  </label>
+  <div class="form-grid">
+    <input bind:value={s3Endpoint} data-testid="s3-endpoint" placeholder={tr('systemhealth.s3_endpoint_placeholder')} />
+    <input bind:value={s3Bucket} data-testid="s3-bucket" placeholder={tr('systemhealth.s3_bucket_placeholder')} />
+    <input bind:value={s3Region} data-testid="s3-region" placeholder={tr('systemhealth.s3_region_placeholder')} />
+    <input bind:value={s3Prefix} data-testid="s3-prefix" placeholder={tr('systemhealth.s3_prefix_placeholder')} />
+    <input bind:value={s3AccessKey} data-testid="s3-access-key" placeholder={tr('systemhealth.s3_access_key_placeholder')} />
+    <input type="password" bind:value={s3SecretKey} data-testid="s3-secret-key"
+           placeholder={s3?.has_secret_key ? tr('systemhealth.s3_secret_key_set') : tr('systemhealth.s3_secret_key_placeholder')} />
+    <button class="btn-secondary" data-testid="s3-test" onclick={testBackupS3} disabled={s3Busy}>
+      {s3Busy ? tr('systemhealth.s3_working') : tr('systemhealth.s3_test_upload')}
+    </button>
+    <button class="btn-primary" data-testid="s3-save" onclick={saveBackupS3} disabled={s3Busy}>
+      {tr('systemhealth.s3_save')}
+    </button>
+  </div>
+  <label class="chk">
+    <input type="checkbox" bind:checked={s3PathStyle} data-testid="s3-path-style" />
+    <span>{tr('systemhealth.s3_path_style')}</span>
+  </label>
+  {#if s3Err}
+    <p class="err-text" data-testid="s3-error">{s3Err}</p>
+    {#if s3Remedy}<p class="hint" data-testid="s3-remedy">{s3Remedy}</p>{/if}
+  {/if}
+  {#if s3}
+    <p class="hint" data-testid="s3-status">
+      {s3.enabled && s3.configured ? tr('systemhealth.s3_uploading') : tr('systemhealth.s3_not_uploading')}
+      {#if s3.key_fingerprint}· {tr('systemhealth.s3_key_fingerprint', { fingerprint: s3.key_fingerprint })}{/if}
     </p>
   {/if}
 </div>

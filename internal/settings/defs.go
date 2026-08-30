@@ -113,6 +113,44 @@ func buildRegistry() *Registry {
 		Help: "Ship each scheduled backup to those chats. Off by default: it sends the panel's whole state to a third party.",
 	})
 
+	// --- off-box backups to an S3-compatible bucket ---------------------------
+	//
+	// Appended after the Telegram block rather than woven into it: the listing
+	// order is the registration order and is served to the UI, so inserting a
+	// key in the middle reshuffles a list operators and tests both read.
+	r.Register(Def{
+		Key: "backup_s3_enabled", Kind: KindBool, Scope: ScopeBackup, Default: "0",
+		Help: "Upload each scheduled backup to the bucket below. Off by default: it ships the panel's whole state off this machine.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_endpoint", Kind: KindString, Scope: ScopeBackup, Default: "",
+		Help: "Base URL of the S3-compatible service, including the scheme, e.g. https://s3.example.com.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_region", Kind: KindString, Scope: ScopeBackup, Default: "us-east-1",
+		Help: "Region to sign with. SigV4 requires one even where the service ignores it; leave this alone if unsure.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_bucket", Kind: KindString, Scope: ScopeBackup, Default: "",
+		Help: "Bucket the backups are written to. It must already exist; the panel never creates one.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_prefix", Kind: KindString, Scope: ScopeBackup, Default: "",
+		Help: "Optional key prefix, e.g. panel/, so one bucket can hold more than this panel's backups.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_access_key", Kind: KindString, Scope: ScopeBackup, Default: "",
+		Help: "Access key id for the bucket.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_secret_key", Kind: KindSecret, Scope: ScopeBackup, Default: "", Secret: true,
+		Help: "Secret access key. Write-only: the panel never shows it back.",
+	})
+	r.Register(Def{
+		Key: "backup_s3_path_style", Kind: KindBool, Scope: ScopeBackup, Default: "1",
+		Help: "Address the bucket as <endpoint>/<bucket>. On for minio and most self-hosted gateways; off for AWS-style <bucket>.<endpoint>.",
+	})
+
 	// --- panel-owned, never an operator surface -------------------------------
 	r.Register(Def{
 		Key: "edge_feed_pull_token", Kind: KindSecret, Scope: ScopeInternal, Default: "", Secret: true,
