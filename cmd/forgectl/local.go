@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -26,6 +27,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/forgepanel/forgepanel/internal/auth"
+	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/core/porthop"
 	"github.com/forgepanel/forgepanel/internal/lifecycle"
@@ -399,11 +401,12 @@ func cmdDNSCheck(args []string) error {
 
 func cmdCert(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: forgectl cert <status|renew>")
+		return errors.New("usage: forgectl cert <status|renew|reset> [--yes] [--data <dir>]")
 	}
 	fs := flag.NewFlagSet("cert", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	data := fs.String("data", defaultDataDir(), "panel data directory")
+	yes := fs.Bool("yes", false, "skip the confirmation prompt (reset only)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -419,8 +422,13 @@ func cmdCert(args []string) error {
 			return err
 		}
 		return renewCert(cfg)
+	case "reset":
+		if err := requireLocalAdmin(); err != nil {
+			return err
+		}
+		return resetCert(cfg, *yes)
 	default:
-		return errors.New("usage: forgectl cert <status|renew>")
+		return errors.New("usage: forgectl cert <status|renew|reset> [--yes] [--data <dir>]")
 	}
 }
 
@@ -462,9 +470,110 @@ func renewCert(cfg *config.Config) error {
 	return certStatus(cfg)
 }
 
+// selfSignedPins derives the two pins that everything downstream of the panel's
+// self-signed certificate depends on: hex(SHA-256(DER)), which the panel bakes
+// into each node unit as PANEL_FINGERPRINT, and base64(SHA-256(SPKI)), which the
+// enrol one-liner passes to curl as --pinnedpubkey. Both derivations are
+// deliberately identical to api.Server.panelCertFingerprint and
+// api.Server.panelCertPubkeyPin — a pin computed any other way would not match
+// the one the panel hands out at enrolment, and the node would read the
+// mismatch as interception.
+//
+// An unreadable or corrupt certificate yields empty strings rather than an
+// error: a panel whose certificate cannot be parsed is the one that needs a
+// reset most, so the caller reports "(none)" and carries on.
+func selfSignedPins(certPath string) (fingerprint, pubkeyPin string) {
+	raw, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", ""
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return "", ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	fingerprint = hex.EncodeToString(sum[:])
+	crt, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fingerprint, ""
+	}
+	spki := sha256.Sum256(crt.RawSubjectPublicKeyInfo)
+	return fingerprint, base64.StdEncoding.EncodeToString(spki[:])
+}
+
+// resetCert regenerates the panel's self-signed certificate.
+//
+// cert.EnsureSelfSigned is create-once and nothing in the panel ever reissued
+// the pair, while the certificate bakes in the host's routable addresses as IP
+// SANs. So after a server IP change the certificate is permanently wrong for the
+// address nodes dial: enrolment dies with "doesn't contain any IP SANs" and
+// there was no supported way to fix it short of deleting files by hand and
+// guessing at the consequences. This is that fix, with the consequences printed.
+func resetCert(cfg *config.Config, assumeYes bool) error {
+	p := cfg.Panel()
+	// With a domain configured the panel serves an ACME/imported certificate and
+	// neither pin is even computed (both panelCertFingerprint and the export
+	// defaults short-circuit on a real cert), so regenerating the self-signed
+	// pair would destroy node trust to fix nothing.
+	if d := strings.TrimSpace(p.Domain); d != "" {
+		return fmt.Errorf("this panel serves an ACME/imported certificate for %s; use `forgectl cert renew`", d)
+	}
+	certDir := filepath.Join(cfg.DataDir, "certs")
+	certFile := filepath.Join(certDir, "self.crt")
+	// Read the outgoing pins BEFORE the file is replaced; an operator who has to
+	// hand-edit node units needs to recognise the old value there.
+	oldFP, oldPub := selfSignedPins(certFile)
+	if !assumeYes && !confirmLocal("This invalidates every node pin and every issued xray client link. Continue? [y/N]") {
+		return errors.New("aborted")
+	}
+	if _, _, err := cert.ResetSelfSigned(certDir); err != nil {
+		return err
+	}
+	newFP, newPub := selfSignedPins(certFile)
+	// Mandatory, not tidiness: cert.Store.selfSignedCert memoizes the pair behind
+	// a sync.Once for the life of the process. Without the restart the file on disk
+	// is new and the panel still presents the old certificate, so the operator
+	// pins a fingerprint the panel does not serve and every node refuses to
+	// connect as if intercepted — strictly worse than before the reset.
+	if err := systemctl("restart", "forgepanel"); err != nil {
+		return err
+	}
+	// A plain restart plus health probe, never restartAndVerify wrapped in the
+	// rollback pattern cmdSettingsSet uses: there is nothing to roll back to, and
+	// reverting a rescue is the bug.
+	if err := verifyHealth(cfg); err != nil {
+		return err
+	}
+	auditLocal(cfg, "cert.reset", "panel", "ok")
+	// A cert that could not be read or parsed is reported, not hidden: the
+	// operator still needs the new pin, and the missing old one explains why the
+	// panel was broken.
+	shown := func(prefix, v string) string {
+		if v == "" {
+			return "(none)"
+		}
+		return prefix + v
+	}
+	fmt.Println("panel self-signed certificate regenerated")
+	fmt.Println("old PANEL_FINGERPRINT:", shown("", oldFP))
+	fmt.Println("new PANEL_FINGERPRINT:", shown("", newFP))
+	fmt.Println("old --pinnedpubkey:   ", shown("sha256//", oldPub))
+	fmt.Println("new --pinnedpubkey:   ", shown("sha256//", newPub))
+	fmt.Println()
+	fmt.Println("Every enrolled node still pins the old certificate. Remediation:")
+	fmt.Println("  1. on each node, set Environment=PANEL_FINGERPRINT=" + newFP)
+	fmt.Println("     in /etc/systemd/system/forgenode.service, then")
+	fmt.Println("     systemctl daemon-reload && systemctl restart forgenode")
+	fmt.Println("  2. re-export and redistribute subscriptions: xray client links carry the")
+	fmt.Println("     old certificate hash as pinnedPeerCertSha256 and will not connect")
+	fmt.Println("     until each user re-fetches their subscription")
+	fmt.Println("  3. sing-box-rendered protocols need no action; they use insecure, not a pin")
+	return nil
+}
+
 func cmdAdmin(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: forgectl admin <reset-password|reset-2fa|regenerate-path>")
+		return errors.New("usage: forgectl admin <list|reset-password|reset-2fa|regenerate-path>")
 	}
 	if err := requireLocalAdmin(); err != nil {
 		return err
@@ -481,6 +590,8 @@ func cmdAdmin(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "list":
+		return cmdAdminList(cfg)
 	case "reset-password":
 		if *username == "" {
 			return errors.New("--user is required")
@@ -494,8 +605,40 @@ func cmdAdmin(args []string) error {
 	case "regenerate-path":
 		return regeneratePath(cfg)
 	default:
-		return errors.New("usage: forgectl admin <reset-password|reset-2fa|regenerate-path>")
+		return errors.New("usage: forgectl admin <list|reset-password|reset-2fa|regenerate-path>")
 	}
+}
+
+// cmdAdminList prints the administrator accounts.
+//
+// reset-password and reset-2fa both demand --user, and the only place a username
+// could be read was the web UI — precisely what an operator reaching for
+// forgectl admin has lost. Store.ListAdmins already existed; its sole caller was
+// the HTTP handler behind that login.
+func cmdAdminList(cfg *config.Config) error {
+	db, err := store.Open(filepath.Join(cfg.DataDir, "forgepanel.db"))
+	if err != nil {
+		return err
+	}
+	admins, err := db.ListAdmins()
+	if err != nil {
+		return err
+	}
+	out := make([]map[string]any, 0, len(admins))
+	for _, a := range admins {
+		// Assembled field by field rather than marshalling store.Admin: the
+		// record carries PasswordHash, TOTPSecret and RecoveryCodes, and rescue
+		// output is exactly the sort of thing that gets pasted into a support
+		// thread. Whether 2FA is on is all an operator needs to know about it.
+		out = append(out, map[string]any{
+			"id":           a.ID,
+			"username":     a.Username,
+			"role":         a.Role,
+			"enabled":      !a.Disabled,
+			"totp_enabled": a.TOTPSecret != "",
+		})
+	}
+	return jsonOutput(out)
 }
 
 var promptSecret = func(label string) (string, error) {
@@ -1003,7 +1146,8 @@ func cmdMenu([]string) error {
 			" 1) Status and panel URL", " 2) Start panel", " 3) Stop panel", " 4) Restart panel", " 5) Recent logs", " 6) Follow logs",
 			" 7) Show settings", " 8) Change panel port", " 9) Change domain", "10) Change bind address", "11) Enable/disable HTTPS", "12) Change ACME email",
 			"13) Check domain DNS", "14) Certificate status", "15) Request/renew certificate", "16) Regenerate admin path", "17) Reset administrator password", "18) Reset administrator 2FA",
-			"19) Create encrypted backup", "20) Restore encrypted backup", "21) Check firewall", "22) Clean firewall", "23) Repair installation", "24) Uninstall", "25) Purge uninstall", "26) Check for updates", "27) Install update", " 0) Exit",
+			"19) Create encrypted backup", "20) Restore encrypted backup", "21) Check firewall", "22) Clean firewall", "23) Repair installation", "24) Uninstall", "25) Purge uninstall", "26) Check for updates", "27) Install update",
+			"28) Reset panel self-signed certificate", "29) List administrator accounts", " 0) Exit",
 		} {
 			fmt.Println(line)
 		}
@@ -1082,6 +1226,10 @@ func runMenuChoice(choice string, reader *bufio.Reader) error {
 		return cmdUpdate([]string{"--check"})
 	case "27":
 		return cmdUpdate([]string{"--yes"})
+	case "28":
+		return cmdCert([]string{"reset"})
+	case "29":
+		return cmdAdmin([]string{"list"})
 	default:
 		return errors.New("unknown choice")
 	}

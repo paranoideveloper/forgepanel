@@ -2,12 +2,18 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/cert"
 	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/lifecycle"
 	"github.com/forgepanel/forgepanel/internal/store"
@@ -276,7 +282,7 @@ func TestMenuAllChoices(t *testing.T) {
 	_ = dir
 
 	r := bufio.NewReader(strings.NewReader("val\n"))
-	choices := []string{"0", "1", "2", "3", "4", "7", "14", "15", "16", "17", "18", "19", "20"}
+	choices := []string{"0", "1", "2", "3", "4", "7", "14", "15", "16", "17", "18", "19", "20", "28", "29"}
 	for _, choice := range choices {
 		_ = runMenuChoice(choice, r)
 	}
@@ -294,4 +300,130 @@ func TestCmdLogsAndSettingsAndDNSCheckAndUpdate(t *testing.T) {
 	_ = cmdLifecycle([]string{"install", "--data", dir})
 	_ = cmdLifecycle([]string{"remove", "--data", dir})
 	_ = cmdUpdate([]string{"--check", "--data", dir})
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what it
+// printed. forgectl's local commands report through fmt.Println rather than an
+// injectable writer, so this is the only way to assert on what an operator
+// actually sees.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var sb strings.Builder
+		_, _ = io.Copy(&sb, r)
+		done <- sb.String()
+	}()
+	fn()
+	_ = w.Close()
+	os.Stdout = orig
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+func TestCmdCertResetRegeneratesTheSelfSignedCertificateAndRestartsThePanel(t *testing.T) {
+	dir := setupMockGlobals(t)
+
+	// setupMockGlobals already replaced systemctl and restores the original in
+	// its own t.Cleanup, so recording over it here is undone automatically.
+	var calls [][]string
+	systemctl = func(args ...string) error {
+		calls = append(calls, args)
+		return nil
+	}
+
+	certDir := filepath.Join(dir, "certs")
+	if _, _, err := cert.EnsureSelfSigned(certDir); err != nil {
+		t.Fatalf("EnsureSelfSigned: %v", err)
+	}
+	der := func() []byte {
+		raw, err := os.ReadFile(filepath.Join(certDir, "self.crt"))
+		if err != nil {
+			t.Fatalf("read self.crt: %v", err)
+		}
+		block, _ := pem.Decode(raw)
+		if block == nil {
+			t.Fatal("self.crt is not PEM")
+		}
+		return block.Bytes
+	}
+	before := sha256.Sum256(der())
+
+	var out string
+	var resetErr error
+	out = captureStdout(t, func() {
+		resetErr = cmdCert([]string{"reset", "--data", dir, "--yes"})
+	})
+	if resetErr != nil {
+		t.Fatalf("cmdCert reset: %v", resetErr)
+	}
+
+	if after := sha256.Sum256(der()); after == before {
+		t.Fatal("self.crt is byte-identical; EnsureSelfSigned's exists-check was never bypassed")
+	}
+
+	restarted := false
+	for _, c := range calls {
+		if reflect.DeepEqual(c, []string{"restart", "forgepanel"}) {
+			restarted = true
+		}
+	}
+	if !restarted {
+		t.Fatal("no systemctl restart forgepanel; internal/cert/cert.go ssOnce memoizes the pair, so the live panel still serves the old cert")
+	}
+
+	// The whole point of the command is handing the operator the new pin to push
+	// to every enrolled node; printing nothing makes the reset unusable.
+	newPin := hex.EncodeToString(func() []byte { s := sha256.Sum256(der()); return s[:] }())
+	if !strings.Contains(out, newPin) {
+		t.Fatalf("new PANEL_FINGERPRINT %s not printed; output was:\n%s", newPin, out)
+	}
+}
+
+func TestCmdCertResetRefusesOnADomainedPanel(t *testing.T) {
+	dir := setupMockGlobals(t)
+
+	cfg, err := config.LoadFromDataDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDataDir: %v", err)
+	}
+	cfg.Panel().Domain = "panel.example.com"
+	if err := cfg.SavePanel(); err != nil {
+		t.Fatalf("SavePanel: %v", err)
+	}
+
+	err = cmdCert([]string{"reset", "--data", dir, "--yes"})
+	if err == nil {
+		t.Fatal("cert reset was allowed on a panel with a domain; regenerating the self-signed pair there changes nothing the ACME/imported cert path uses")
+	}
+	if !strings.Contains(err.Error(), "panel.example.com") {
+		t.Fatalf("refusal must name the domain it is protecting so the operator knows why; got %v", err)
+	}
+}
+
+func TestCmdAdminListNamesTheAccountsWithoutLeakingSecrets(t *testing.T) {
+	dir := setupMockGlobals(t)
+
+	var listErr error
+	out := captureStdout(t, func() {
+		listErr = cmdAdmin([]string{"list", "--data", dir})
+	})
+	if listErr != nil {
+		t.Fatalf("cmdAdmin list: %v", listErr)
+	}
+	if !strings.Contains(out, "admin") {
+		t.Fatalf("admin list did not name the account an operator must pass to --user; output was:\n%s", out)
+	}
+	// setupMockGlobals stores the literal password hash "hash"; it must never
+	// reach an operator's terminal or a pasted support thread.
+	if strings.Contains(out, "hash") {
+		t.Fatalf("admin list leaked credential material; output was:\n%s", out)
+	}
 }

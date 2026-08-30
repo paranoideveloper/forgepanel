@@ -74,6 +74,26 @@ sudo forgectl uninstall --purge --yes   # remove manifest-owned data too
 sudo forgectl repair                    # reload/enable/restart a recorded install
 ```
 
+Locked out of the web UI, or the panel's address changed:
+
+```bash
+sudo forgectl admin list                # discover the administrator username
+sudo forgectl admin reset-password --user <name>
+sudo forgectl cert reset                # regenerate the self-signed panel certificate
+sudo forgectl settings set --domain "" --bind-address "" --defer-restart   # back to self-signed, no domain
+```
+
+`cert reset` is destructive on purpose: the self-signed certificate is generated
+once, with the host's routable addresses as IP SANs, so a server IP change leaves
+it permanently wrong and node enrolment fails with `doesn't contain any IP SANs`.
+Regenerating it invalidates every enrolled node's `PANEL_FINGERPRINT` and every
+already-distributed xray subscription (which pins the certificate hash). The
+command prints the old and new pins and the exact remediation for both.
+
+`--defer-restart` skips the post-change restart and health probe. Use it during a
+rescue: the default path reverts a settings change when the panel does not come
+back healthy, which is the state being rescued from.
+
 Changed files and legacy installations are retained and reported rather than
 deleted by guesswork. Keep the manifest when preserving data; it is needed for
 later repair or explicit purge.
