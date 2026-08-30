@@ -146,9 +146,10 @@ func (c *Controller) dispatch(specs []engine.InboundSpec, certPath, keyPath stri
 //
 // It asks the registry which adapter serves each inbound rather than switching
 // on the engine name, so a core added to the registry is fetched without
-// touching this function. binmgr decides what is downloadable: AmneziaWG runs
-// from the host's kernel module and has nothing to fetch, and that is a normal
-// state rather than an error.
+// touching this function. Each adapter then decides whether it has anything to
+// install: a core that does not implement adapter.Provisionable runs from the
+// host — AmneziaWG's kernel module and awg-quick — and that is a normal state
+// rather than an error.
 //
 // An inbound nothing can serve is skipped here and reported by the reload.
 // Refusing to fetch anything because one inbound is unroutable would block the
@@ -178,12 +179,18 @@ func (c *Controller) ensureBinariesFor(nodes []*model.Node) error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	ctx := context.Background()
 	for _, name := range names {
-		e := binmgr.Engine(name)
-		if !binmgr.Managed(e) {
+		a, ok := c.registry.Lookup(name)
+		if !ok {
 			continue
 		}
-		if _, err := c.bins.Ensure(e); err != nil {
+		p, ok := a.(adapter.Provisionable)
+		if !ok {
+			// Nothing to fetch — AmneziaWG's kernel module. A normal state.
+			continue
+		}
+		if err := p.Provision(ctx); err != nil {
 			return err
 		}
 	}

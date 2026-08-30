@@ -184,13 +184,26 @@ func (a *supervised) GenerateMultiUser(specs []engine.InboundSpec, certPath, key
 // exact shape of the bug this feature was added to fix.
 func (a *supervised) HasLivenessProbe() bool { return a.opts.Probe[a.name] != nil }
 
-// BinaryPresent reports whether this core's binary is already installed. It lets
+// Provisioned reports whether this core's binary is already installed. It lets
 // a caller skip validation rather than pay for a download inside a check.
-func (a *supervised) BinaryPresent() bool { return a.bins.Present(a.binEngine) }
+func (a *supervised) Provisioned() bool { return a.bins.Present(a.binEngine) }
 
-func (a *supervised) ValidateConfig(cfg []byte) error {
+// Provision downloads and checksum-verifies the pinned binary if it is missing.
+func (a *supervised) Provision(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if _, err := a.bins.Ensure(a.binEngine); err != nil {
 		return fmt.Errorf("%s binary: %w", a.name, err)
+	}
+	return nil
+}
+
+func (a *supervised) ValidateConfig(cfg []byte) error {
+	// ValidateConfig has no context of its own, and the fetch it guards is the
+	// same one Apply pays; Background matches the precedent in dispatch.go.
+	if err := a.Provision(context.Background()); err != nil {
+		return err
 	}
 	a.mu.Lock()
 	p := a.process()
@@ -212,8 +225,8 @@ func (a *supervised) Apply(ctx context.Context, plan Plan) error {
 	// inbound is malformed, and the operator's next fix would then pay the
 	// download at the worst possible moment.
 	if len(plan.Nodes()) > 0 {
-		if _, err := a.bins.Ensure(a.binEngine); err != nil {
-			return fmt.Errorf("%s binary: %w", a.name, err)
+		if err := a.Provision(ctx); err != nil {
+			return err
 		}
 	}
 	cfg, served, _, err := a.GenerateMultiUser(plan.Specs, plan.CertPath, plan.KeyPath)

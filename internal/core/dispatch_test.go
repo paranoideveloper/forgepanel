@@ -1,11 +1,14 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/forgepanel/forgepanel/internal/core/adapter"
+	"github.com/forgepanel/forgepanel/internal/core/binmgr"
 	"github.com/forgepanel/forgepanel/internal/core/engine"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
@@ -253,5 +256,103 @@ func TestAGenuinelyUnservableInboundKeepsItsSkip(t *testing.T) {
 	}
 	if !found {
 		t.Error("an inbound no core can serve lost its skip entry")
+	}
+}
+
+// A fake core that owns its own installation, registered under a name binmgr's
+// allowlist says nothing can be fetched for. It stands in for any core the panel
+// installs by a route binmgr does not know — the case the capability exists for.
+//
+// The embedded nil CoreAdapter is deliberate: every method ensureBinariesFor is
+// NOT supposed to call panics if it is called.
+type provisioningAdapter struct {
+	adapter.CoreAdapter
+	provisions int
+}
+
+var _ adapter.Provisionable = (*provisioningAdapter)(nil)
+
+func (f *provisioningAdapter) Name() string { return model.EngineAmneziaWG }
+func (f *provisioningAdapter) SupportedProtocols() []model.Protocol {
+	return []model.Protocol{model.ProtoAmneziaWG}
+}
+func (f *provisioningAdapter) Supports(*model.Node) error      { return nil }
+func (f *provisioningAdapter) Provisioned() bool               { return f.provisions > 0 }
+func (f *provisioningAdapter) Provision(context.Context) error { f.provisions++; return nil }
+
+// A core with nothing to install, registered under a name binmgr WILL download
+// for. It is the other half of the seam: the fetch must follow the adapter, not
+// the engine name.
+type hostProvidedAdapter struct {
+	adapter.CoreAdapter
+}
+
+func (f *hostProvidedAdapter) Name() string { return model.EngineXray }
+func (f *hostProvidedAdapter) SupportedProtocols() []model.Protocol {
+	return []model.Protocol{model.ProtoVLESS}
+}
+func (f *hostProvidedAdapter) Supports(*model.Node) error { return nil }
+
+// EnsureBinaries must ask the ADAPTER whether it has anything to install, not
+// binmgr's allowlist. The allowlist lives in another package and hardcodes three
+// engine names; consulting it means the panel can resolve an inbound to a core
+// and then refuse to install that core because a list somewhere else does not
+// mention it.
+func TestEnsureBinariesProvisionsThroughTheAdapterCapability(t *testing.T) {
+	ctrl := NewController(t.TempDir(), 20096)
+
+	own := &provisioningAdapter{}
+	reg := adapter.NewRegistry()
+	if err := reg.Register(own); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Register(&hostProvidedAdapter{}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.registry = reg // same package; the dispatcher reads this field
+
+	nodes := []*model.Node{
+		{Protocol: model.ProtoAmneziaWG, Address: "127.0.0.1", Port: 30001},
+		{Protocol: model.ProtoVLESS, Address: "127.0.0.1", Port: 30002},
+	}
+	if err := ctrl.EnsureBinaries(nodes); err != nil {
+		t.Fatalf("EnsureBinaries: %v", err)
+	}
+
+	// (A) The adapter that CAN install itself was asked to, even though
+	// binmgr.Managed says its engine name is not downloadable.
+	if own.provisions != 1 {
+		t.Errorf("Provision called %d times, want 1: ensureBinariesFor is still deciding "+
+			"what to fetch from binmgr's allowlist instead of from the adapter", own.provisions)
+	}
+	// (B) The adapter that CANNOT was left alone — no download, no error — even
+	// though binmgr.Managed(xray) is true.
+	if ctrl.bins.Present(binmgr.EngineXray) {
+		t.Error("the xray binary was downloaded for an adapter that never claimed to own one: " +
+			"the fetch is still keyed on the engine NAME, not on the capability")
+	}
+}
+
+// Consistency check between two packages, NOT the wiring proof: it passes with
+// ensureBinariesFor untouched, because it never calls it. Every registered
+// adapter that claims Provisionable must name an engine binmgr can actually
+// fetch, or Provision returns "binmgr: unknown engine" and the reload aborts
+// before dispatch runs — taking every inbound on the box down, where the old
+// allowlist would merely have skipped that one core. Delete this test in the
+// same commit that deletes binmgr.Managed.
+func TestProvisionableCoresAreOnesBinmgrCanFetch(t *testing.T) {
+	ctrl := NewController(t.TempDir(), 20098)
+	reg := ctrl.Registry()
+	if reg == nil {
+		t.Fatalf("controller has no adapter registry: %v", ctrl.regErr)
+	}
+	for _, a := range reg.All() {
+		if _, ok := a.(adapter.Provisionable); !ok {
+			continue
+		}
+		if e := binmgr.Engine(a.Name()); !binmgr.Managed(e) {
+			t.Errorf("adapter %q claims Provisionable but binmgr cannot fetch engine %q: "+
+				"Provision would fail the whole reload", a.Name(), e)
+		}
 	}
 }

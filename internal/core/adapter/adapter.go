@@ -127,6 +127,25 @@ type Reconciler interface {
 	Reconcile(ctx context.Context) error
 }
 
+// Provisionable is the OPTIONAL capability of a core that owns its own
+// installation.
+//
+// It is optional because "nothing to fetch" is a normal state, not a failure.
+// AmneziaWG deliberately does not implement it: it runs from the host's kernel
+// module and distro-installed awg-quick, and a userspace tool downloaded by the
+// panel could not be guaranteed to match the loaded module (see amneziawg.go's
+// Detect). Before this interface, that fact lived in another package as
+// binmgr.managedEngines — an allowlist internal/core consulted to decide what
+// the adapter it had ALREADY RESOLVED was allowed to install.
+type Provisionable interface {
+	// Provisioned reports whether the core can run without a fetch. It must not
+	// download: callers use it to skip work inside a cheap check.
+	Provisioned() bool
+	// Provision installs what the core needs. It is idempotent, and returning
+	// nil means the core is ready to run.
+	Provision(ctx context.Context) error
+}
+
 // MultiUserGenerator is the OPTIONAL capability of rendering a config that
 // carries one credential per assigned user, rather than the inbound's template
 // credential. Cores that authenticate users individually (xray, sing-box)
