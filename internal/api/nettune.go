@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/apierr"
+
 	"github.com/forgepanel/forgepanel/internal/nettune"
 )
 
@@ -89,7 +91,7 @@ func (s *Server) handleSetNetTune(c *gin.Context) {
 		Enabled bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		failErr(c, 400, err)
 		return
 	}
 	value := "0"
@@ -103,7 +105,7 @@ func (s *Server) handleSetNetTune(c *gin.Context) {
 	// declared kind before it is stored, so the table cannot end up holding
 	// something no reader can parse.
 	if err := s.knobs().Set(settingNetTuneBBR, value); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	action := nettuneApply
@@ -118,12 +120,14 @@ func (s *Server) handleSetNetTune(c *gin.Context) {
 		// toggle over a host still running cubic is precisely how this feature
 		// gets shipped broken. The stored setting stands, so the panel will try
 		// again at the next boot and the next maintenance sweep.
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":       err.Error(),
-			"remediation": st.Remediation,
-			"enabled":     req.Enabled,
-			"status":      st,
-		})
+		e := apierr.New(http.StatusInternalServerError, err.Error())
+		e.Op = "nettune.apply"
+		e.Remediation = st.Remediation
+		// The host's own report travels with the refusal. Without it the UI can
+		// say the apply failed but not WHY the kernel refused, which is the only
+		// part an operator can act on.
+		e.Details = map[string]any{"enabled": req.Enabled, "status": st}
+		apierr.Fail(c, e)
 		return
 	}
 	c.JSON(200, netTuneView{Enabled: req.Enabled, Status: st})

@@ -54,7 +54,7 @@ func (s *Server) handle2FASetup(c *gin.Context) {
 	// here would hand the admin a QR code that 2fa/enable can never match, so it
 	// is reported rather than discarded.
 	if err := s.knobs().Set("pending_totp_"+claims.Username, secret); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	uri := auth.TOTPURI("ForgePanel", claims.Username, secret)

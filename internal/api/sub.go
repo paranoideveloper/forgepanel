@@ -198,10 +198,10 @@ func (s *Server) handleSetSubSettings(c *gin.Context) {
 		if errors.As(err, &ve) {
 			// Named per field, so the UI can mark the input instead of showing a
 			// sentence about a card with eleven of them.
-			c.JSON(400, gin.H{"error": ve.Error(), "fields": ve.Fields()})
+			failFields(c, 400, ve.Error(), ve.Fields())
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		failErr(c, 500, err)
 		return
 	}
 	s.audit(c, "settings.subscription.update", s.subRoutingPreset())

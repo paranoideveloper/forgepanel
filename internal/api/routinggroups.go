@@ -28,7 +28,7 @@ import (
 func (s *Server) handleListOutboundGroups(c *gin.Context) {
 	groups, err := s.db.ListOutboundGroups()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		failErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if groups == nil {
@@ -51,13 +51,13 @@ func (s *Server) handleListOutboundGroups(c *gin.Context) {
 func (s *Server) handleSaveOutboundGroup(c *gin.Context) {
 	var g store.OutboundGroup
 	if err := c.ShouldBindJSON(&g); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if id := c.Param("id"); id != "" {
 		n, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group id"})
+			fail(c, http.StatusBadRequest, "invalid group id")
 			return
 		}
 		g.ID = uint(n)
@@ -81,7 +81,7 @@ func (s *Server) handleSaveOutboundGroup(c *gin.Context) {
 
 	prev, _ := s.db.OutboundGroupByID(g.ID)
 	if err := s.db.SaveOutboundGroup(&g); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		failErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if !s.validateRoutingOrFail(c) {
@@ -100,12 +100,12 @@ func (s *Server) handleSaveOutboundGroup(c *gin.Context) {
 func (s *Server) handleDeleteOutboundGroup(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group id"})
+		fail(c, http.StatusBadRequest, "invalid group id")
 		return
 	}
 	g, err := s.db.OutboundGroupByID(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "failover group not found"})
+		fail(c, http.StatusNotFound, "failover group not found")
 		return
 	}
 	if err := s.db.DeleteOutboundGroup(uint(id)); err != nil {
@@ -113,7 +113,7 @@ func (s *Server) handleDeleteOutboundGroup(c *gin.Context) {
 		// balancer nothing defines, which the core accepts and then drops every
 		// connection the rule matches — traffic that stops for a reason visible
 		// only in the engine log.
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		failErr(c, http.StatusConflict, err)
 		return
 	}
 	s.audit(c, "routing.group.deleted", g.Tag)

@@ -380,3 +380,43 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 	}
 	t.Fatal(msg)
 }
+
+// The probe the registry supplies must actually reach the supervisor.
+//
+// Options.Probe is proved populated by a guard in internal/core, and the
+// supervisor is proved to run a probe it is given by a test that builds
+// EngineSpec directly. The one line joining them is spec(), and nothing covered
+// it: setting Probe to nil there left the whole core and api suites green, so
+// the feature could have shipped with liveness probing configured, tested at
+// both ends, and never actually running.
+func TestTheProbeFromTheRegistryReachesTheSupervisorSpec(t *testing.T) {
+	called := false
+	probe := func(context.Context) error { called = true; return nil }
+
+	a := &supervised{
+		name: "xray",
+		opts: Options{Probe: map[string]func(context.Context) error{"xray": probe}},
+		bins: binmgr.New(t.TempDir()),
+	}
+	spec := a.spec()
+	if spec.Probe == nil {
+		t.Fatal("spec() dropped the registry's probe: the supervisor would never probe this core")
+	}
+	if err := spec.Probe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Error("spec() carried a probe that is not the one the registry supplied")
+	}
+
+	// A core the registry has no probe for must carry none rather than another
+	// core's — the map is keyed by engine name for that reason.
+	b := &supervised{
+		name: "sing-box",
+		opts: Options{Probe: map[string]func(context.Context) error{"xray": probe}},
+		bins: binmgr.New(t.TempDir()),
+	}
+	if b.spec().Probe != nil {
+		t.Error("an unprobed core was given another core's probe")
+	}
+}
