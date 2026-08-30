@@ -72,3 +72,98 @@ func TestServiceUnitPermitsSysctlPersistence(t *testing.T) {
 		}
 	}
 }
+
+// An install with no domain should still end with a working padlock.
+//
+// A certificate authority will not issue for a bare IP on the ordinary profile,
+// so "no domain" has always meant plain HTTP or a self-signed certificate and a
+// browser warning — neither of which is something to hand someone who has just
+// finished an install. sslip.io resolves <ip-with-dashes>.sslip.io back to that
+// IP, which is a real hostname pointing at this server that Let's Encrypt will
+// validate over HTTP-01.
+//
+// These assert on the SCRIPT because the behaviour is interactive and network
+// dependent; what can be pinned here is that the path exists, that it is
+// offered rather than imposed, and that the three ways it can go wrong are
+// handled.
+func TestInstallerOffersHTTPSWhenThereIsNoDomain(t *testing.T) {
+	b, err := os.ReadFile("../../install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+
+	if !strings.Contains(s, "offer_magic_dns()") {
+		t.Fatal("install.sh has no no-domain HTTPS path; an IP-only install ends on plain HTTP")
+	}
+	// It must be reachable from the branch that runs when the operator says they
+	// have no domain — a helper nothing calls is the same as no helper.
+	if !strings.Contains(s, "if offer_magic_dns; then") {
+		t.Error("offer_magic_dns is never called from the no-domain branch")
+	}
+
+	// Offered, not imposed: it puts a third party in the panel's own resolution
+	// path, and its certificate quota is shared globally.
+	if !strings.Contains(s, `confirm "Use ${magic}`) {
+		t.Error("the magic-DNS hostname is used without asking")
+	}
+	// The cost has to be on screen at the moment of the decision.
+	if !strings.Contains(s, "shared globally") {
+		t.Error("the shared certificate quota is not disclosed where the operator decides")
+	}
+
+	// Resolution is confirmed BEFORE a CA is asked to validate: a resolver that
+	// answers with something else becomes an issuance failure several steps
+	// later, with nothing connecting the two on screen.
+	if !strings.Contains(s, `resolve_host "$magic"`) {
+		t.Error("the hostname is not checked to resolve here before HTTPS is enabled")
+	}
+	if !strings.Contains(s, `"$resolved" != "$SERVER_IP"`) {
+		t.Error("a hostname resolving elsewhere is not caught")
+	}
+
+	// IPv6 is excluded deliberately: sslip.io supports it, but not by simple
+	// dot-to-dash substitution, and a wrong address is worse than plain HTTP.
+	if !strings.Contains(s, "*:*) return 1 ;;") {
+		t.Error("IPv6 addresses are not excluded from the dashed-IPv4 substitution")
+	}
+
+	// Every failure path must leave the previous behaviour intact rather than
+	// half-enabling HTTPS.
+	for _, guard := range []string{
+		`[[ -n "$SERVER_IP" ]] || return 1`,
+		"Falling back to plain HTTP.",
+	} {
+		if !strings.Contains(s, guard) {
+			t.Errorf("missing fallback guard: %s", guard)
+		}
+	}
+}
+
+// The helper must not be able to enable HTTPS without also setting the domain
+// it will be issued for: PANEL_HTTPS=1 with an empty PANEL_DOMAIN is the state
+// the script elsewhere treats as a misconfiguration.
+func TestTheNoDomainPathSetsDomainAndHTTPSTogether(t *testing.T) {
+	b, err := os.ReadFile("../../install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	i := strings.Index(s, "offer_magic_dns() {")
+	if i < 0 {
+		t.Fatal("offer_magic_dns not found")
+	}
+	j := strings.Index(s[i:], "\n}\n")
+	if j < 0 {
+		t.Fatal("could not find the end of offer_magic_dns")
+	}
+	body := s[i : i+j]
+
+	if !strings.Contains(body, `PANEL_DOMAIN="$magic"`) || !strings.Contains(body, `PANEL_HTTPS="1"`) {
+		t.Error("the success path must set both the domain and the HTTPS flag")
+	}
+	// Success is the LAST thing it does; every earlier exit returns 1.
+	if strings.Count(body, "return 1") < 4 {
+		t.Errorf("expected every failure path to return 1, found %d", strings.Count(body, "return 1"))
+	}
+}

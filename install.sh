@@ -715,6 +715,74 @@ step_port() {
   fi
 }
 
+# offer_magic_dns gives an IP-only install a real certificate.
+#
+# A certificate authority will not issue for a bare IP address on the ordinary
+# profile, so "no domain" has always meant "plain HTTP, or a self-signed
+# certificate and a browser warning". Neither is something to hand someone who
+# has just finished an install.
+#
+# sslip.io resolves <ip-with-dashes>.sslip.io straight back to that IP, so it is
+# a real hostname pointing at this server that needs no registration and no DNS
+# of your own — which is enough for Let's Encrypt to issue against it over
+# HTTP-01. The panel is then reachable at a name whose certificate is genuinely
+# valid, from a machine that has no domain at all.
+#
+# THE COST, stated because it decides whether an operator should accept:
+#   * sslip.io is not on the Public Suffix List, so Let's Encrypt counts every
+#     *.sslip.io name against ONE registered-domain limit shared by every user
+#     of the service worldwide. Issuance can fail with "too many certificates
+#     already issued" for reasons that have nothing to do with this server.
+#     That is why this is offered rather than chosen silently.
+#   * It puts a third party in the resolution path for the panel's own address.
+#     The certificate stays valid if sslip.io goes away; renewal does not.
+#
+# Declining leaves the previous behaviour exactly as it was.
+offer_magic_dns() {
+  [[ -n "$SERVER_IP" ]] || return 1
+  # IPv6 has no dashed form here; sslip.io does support it, but the mapping is
+  # not a simple substitution and an address we get wrong is worse than a plain
+  # HTTP install.
+  case "$SERVER_IP" in
+    *:*) return 1 ;;
+  esac
+
+  local magic="${SERVER_IP//./-}.sslip.io"
+
+  info "No domain — but the panel can still have a valid certificate."
+  info "  ${magic}"
+  info "  resolves to this server (${SERVER_IP}) and needs no registration,"
+  info "  so a certificate can be issued for it and the browser shows no warning."
+  warn "It relies on the public sslip.io service, whose certificate quota is"
+  warn "shared globally; issuance can fail for reasons outside this server."
+
+  if ! confirm "Use ${magic} so the panel has HTTPS with no browser warning?" "yes"; then
+    return 1
+  fi
+
+  # Confirm the name really points here before asking a CA to validate it: a
+  # resolver that returns something else turns into an issuance failure several
+  # steps later, with nothing on screen connecting the two.
+  local resolved
+  resolved=$(resolve_host "$magic" | head -1 || true)
+  if [[ -z "$resolved" ]]; then
+    warn "${magic} did not resolve from this server — DNS may be filtered here."
+    warn "Falling back to plain HTTP."
+    return 1
+  fi
+  if [[ "$resolved" != "$SERVER_IP" ]]; then
+    warn "${magic} resolves to ${resolved}, not ${SERVER_IP}. Falling back to plain HTTP."
+    return 1
+  fi
+
+  PANEL_DOMAIN="$magic"
+  PANEL_HTTPS="1"
+  ok "Automatic HTTPS enabled for ${magic}."
+  info "Open the panel at https://${magic}:${PANEL_PORT}"
+  info "Point a real domain here later and the panel switches to it without a reinstall."
+  return 0
+}
+
 step_domain() {
   step 5 "Domain and encryption"
 
@@ -726,6 +794,9 @@ step_domain() {
   fi
 
   if [[ "$want_domain" != "yes" ]]; then
+    if offer_magic_dns; then
+      return 0
+    fi
     PANEL_DOMAIN=""
     PANEL_HTTPS="0"
     info "No domain configured — the panel will be reachable over plain HTTP at"
