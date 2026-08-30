@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
+	"io/fs"
 	"math/big"
 	"net"
 	"os"
@@ -72,6 +74,26 @@ func EnsureSelfSigned(dir string) (certPath, keyPath string, err error) {
 	_ = pem.Encode(kp, &pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})
 	_ = kp.Close()
 	return certPath, keyPath, nil
+}
+
+// ResetSelfSigned removes the existing self.crt/self.key pair and mints a fresh
+// one, returning the new paths.
+//
+// EnsureSelfSigned is create-once on purpose — it sits on hot paths in
+// core.Manager, the export defaults and forgenode, and must stay idempotent —
+// so regeneration cannot be a side effect of asking for the certificate. It has
+// to be the caller's explicit, destructive act: the IP SANs above are baked in
+// at generation time, so after the host's address changes the only way to a
+// correct certificate is to throw the old one away, and doing that invalidates
+// every node fingerprint and every issued xray link carrying
+// pinnedPeerCertSha256.
+func ResetSelfSigned(dir string) (certPath, keyPath string, err error) {
+	for _, name := range []string{"self.crt", "self.key"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", "", err
+		}
+	}
+	return EnsureSelfSigned(dir)
 }
 
 func fileExists(p string) bool {
