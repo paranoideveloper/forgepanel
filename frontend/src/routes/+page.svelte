@@ -58,6 +58,7 @@
     forgedns: () => import('$lib/views/ForgeDNSView.svelte'),
     edge: () => import('$lib/views/ForgeEdgeView.svelte'),
     certs: () => import('$lib/views/CertificatesView.svelte'),
+    engines: () => import('$lib/views/EnginesView.svelte'),
     system: () => import('$lib/views/SystemHealthView.svelte')
   };
 

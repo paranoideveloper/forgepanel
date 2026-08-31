@@ -233,12 +233,16 @@ var adminAuthzRules = []authzRule{
 	{methods: get, path: "/api/admin/geoip", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/inbounds", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/nodes", exact: true, roles: readDash},
-	{methods: get, path: "/api/admin/engines", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/domains-status", exact: true, roles: readDash},
 
 	// --- infrastructure: owner + admin ------------------------------------
 	// Everything below mutates or inspects the serving plane.
 	{path: "/api/admin/inbounds", roles: ownerAdmin},
+	// Engine state is owner+admin for READS too, not just mutations. It was in
+	// the dashboard-read set, and its payload carries each core's recent log
+	// lines — for Xray those are per-connection accept lines with client
+	// addresses and destinations. A reseller manages customers and a viewer
+	// reads dashboards; neither needs the traffic metadata of everyone else's.
 	{path: "/api/admin/engines", roles: ownerAdmin},
 	{path: "/api/admin/nodes", roles: ownerAdmin},
 	{path: "/api/admin/domains", roles: ownerAdmin},

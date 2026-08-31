@@ -50,6 +50,9 @@ var tabRoutes = map[string]struct {
 	"admins":   {"POST", "/api/admin/admins"},
 	"certs":    {"POST", "/api/admin/panel-address"},
 	"system":   {"POST", "/api/admin/backup"},
+	// The Engines page is a read of live core state; without that read there is
+	// nothing on it at all.
+	"engines": {"GET", "/api/admin/engines"},
 }
 
 // tabRolesFromFrontend parses the TAB_ROLES table out of session.svelte.ts.

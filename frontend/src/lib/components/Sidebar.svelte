@@ -59,6 +59,7 @@
     { id: 'forgedns', labelKey: 'sidebar.tab.forgedns', icon: '🛰️' },
     { id: 'edge', labelKey: 'sidebar.tab.edge', icon: '☁️' },
     { id: 'certs', labelKey: 'sidebar.tab.certs', icon: '🔒' },
+    { id: 'engines', labelKey: 'sidebar.tab.engines', icon: '🧩' },
     { id: 'system', labelKey: 'sidebar.tab.system', icon: '🛠️' }
   ];
 

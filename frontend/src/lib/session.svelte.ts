@@ -89,6 +89,9 @@ export const TAB_ROLES: Record<string, Role[]> = {
 	studio: ['owner', 'admin'],
 	wizard: ['owner', 'admin'],
 	audit: ['owner', 'admin'],
+	// Live core state: pids, restarts, kernel interfaces and recent log lines.
+	// Infrastructure, so the same reach as inbounds and routing.
+	engines: ['owner', 'admin'],
 
 	// Owner only: accounts, the panel's own address and TLS material, backups.
 	admins: ['owner'],
