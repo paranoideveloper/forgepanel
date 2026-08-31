@@ -114,7 +114,15 @@ func humanBytes(b int64) string {
 // subLandingPage renders the browser-facing subscription page: a usage summary
 // and, per client family, a one-click import button plus a copy-the-link button.
 // base is the subscription URL without a format suffix.
-func subLandingPage(base, userinfo string) []byte {
+// nativeEntry is one downloadable, non-URI config offered on the landing page.
+// body is carried so the QR can encode the config text itself: WireGuard and
+// AmneziaWG clients scan the CONF, not a link to it, and a QR of the URL is
+// something none of them can import.
+type nativeEntry struct {
+	name, kind, url, body string
+}
+
+func subLandingPage(base, userinfo string, natives []nativeEntry) []byte {
 	used, total, expire := parseUserinfo(userinfo)
 	var usage string
 	if total > 0 {
@@ -169,6 +177,8 @@ a.btn,button.btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weigh
 .btn.ghost{background:#1A2230;color:#fff;border:1px solid rgba(255,255,255,.1)}
 .tip{margin-top:20px;font-size:12px;color:rgba(255,255,255,.45)}
 code{background:#0F1420;padding:2px 6px;border-radius:6px;font-size:12px}
+.nat-h{font-size:16px;margin:28px 0 2px}
+.nat-sub{font-size:12px;margin:0 0 14px}
 </style></head><body><div class="wrap">`)
 	b.WriteString(`<h1>⚡ ForgePanel <span class="muted" style="font-size:13px;font-weight:400">subscription</span></h1>`)
 	b.WriteString(`<div class="usage"><div class="row"><span>` + html.EscapeString(usage) + `</span><span class="muted">` + html.EscapeString(expiry) + `</span></div></div>`)
@@ -187,6 +197,30 @@ code{background:#0F1420;padding:2px 6px;border-radius:6px;font-size:12px}
 		b.WriteString(`</div></div>`)
 	}
 	b.WriteString(`</div>`)
+
+	// Protocols a subscription URL cannot carry. Without this section the panel
+	// can create a WireGuard, AmneziaWG or ShadowTLS inbound and hand its user
+	// no way to import it — the config exists on the server and nowhere else.
+	if len(natives) > 0 {
+		b.WriteString(`<h2 class="nat-h">Direct configs</h2>`)
+		b.WriteString(`<p class="muted nat-sub">These protocols are configured by a file, not a subscription link.</p>`)
+		b.WriteString(`<div class="grid">`)
+		for _, n := range natives {
+			b.WriteString(`<div class="card"><h3>` + html.EscapeString(n.name) + `</h3><p>` + html.EscapeString(n.kind) + `</p>`)
+			// A WireGuard-family QR carries the config text, which is what those
+			// apps scan. A sing-box JSON is far past a QR's capacity, so that
+			// card offers download and copy only rather than a broken code.
+			if svg := qrSVG(n.body); svg != "" {
+				b.WriteString(`<div class="qr" title="Scan in your VPN app to import">` + svg + `</div>`)
+			}
+			b.WriteString(`<div class="btns">`)
+			b.WriteString(`<a class="btn primary" href="` + html.EscapeString(n.url) + `" download>Download</a>`)
+			b.WriteString(`<button class="btn ghost" data-copy="` + html.EscapeString(n.body) + `">Copy config</button>`)
+			b.WriteString(`</div></div>`)
+		}
+		b.WriteString(`</div>`)
+	}
+
 	b.WriteString(`<p class="tip">On your phone: open your VPN app, choose “add subscription / import from QR”, and scan the code for your app. On a computer: tap <b>Import</b> to open the app, or <b>Copy link</b> and paste it in. Your link is private — do not share it.</p>`)
 	b.WriteString(`<script>
 document.querySelectorAll('button[data-copy]').forEach(function(el){

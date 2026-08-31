@@ -66,7 +66,7 @@ func TestRawQueryOptsOutOfLandingPage(t *testing.T) {
 // mobile import path), and the deep-links for the apps the family uses are
 // present.
 func TestSubLandingPageQRAndClients(t *testing.T) {
-	html := string(subLandingPage("https://vpn.example.com/sub/abc123", "upload=0; download=536870912; total=10737418240; expire=1767225600"))
+	html := string(subLandingPage("https://vpn.example.com/sub/abc123", "upload=0; download=536870912; total=10737418240; expire=1767225600", nil))
 	for _, want := range []string{
 		"of 10.0 GB",          // usage summary (512 MB of 10 GB)
 		"<svg",                // QR codes present

@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
+	"github.com/forgepanel/forgepanel/internal/store"
 )
 
 // A subscription is a list of URIs, and two protocols cannot be represented as
@@ -110,4 +113,133 @@ func TestTheNativeConfEndpointRefusesWhatItCannotServe(t *testing.T) {
 			t.Errorf("%s refused with an empty body", path)
 		}
 	}
+}
+
+// TestLandingPageDownloadURLMatchesRoute pins the Download button's href to the
+// route that actually serves it. The first version of this page built the URL
+// by appending to the subscription base, producing /sub/<token>/subconf/0 —
+// a button that 404s. Asserting the string alone would have passed; this
+// asserts the shape the router registered.
+func TestLandingPageDownloadURLMatchesRoute(t *testing.T) {
+	natives := []nativeEntry{
+		{name: "wg-one", kind: "WireGuard client",
+			url:  "https://vpn.example.com/subconf/abc123/0",
+			body: "[Interface]\nPrivateKey = X\n[Peer]\n"},
+	}
+	page := string(subLandingPage("https://vpn.example.com/sub/abc123",
+		"upload=0; download=0; total=0; expire=0", natives))
+
+	if !strings.Contains(page, `href="https://vpn.example.com/subconf/abc123/0" download`) {
+		t.Errorf("landing page does not offer the native config for download:\n%s", page)
+	}
+	// The registered route is /subconf/:token/:index. A link built under /sub/
+	// is the exact regression this test exists for.
+	if strings.Contains(page, "/sub/abc123/subconf/") {
+		t.Error("download link nests /subconf under /sub — that route does not exist")
+	}
+	if !strings.Contains(page, "Direct configs") {
+		t.Error("the native-config section is missing entirely")
+	}
+	// The copy button must carry the CONFIG, not the URL: a WireGuard user
+	// pastes the conf into their client, they do not paste a link.
+	if !strings.Contains(page, "[Interface]") {
+		t.Error("copy button does not carry the config text")
+	}
+}
+
+// TestSubNativeEntriesURLResolves goes one step further than string matching:
+// it takes the URL the landing page would emit and asks the real router to
+// serve it.
+func TestSubNativeEntriesURLResolves(t *testing.T) {
+	s, token := seedNativeSubscription(t)
+
+	// Fetch the landing page as a browser would.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sub/"+token, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("landing page: got %d", rec.Code)
+	}
+	href := firstDownloadHref(rec.Body.String())
+	if href == "" {
+		t.Fatalf("landing page offered no download link:\n%s", rec.Body.String())
+	}
+
+	// Now ask the router for exactly that path.
+	path := href
+	if i := strings.Index(href, "/subconf/"); i >= 0 {
+		path = href[i:]
+	}
+	rec2 := httptest.NewRecorder()
+	s.router.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("the Download button's own URL %q returned %d:\n%s",
+			path, rec2.Code, rec2.Body.String())
+	}
+	if !strings.Contains(rec2.Body.String(), "[Interface]") {
+		t.Errorf("download returned something that is not a config:\n%s", rec2.Body.String())
+	}
+	if cd := rec2.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Errorf("config is not served as a download: Content-Disposition=%q", cd)
+	}
+}
+
+func firstDownloadHref(page string) string {
+	const marker = `class="btn primary" href="`
+	i := strings.Index(page, marker)
+	for i >= 0 {
+		rest := page[i+len(marker):]
+		end := strings.Index(rest, `"`)
+		if end < 0 {
+			return ""
+		}
+		href := rest[:end]
+		if strings.Contains(href, "/subconf/") {
+			return href
+		}
+		next := strings.Index(rest, marker)
+		if next < 0 {
+			return ""
+		}
+		i = i + len(marker) + next
+	}
+	return ""
+}
+
+// seedNativeSubscription builds a server whose subscription contains a
+// WireGuard inbound, with the same routes main() registers for these paths.
+func seedNativeSubscription(t *testing.T) (*Server, string) {
+	t.Helper()
+	s := dbServerT(t)
+	n := &model.Node{
+		Protocol: model.ProtoWireGuard, Address: "vpn.example.com", Port: 51820,
+		Remark: "wg-native",
+		WireGuard: &model.WireGuardOptions{
+			PrivateKey: "cFJvYmFibHlOb3RBUmVhbEtleUZvclRlc3Rz", PublicKey: "U0VSVkVSLVBVQkxJQy1LRVktRk9SLVRFU1Rz",
+			PeerPrivateKey: "Q0xJRU5ULVBSSVZBVEUtS0VZLUZPUi1URVNUcw", PeerPublicKey: "Q0xJRU5ULVBVQkxJQy1LRVktRk9SLVRFU1RzMQ",
+			PeerAddress: []string{"10.66.66.2/32"}, AllowedIPs: []string{"0.0.0.0/0"},
+			MTU: 1420, Keepalive: 25,
+		},
+	}
+	in, err := s.db.CreateInbound(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &store.Group{Name: "gnative", InboundIDs: []uint{in.ID}}
+	if err := s.db.CreateGroup(g); err != nil {
+		t.Fatal(err)
+	}
+	u := &store.User{Username: "wguser", GroupID: g.ID, SubToken: "nativetok123",
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Status: store.StatusActive}
+	if err := s.db.CreateUser(u); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.GET("/sub/:token", s.handleSub)
+	r.GET("/sub/:token/*format", s.handleSub)
+	r.GET("/subconf/:token/:index", s.handleSubNativeConf)
+	s.router = r
+	return s, u.SubToken
 }

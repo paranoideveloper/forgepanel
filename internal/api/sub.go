@@ -351,7 +351,8 @@ func (s *Server) handleSub(c *gin.Context) {
 		// history that omitted it would tell the operator "never fetched" about a
 		// user who had just looked at their own page.
 		s.recordSubFetch(c, token, "browser")
-		c.Data(200, "text/html; charset=utf-8", subLandingPage(base, s.subscriptionUserinfo(token)))
+		c.Data(200, "text/html; charset=utf-8",
+			subLandingPage(base, s.subscriptionUserinfo(token), s.subNativeEntries(token, c, base)))
 		return
 	}
 

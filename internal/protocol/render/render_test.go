@@ -1759,9 +1759,18 @@ func TestSingboxEndpoint(t *testing.T) {
 			t.Errorf("address = %v", ep["address"])
 		}
 		peer := firstOf(t, ep, "peers")
-		if str(t, peer, "public_key") != "CLI-PK" || str(t, peer, "pre_shared_key") != "PSK" ||
-			num(t, peer, "persistent_keepalive_interval") != 25 {
+		if str(t, peer, "public_key") != "CLI-PK" || str(t, peer, "pre_shared_key") != "PSK" {
 			t.Fatalf("peer = %v", peer)
+		}
+		// This test used to require persistent_keepalive_interval on the peer.
+		// That is the client-side directive, and setting it on a server whose
+		// peer is a roaming client (no endpoint) makes sing-box retry a
+		// handshake it cannot address every few seconds, forever:
+		//   peer(...) - failed to send handshake initiation: no known endpoint
+		// Observed live on a generated WireGuard inbound. The keepalive is
+		// emitted in the exported client .conf instead.
+		if _, present := peer["persistent_keepalive_interval"]; present {
+			t.Errorf("server-side peer must not carry keepalive: %v", peer)
 		}
 		if !reflect.DeepEqual(peer["allowed_ips"], []string{"10.66.66.2/32"}) {
 			t.Errorf("allowed_ips = %v", peer["allowed_ips"])
@@ -2024,5 +2033,56 @@ func TestShadowTLSPairIsAcceptedByTheRealCore(t *testing.T) {
 	}
 	if out, err := exec.Command(bin, "check", "-c", path).CombinedOutput(); err != nil {
 		t.Fatalf("sing-box refuses the ShadowTLS client config:\n%s\n%s", out, raw)
+	}
+}
+
+// TestSingboxEndpointRendersEveryPeer: WireGuard keys a session by public key,
+// so a multi-user inbound that renders one peer does not give those users a
+// shared tunnel — they take it from each other in turn. WireGuardOptions.Peers
+// was modelled for this and nothing rendered it.
+func TestSingboxEndpointRendersEveryPeer(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoWireGuard, Port: 51820,
+		WireGuard: &model.WireGuardOptions{
+			PrivateKey:    "SRV-SK",
+			ServerAddress: []string{"10.66.66.1/24"},
+			// The legacy single-peer fields are set too: the peer list must win.
+			PeerPublicKey: "LEGACY-PK", PeerAddress: []string{"10.66.66.2/32"},
+			Peers: []model.WGPeerEntry{
+				{PublicKey: "PK-A", AllowedIPs: []string{"10.66.66.10/32"}},
+				{PublicKey: "PK-B", AllowedIPs: []string{"10.66.66.11/32"}, PresharedKey: "PSK-B"},
+				{PublicKey: "PK-C", AllowedIPs: []string{"10.66.66.12/32"}},
+			},
+		}}
+	ep, err := SingboxEndpoint(n)
+	if err != nil {
+		t.Fatalf("SingboxEndpoint: %v", err)
+	}
+	peers, ok := ep["peers"].([]any)
+	if !ok {
+		t.Fatalf("peers is not a list: %T", ep["peers"])
+	}
+	if len(peers) != 3 {
+		t.Fatalf("expected all 3 assigned peers, got %d: %v", len(peers), peers)
+	}
+	var keys []string
+	for _, p := range peers {
+		pm := p.(jobj)
+		keys = append(keys, str(t, pm, "public_key"))
+		// A peer whose allowed_ips is wider than one host receives traffic
+		// addressed to its neighbours on the same tunnel.
+		ips, _ := pm["allowed_ips"].([]string)
+		if len(ips) != 1 || !strings.HasSuffix(ips[0], "/32") {
+			t.Errorf("peer %v allowed_ips must pin one host, got %v", pm["public_key"], ips)
+		}
+		if _, bad := pm["persistent_keepalive_interval"]; bad {
+			t.Errorf("peer %v carries server-side keepalive", pm["public_key"])
+		}
+	}
+	want := []string{"PK-A", "PK-B", "PK-C"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("peers = %v, want %v (the legacy single peer must not leak in)", keys, want)
+	}
+	if peers[1].(jobj)["pre_shared_key"] != "PSK-B" {
+		t.Errorf("per-peer preshared key was dropped: %v", peers[1])
 	}
 }

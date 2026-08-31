@@ -45,8 +45,30 @@ func TestPresetWizardPlansAreValidAndRenderable(t *testing.T) {
 			t.Errorf("%s: validate: %v", p.remark, err)
 			continue
 		}
-		if _, err := render.XrayInbound(n); err != nil {
-			t.Errorf("%s: xray render: %v", p.remark, err)
+		// The catalogue spans three engines, so render through the one that
+		// actually serves this protocol. Asserting Xray for all of them was
+		// only correct while every preset happened to be an Xray protocol.
+		switch eng := model.EngineFor(n.Protocol); eng {
+		case "xray":
+			if _, err := render.XrayInbound(n); err != nil {
+				t.Errorf("%s: xray render: %v", p.remark, err)
+			}
+		case "sing-box":
+			// WireGuard is an ENDPOINT in sing-box, not an inbound — a separate
+			// top-level section with its own renderer.
+			if render.IsSingboxEndpoint(n) {
+				if _, err := render.SingboxEndpoint(n); err != nil {
+					t.Errorf("%s: sing-box endpoint render: %v", p.remark, err)
+				}
+			} else if _, err := render.SingboxInbounds(n); err != nil {
+				t.Errorf("%s: sing-box render: %v", p.remark, err)
+			}
+		case "amneziawg":
+			// AmneziaWG is served by its own kernel engine, not a core that
+			// takes a JSON inbound; its client-facing artefact is the conf,
+			// asserted in the catalogue tests.
+		default:
+			t.Errorf("%s: no engine serves protocol %q", p.remark, n.Protocol)
 		}
 		// REALITY inbounds must carry the shared key + the SNI rotation.
 		if n.Security.Type == model.SecReality {

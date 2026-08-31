@@ -194,3 +194,20 @@ func sigOf(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:8])
 }
+
+// AmneziaWGReady reports whether this box can actually serve AmneziaWG, and why
+// not when it cannot.
+//
+// The panel will happily create an AmneziaWG inbound on a host with no awg
+// tooling and no kernel module: the row is written, the inbound is enabled, and
+// nothing ever listens on its port. Callers that are about to tell an operator
+// "created" need to be able to say "…but this server cannot serve it".
+func AmneziaWGReady() (bool, string) {
+	if !awgToolsAvailable() {
+		return false, "awg/awg-quick tools are not installed on this server"
+	}
+	if err := awgModuleReady(); err != nil {
+		return false, "amneziawg kernel module unavailable: " + err.Error()
+	}
+	return true, ""
+}

@@ -855,17 +855,51 @@ func SingboxEndpoint(n *model.Node) (jobj, error) {
 	if len(addr) == 0 {
 		addr = []string{"10.66.66.1/24"}
 	}
-	peer := jobj{"public_key": w.PeerPublicKey}
-	peerIPs := w.PeerAddress
-	if len(peerIPs) == 0 {
-		peerIPs = []string{"10.66.66.2/32"}
+	// Every peer here is a roaming client, so none of them gets
+	// persistent_keepalive_interval. Keepalive tells WireGuard to send
+	// unprompted packets TO a peer, which needs that peer's endpoint — unknown
+	// on a server until the client dials in. Setting it anyway makes sing-box
+	// log
+	//
+	//   peer(...) - failed to send handshake initiation: no known endpoint for peer
+	//
+	// every few seconds forever, which is what an operator sees in the logs of a
+	// WireGuard inbound that is otherwise healthy. Keepalive belongs in the
+	// CLIENT config, whose peer (this server) does have a known endpoint;
+	// export.WireGuardConf writes it there.
+	var peers []any
+	if len(w.Peers) > 0 {
+		// The multi-peer list was modelled but never rendered, so a WireGuard
+		// inbound with five users assigned still served exactly one peer — and
+		// because WireGuard keys a session by public key, those users took the
+		// tunnel from each other in turn.
+		for _, pe := range w.Peers {
+			if pe.PublicKey == "" {
+				continue
+			}
+			ips := pe.AllowedIPs
+			if len(ips) == 0 {
+				continue
+			}
+			pj := jobj{"public_key": pe.PublicKey, "allowed_ips": ips}
+			if pe.PresharedKey != "" {
+				pj["pre_shared_key"] = pe.PresharedKey
+			}
+			peers = append(peers, pj)
+		}
 	}
-	peer["allowed_ips"] = peerIPs
-	if w.PreSharedKey != "" {
-		peer["pre_shared_key"] = w.PreSharedKey
-	}
-	if w.Keepalive > 0 {
-		peer["persistent_keepalive_interval"] = w.Keepalive
+	if len(peers) == 0 {
+		// Legacy single-peer inbound: one client described by PeerPublicKey.
+		peer := jobj{"public_key": w.PeerPublicKey}
+		peerIPs := w.PeerAddress
+		if len(peerIPs) == 0 {
+			peerIPs = []string{"10.66.66.2/32"}
+		}
+		peer["allowed_ips"] = peerIPs
+		if w.PreSharedKey != "" {
+			peer["pre_shared_key"] = w.PreSharedKey
+		}
+		peers = []any{peer}
 	}
 	ep := jobj{
 		"type":        "wireguard",
@@ -873,7 +907,7 @@ func SingboxEndpoint(n *model.Node) (jobj, error) {
 		"address":     addr,
 		"private_key": w.PrivateKey,
 		"listen_port": n.Port,
-		"peers":       []any{peer},
+		"peers":       peers,
 	}
 	if w.MTU > 0 {
 		ep["mtu"] = w.MTU

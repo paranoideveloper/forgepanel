@@ -861,6 +861,20 @@ func stampIdentity(n *model.Node, u *store.User) {
 		if u.Password != "" {
 			n.Password = u.Password
 		}
+	case model.ProtoShadowTLS:
+		// The served inbound emits one shadowtls user per assigned panel user,
+		// keyed on that user's password (engine/multi.go). Without the matching
+		// substitution here the subscription handed out the INBOUND's template
+		// password instead, so the two sides never agreed and every connection
+		// died with "shadow-tls v3: hmac mismatch" — the camouflage handshake
+		// completes and authentication then fails, which is why the inbound
+		// looked healthy while serving nobody.
+		if u.Password != "" {
+			if n.ShadowTLS == nil {
+				n.ShadowTLS = &model.ShadowTLSOptions{}
+			}
+			n.ShadowTLS.Password = u.Password
+		}
 	case model.ProtoShadowsocks:
 		// SS-2022 carries a per-user identity header, so each user authenticates
 		// with the SERVER PSK (the inbound's own key) joined to a per-user PSK

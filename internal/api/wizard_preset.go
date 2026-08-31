@@ -13,6 +13,8 @@ import (
 
 	"github.com/forgepanel/forgepanel/internal/apierr"
 	"github.com/forgepanel/forgepanel/internal/cdncheck"
+	"github.com/forgepanel/forgepanel/internal/core"
+	"github.com/forgepanel/forgepanel/internal/deploy"
 	"github.com/forgepanel/forgepanel/internal/dns"
 	"github.com/forgepanel/forgepanel/internal/firewall"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
@@ -72,7 +74,12 @@ type presetPlan struct {
 	remark string
 	port   int
 	cdn    bool // true → proxied Cloudflare sub-domain, edge TLS
-	build  func(p *presetPlan, w *presetWizardCtx) *model.Node
+	// needs is the deployment capability this plan requires, empty when it works
+	// anywhere. A UDP protocol on a platform that routes no UDP is an inbound
+	// the panel would create, enable, and never serve — which is the state this
+	// audit spent its time removing, not adding more of.
+	needs deploy.Capability
+	build func(p *presetPlan, w *presetWizardCtx) *model.Node
 }
 
 // presetWizardCtx carries the shared state every plan reads.
@@ -81,6 +88,18 @@ type presetWizardCtx struct {
 	cdnHost  string         // e.g. edge-<rand>.anonymous.observer (proxied)
 	serverIP string         // the box's public IPv4
 	reality  *model.Reality // ONE keypair shared by every REALITY inbound
+}
+
+// tlsName is the certificate name the direct TLS inbounds present.
+//
+// The panel's own domain when there is one — that certificate is real and
+// already renewed — falling back to the server address, where the engine's
+// self-signed certificate is what a client accepts with allowInsecure.
+func (w *presetWizardCtx) tlsName() string {
+	if w.domain != "" {
+		return w.domain
+	}
+	return w.serverIP
 }
 
 // wizardPresetPlans is the catalogue, in creation order. Ports avoid the panel
@@ -138,6 +157,68 @@ func wizardPresetPlans() []presetPlan {
 		cdn("VLESS · WS · TLS (CDN)", 2096, model.ProtoVLESS, ws("/wsv")),
 		cdn("VLESS · XHTTP · TLS (CDN)", 2087, model.ProtoVLESS, xh("/xhv")),
 		cdn("VMess · WS · TLS (CDN)", 2083, model.ProtoVMess, ws("/vm")),
+		// --- UDP / QUIC ------------------------------------------------------
+		//
+		// Nothing above this line is UDP, and in a network that throttles or
+		// blocks long-lived TCP these are often the only things that move. They
+		// need a routed UDP port, so they are gated: on a platform that gives
+		// the container one HTTP port, creating them would produce an inbound
+		// that is enabled, listening, and unreachable.
+		{remark: "Hysteria2", port: 8446, cdn: false, needs: deploy.UDP, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			// Password and the obfuscation secret are minted by
+			// applyCreateDefaults; a self-signed certificate is injected by the
+			// engine, which is what Hysteria2 clients expect with insecure=1 on
+			// a server that has no domain of its own.
+			// No transport network is set: these protocols are UDP by nature, the
+			// model has no NetUDP, and the renderer keys on
+			// Protocol.IsQUICBased(). The inbounds already running on a live
+			// panel carry the default transport, so this matches what works.
+			return &model.Node{Protocol: model.ProtoHysteria2, Port: p.port, Remark: p.remark,
+				Security: model.Security{Type: model.SecTLS, ServerName: w.tlsName()}}
+		}},
+		{remark: "TUIC v5", port: 8447, cdn: false, needs: deploy.UDP, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			return &model.Node{Protocol: model.ProtoTUIC, Port: p.port, Remark: p.remark,
+				Security: model.Security{Type: model.SecTLS, ServerName: w.tlsName()}}
+		}},
+
+		// --- TLS camouflage, direct -----------------------------------------
+		//
+		// Neither of these fronts through a CDN: AnyTLS and ShadowTLS both do
+		// their own TLS, and an edge that terminates first destroys what they
+		// are for.
+		{remark: "AnyTLS", port: 8448, cdn: false, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			return &model.Node{Protocol: model.ProtoAnyTLS, Port: p.port, Remark: p.remark,
+				Transport: model.Transport{Network: model.NetTCP},
+				Security:  model.Security{Type: model.SecTLS, ServerName: w.tlsName()}}
+		}},
+		{remark: "ShadowTLS · Shadowsocks-2022", port: 8449, cdn: false, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			// ShadowTLS is camouflage, not a proxy: applyCreateDefaults mints the
+			// inner Shadowsocks credentials so the pair is a complete tunnel.
+			// The handshake host must be a real TLS site, which is what the
+			// REALITY dest already is.
+			return &model.Node{Protocol: model.ProtoShadowTLS, Port: p.port, Remark: p.remark,
+				Transport: model.Transport{Network: model.NetTCP},
+				ShadowTLS: &model.ShadowTLSOptions{HandshakeHost: hostOf(realityDest), HandshakePort: 443},
+			}
+		}},
+
+		// --- WireGuard family -------------------------------------------------
+		//
+		// A different family entirely: no TLS, no HTTP, and the client format is
+		// a FILE rather than a link. Both are UDP.
+		{remark: "WireGuard", port: 8450, cdn: false, needs: deploy.UDP, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			// Both keypairs and the tunnel addresses come from
+			// applyCreateDefaults, so the exported wg-quick config is complete.
+			return &model.Node{Protocol: model.ProtoWireGuard, Port: p.port, Remark: p.remark}
+		}},
+		{remark: "AmneziaWG", port: 8451, cdn: false, needs: deploy.UDP, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
+			// The obfuscation parameters (Jc/Jmin/Jmax/S1/S2/H1-H4) are defaulted
+			// by applyCreateDefaults. A host without the amneziawg kernel module
+			// does not fail the wizard: the adapter reports it and the other
+			// inbounds are unaffected.
+			return &model.Node{Protocol: model.ProtoAmneziaWG, Port: p.port, Remark: p.remark}
+		}},
+
 		{remark: "Shadowsocks-2022", port: 8388, cdn: false, build: func(p *presetPlan, w *presetWizardCtx) *model.Node {
 			// Leave Password blank: applyCreateDefaults mints a correctly-encoded
 			// SS-2022 PSK (std base64, exact key size) via keygen.SS2022PSK. A
@@ -256,6 +337,7 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	}
 
 	plans := wizardPresetPlans()
+	surface := s.deploySurface()
 	created := []gin.H{}
 	ports := []int{}
 	for i := range plans {
@@ -263,6 +345,24 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 		// Skip CDN inbounds when there is no domain to front them.
 		if p.cdn && wctx.cdnHost == "" {
 			continue
+		}
+		// Skip what this deployment cannot carry. Creating a UDP inbound on a
+		// platform that routes no UDP produces something enabled, listening and
+		// unreachable — the exact state this panel has spent a release removing.
+		if p.needs != "" && !surface.Allows(p.needs) {
+			warnings = append(warnings, fmt.Sprintf("%s was not created: %s",
+				p.remark, surface.Why[p.needs]))
+			continue
+		}
+		// An engine that is not installed will not serve what we are about to
+		// create. The inbound is still created — the operator may be about to
+		// install the tooling — but reporting a bare "created" for a port that
+		// will never open is the failure this audit is here to remove.
+		if eng := model.EngineFor(protocolOf(p, wctx)); eng == "amneziawg" {
+			if ok, why := core.AmneziaWGReady(); !ok {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s was created but this server cannot serve it yet: %s", p.remark, why))
+			}
 		}
 		n := p.build(p, wctx)
 		applyCreateDefaults(n)
@@ -394,4 +494,15 @@ func cfWizardWarning(err error, host, ip string) string {
 	b.WriteString(ip)
 	b.WriteString(" (proxied) manually.")
 	return b.String()
+}
+
+// protocolOf reports the protocol a plan builds, without committing to the node
+// (building is cheap and has no side effects, so this stays honest even as
+// plans grow conditional).
+func protocolOf(p *presetPlan, w *presetWizardCtx) model.Protocol {
+	n := p.build(p, w)
+	if n == nil {
+		return ""
+	}
+	return n.Protocol
 }
