@@ -120,7 +120,8 @@ func AmneziaWGConf(n *model.Node, host string) (string, error) {
 		fmt.Fprintf(&b, "PresharedKey = %s\n", w.PreSharedKey)
 	}
 	fmt.Fprintf(&b, "Endpoint = %s:%d\n", host, n.Port)
-	fmt.Fprintf(&b, "AllowedIPs = %s\n", strings.Join(allowed, ", "))
+	fmt.Fprintf(&b, "AllowedIPs = %s\n",
+		strings.Join(matchAllowedIPsToTunnel(allowed, addr), ", "))
 	fmt.Fprintf(&b, "PersistentKeepalive = %d\n", keep)
 	// AdvancedSecurity is a PEER-level flag, and 3.0 or newer only.
 	if a.AdvancedSecurity && a.AtLeast(model.AWG30) {

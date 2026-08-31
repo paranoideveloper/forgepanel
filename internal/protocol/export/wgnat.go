@@ -77,3 +77,62 @@ func natSubnets(addrs []string) []string {
 	}
 	return out
 }
+
+// matchAllowedIPsToTunnel drops address families the tunnel cannot carry.
+//
+// The panel allocates an IPv4 tunnel address and advertised
+// "AllowedIPs = 0.0.0.0/0, ::/0" regardless. wg-quick and every AmneziaWG
+// client then install a ::/0 route into an interface that has no IPv6 address,
+// so every IPv6 packet is dropped at the source-address lookup.
+//
+// On an IPv4-only test host that is invisible — which is exactly why it
+// survived: netns tests, a Linux client, a server with no v6 in the tunnel, all
+// pass. On a real dual-stack device it is severe. Happy-eyeballs prefers AAAA,
+// most large sites publish one, and the user sees a tunnel that connects,
+// shows a handshake, pings the gateway, and cannot load Google.
+//
+// So the client is offered only what the tunnel can actually deliver.
+func matchAllowedIPsToTunnel(allowed, tunnelAddrs []string) []string {
+	var hasV4, hasV6 bool
+	for _, a := range tunnelAddrs {
+		s := strings.TrimSpace(a)
+		if s == "" {
+			continue
+		}
+		if i := strings.Index(s, "/"); i >= 0 {
+			s = s[:i]
+		}
+		ip, err := netip.ParseAddr(s)
+		if err != nil {
+			continue
+		}
+		if ip.Is4() {
+			hasV4 = true
+		} else {
+			hasV6 = true
+		}
+	}
+	// Nothing parseable: leave the operator's list alone rather than empty it.
+	if !hasV4 && !hasV6 {
+		return allowed
+	}
+	out := make([]string, 0, len(allowed))
+	for _, a := range allowed {
+		s := strings.TrimSpace(a)
+		if s == "" {
+			continue
+		}
+		isV6 := strings.Contains(s, ":")
+		if isV6 && !hasV6 {
+			continue
+		}
+		if !isV6 && !hasV4 {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return allowed
+	}
+	return out
+}

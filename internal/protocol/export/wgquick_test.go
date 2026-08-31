@@ -35,7 +35,9 @@ func TestWireGuardConfDefaults(t *testing.T) {
 		"PrivateKey":          "CLI-SK",
 		"PublicKey":           "SRV-PK",
 		"Address":             "10.66.66.2/32",
-		"AllowedIPs":          "0.0.0.0/0, ::/0",
+		// IPv4-only tunnel address, so no ::/0: offering it makes the client
+		// route IPv6 into an interface with no IPv6 address and blackhole it.
+		"AllowedIPs":          "0.0.0.0/0",
 		"MTU":                 "1420",
 		"PersistentKeepalive": "25",
 		"DNS":                 "1.1.1.1, 8.8.8.8",
@@ -122,7 +124,9 @@ func TestAmneziaWGConfDefaultsAndHostFallback(t *testing.T) {
 	for key, want := range map[string]string{
 		"Endpoint":            "vpn.example.com:51820",
 		"Address":             "10.67.67.2/32",
-		"AllowedIPs":          "0.0.0.0/0, ::/0",
+		// IPv4-only tunnel address, so no ::/0: offering it makes the client
+		// route IPv6 into an interface with no IPv6 address and blackhole it.
+		"AllowedIPs":          "0.0.0.0/0",
 		"MTU":                 "1420",
 		"PersistentKeepalive": "25",
 	} {

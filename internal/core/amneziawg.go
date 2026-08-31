@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"sync"
 
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
@@ -278,7 +279,34 @@ func AmneziaWGReady() (bool, string) {
 
 // KernelWGReady reports whether this box can serve plain WireGuard on the
 // kernel datapath, and why not when it cannot.
-func KernelWGReady() (bool, string) {
+//
+// Cached, because the engine-choice hook asks once per inbound on every reload
+// and the answer costs a PATH lookup plus, on a host without it loaded, a
+// modprobe. A host does not gain or lose a kernel module between two inbounds
+// of the same reload, and the cache is short enough that installing the tools
+// takes effect without a panel restart.
+func KernelWGReady() (bool, string) { return kernelWGCache.get() }
+
+type readinessCache struct {
+	mu     sync.Mutex
+	at     time.Time
+	ok     bool
+	reason string
+	probe  func() (bool, string)
+}
+
+func (c *readinessCache) get() (bool, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.at.IsZero() && time.Since(c.at) < 30*time.Second {
+		return c.ok, c.reason
+	}
+	c.ok, c.reason = c.probe()
+	c.at = time.Now()
+	return c.ok, c.reason
+}
+
+var kernelWGCache = &readinessCache{probe: func() (bool, string) {
 	if !wgKernelFlavour.toolsAvailable() {
 		return false, "wg/wg-quick tools are not installed on this server"
 	}
@@ -286,4 +314,4 @@ func KernelWGReady() (bool, string) {
 		return false, "wireguard kernel module unavailable: " + err.Error()
 	}
 	return true, ""
-}
+}}

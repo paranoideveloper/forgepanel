@@ -81,3 +81,70 @@ func TestNATSubnetsRefusesWhatItCannotMasqueradeSafely(t *testing.T) {
 		t.Fatalf("natSubnets = %v, want just the masked v4 prefix", got)
 	}
 }
+
+// TestClientIsNotOfferedAFamilyTheTunnelCannotCarry is the fix for a tunnel
+// that connects and then cannot load half the internet.
+//
+// The panel allocates an IPv4 tunnel address and advertised
+// "AllowedIPs = 0.0.0.0/0, ::/0" anyway. The client installs a ::/0 route into
+// an interface with no IPv6 address, so every IPv6 packet is dropped. It is
+// invisible on an IPv4-only test host — which is why it survived a namespace
+// test, a Linux client and a live external check — and severe on a real
+// dual-stack phone, where happy-eyeballs prefers AAAA and most large sites
+// publish one.
+func TestClientIsNotOfferedAFamilyTheTunnelCannotCarry(t *testing.T) {
+	mk := func(peerAddrs []string) *model.Node {
+		return &model.Node{Protocol: model.ProtoAmneziaWG, Address: "203.0.113.9", Port: 5454,
+			AmneziaWG: &model.AmneziaWGOptions{WireGuardOptions: model.WireGuardOptions{
+				PrivateKey: "SRV", PublicKey: "SRVPUB",
+				PeerPrivateKey: "CLI", PeerPublicKey: "CLIPUB",
+				ServerAddress: []string{"10.67.67.1/24"}, PeerAddress: peerAddrs,
+				AllowedIPs: []string{"0.0.0.0/0", "::/0"}, MTU: 1420,
+			}}}
+	}
+
+	t.Run("v4-only tunnel drops ::/0", func(t *testing.T) {
+		conf, err := AmneziaWGConf(mk([]string{"10.67.67.2/32"}), "203.0.113.9")
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := allowedIPsLine(t, conf)
+		if strings.Contains(line, "::/0") {
+			t.Errorf("offered ::/0 on a tunnel with no IPv6 address; every IPv6 "+
+				"destination would blackhole:\n  %s", line)
+		}
+		if !strings.Contains(line, "0.0.0.0/0") {
+			t.Errorf("dropped the IPv4 route as well:\n  %s", line)
+		}
+	})
+
+	t.Run("dual-stack tunnel keeps both", func(t *testing.T) {
+		conf, err := AmneziaWGConf(mk([]string{"10.67.67.2/32", "fd00:67::2/128"}), "203.0.113.9")
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := allowedIPsLine(t, conf)
+		if !strings.Contains(line, "::/0") || !strings.Contains(line, "0.0.0.0/0") {
+			t.Errorf("a tunnel that carries both families must offer both:\n  %s", line)
+		}
+	})
+
+	t.Run("an operator's explicit list is filtered, not emptied", func(t *testing.T) {
+		got := matchAllowedIPsToTunnel([]string{"::/0"}, []string{"10.67.67.2/32"})
+		if len(got) != 1 || got[0] != "::/0" {
+			t.Errorf("filtering everything away would leave a config that routes "+
+				"nothing at all; got %v", got)
+		}
+	})
+}
+
+func allowedIPsLine(t *testing.T, conf string) string {
+	t.Helper()
+	for _, l := range strings.Split(conf, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "AllowedIPs") {
+			return strings.TrimSpace(l)
+		}
+	}
+	t.Fatalf("no AllowedIPs line in:\n%s", conf)
+	return ""
+}

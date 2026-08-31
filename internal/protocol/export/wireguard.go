@@ -53,7 +53,8 @@ func WireGuardConf(n *model.Node, host string) (string, error) {
 		fmt.Fprintf(&b, "PresharedKey = %s\n", w.PreSharedKey)
 	}
 	fmt.Fprintf(&b, "Endpoint = %s:%d\n", host, n.Port)
-	fmt.Fprintf(&b, "AllowedIPs = %s\n", strings.Join(allowed, ", "))
+	fmt.Fprintf(&b, "AllowedIPs = %s\n",
+		strings.Join(matchAllowedIPsToTunnel(allowed, addr), ", "))
 	fmt.Fprintf(&b, "PersistentKeepalive = %d\n", keep)
 	return b.String(), nil
 }

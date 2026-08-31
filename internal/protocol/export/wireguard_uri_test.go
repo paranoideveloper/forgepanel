@@ -118,7 +118,8 @@ func TestTheNativeConfIsCompleteAndClientSide(t *testing.T) {
 	for _, want := range []string{
 		"[Interface]", "PrivateKey = CLIENT-PRIVATE-KEY", "Address = 10.66.66.2/32",
 		"[Peer]", "PublicKey = SERVER-PUBLIC-KEY", "Endpoint = vpn.example.com:3445",
-		"AllowedIPs = 0.0.0.0/0, ::/0", "PersistentKeepalive = 25",
+		// Address is 10.66.66.2/32 — v4 only — so ::/0 must not be offered.
+		"AllowedIPs = 0.0.0.0/0", "PersistentKeepalive = 25",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("wg-quick config is missing %q:\n%s", want, conf)
