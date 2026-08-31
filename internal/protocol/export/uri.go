@@ -486,22 +486,66 @@ func tuicURI(n *model.Node) string {
 }
 
 func wireguardURI(n *model.Node) string {
-	// wireguard://<privkey-urlsafe>@host:port?publickey=&reserved=&address=&mtu=#tag
+	// wireguard://<client-privkey>@host:port?publickey=&address=&allowed_ips=&mtu=&keepalive=#tag
+	//
+	// TWO DEFECTS LIVED HERE, and the link is carried in every subscription, so
+	// both reached every subscriber.
+	//
+	// It preferred w.PrivateKey — the SERVER's key — and fell back to the
+	// client's only when that was absent. A panel-created inbound has both, so
+	// the link handed out was the server's own private key. Anyone holding a
+	// subscription could impersonate the server.
+	//
+	// And it was not importable anyway: it published w.LocalAddress, which a
+	// panel-created node does not set (the client's tunnel address is
+	// PeerAddress), and carried no AllowedIPs and no keepalive. A client that
+	// parsed it got an interface with no address and no routes.
+	//
+	// Measured against a live panel's own WireGuard inbound, the old form was:
+	//   wireguard://<SERVER PRIVATE KEY>@0.0.0.0:3445?mtu=1420&publickey=…
+	// — server key, bind address, nothing a client can use.
 	v := url.Values{}
 	w := n.WireGuard
-	priv := w.PrivateKey
+
+	// The CLIENT's key, always. PrivateKey is the server's half and must never
+	// leave the panel; it is only a fallback for a node parsed from someone
+	// else's client link, where the single key present IS the client's.
+	priv := w.PeerPrivateKey
 	if priv == "" {
-		priv = w.PeerPrivateKey
+		priv = w.PrivateKey
 	}
-	v.Set("publickey", w.PublicKey)
+
+	// The peer the client talks to is the SERVER, so its public key. On a node
+	// imported from a client config the roles are already that way round.
+	pub := w.PublicKey
+	if pub == "" {
+		pub = w.PeerPublicKey
+	}
+	v.Set("publickey", pub)
 	if w.PreSharedKey != "" {
 		v.Set("presharedkey", w.PreSharedKey)
 	}
-	if len(w.LocalAddress) > 0 {
-		v.Set("address", strings.Join(w.LocalAddress, ","))
+
+	// The client's own tunnel address. PeerAddress is where the panel puts it;
+	// LocalAddress is where a parsed client link puts it.
+	addr := w.PeerAddress
+	if len(addr) == 0 {
+		addr = w.LocalAddress
 	}
+	if len(addr) > 0 {
+		v.Set("address", strings.Join(addr, ","))
+	}
+	// Without routes the tunnel comes up and carries nothing.
+	allowed := w.AllowedIPs
+	if len(allowed) == 0 {
+		allowed = []string{"0.0.0.0/0", "::/0"}
+	}
+	v.Set("allowed_ips", strings.Join(allowed, ","))
 	if w.MTU > 0 {
 		v.Set("mtu", strconv.Itoa(w.MTU))
+	}
+	if w.Keepalive > 0 {
+		v.Set("keepalive", strconv.Itoa(w.Keepalive))
 	}
 	if len(w.Reserved) == 3 {
 		v.Set("reserved", fmt.Sprintf("%d,%d,%d", w.Reserved[0], w.Reserved[1], w.Reserved[2]))

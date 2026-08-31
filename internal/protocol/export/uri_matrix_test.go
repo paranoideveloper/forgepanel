@@ -483,13 +483,31 @@ func TestTUICURIParameters(t *testing.T) {
 }
 
 func TestWireGuardURI(t *testing.T) {
-	t.Run("uses the server private key when present", func(t *testing.T) {
+	// This subtest used to be called "uses the server private key when present"
+	// and asserted exactly that. It was locking in a defect: the link it
+	// describes is carried in every user subscription, so preferring the
+	// SERVER's key meant handing every subscriber the key that lets them
+	// impersonate the server. A panel-created inbound holds both halves, so the
+	// preference was not academic — it was the normal case.
+	//
+	// The client's key is the one that belongs in a client's config, which is
+	// what WireGuardConf has always used for the same node.
+	t.Run("carries the CLIENT private key, never the server's", func(t *testing.T) {
 		n := &model.Node{Protocol: model.ProtoWireGuard, Address: "1.2.3.4", Port: 51820, Remark: "WG",
 			WireGuard: &model.WireGuardOptions{PrivateKey: "SK=", PeerPrivateKey: "CLI-SK=", PublicKey: "PK=",
 				PreSharedKey: "PSK=", LocalAddress: []string{"10.0.0.2/32", "fd00::2/128"}, MTU: 1380, Reserved: []int{1, 2, 3}}}
 		n.Normalize()
 		uri := mustExport(t, n)
-		if !strings.HasPrefix(uri, "wireguard://"+url.QueryEscape("SK=")+"@1.2.3.4:51820?") {
+		// Parsed, not substring-matched: "CLI-SK%3D@" contains "SK%3D@", so a
+		// Contains check reports the client's key as the server's.
+		u, perr := url.Parse(uri)
+		if perr != nil {
+			t.Fatalf("uri does not parse: %v", perr)
+		}
+		if got := u.User.Username(); got != "CLI-SK=" {
+			t.Fatalf("userinfo = %q, want the CLIENT key; a subscriber-facing link must never carry the server's", got)
+		}
+		if !strings.HasPrefix(uri, "wireguard://"+url.QueryEscape("CLI-SK=")+"@1.2.3.4:51820?") {
 			t.Fatalf("uri = %s", uri)
 		}
 		wantParams(t, uriQuery(t, uri), map[string]string{"publickey": "PK=", "presharedkey": "PSK=",

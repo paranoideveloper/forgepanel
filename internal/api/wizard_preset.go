@@ -302,6 +302,18 @@ func (s *Server) handlePresetWizard(c *gin.Context) {
 	}
 	s.audit(c, "wizard.preset", fmt.Sprintf("%d inbounds", len(created)))
 
+	// A certificate the CDN will accept.
+	//
+	// The panel resolves a certificate per SNI, so the CDN inbounds will serve a
+	// real one as soon as it exists; without it they present the build-wide
+	// self-signed cert and Cloudflare answers 526 on a Full (Strict) zone. The
+	// token that just created the DNS record is exactly what DNS-01 needs.
+	if wctx.cdnHost != "" && req.CFToken != "" {
+		if note := s.issueCDNCertificate(wctx.cdnHost, req.CFToken, req.AccountID); note != "" {
+			warnings = append(warnings, note)
+		}
+	}
+
 	// Verify the CDN half instead of announcing it.
 	//
 	// A CDN-fronted inbound fails in a way the operator cannot see from here:

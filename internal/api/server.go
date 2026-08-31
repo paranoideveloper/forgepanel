@@ -1010,6 +1010,9 @@ func (s *Server) routes() {
 	// Subscription endpoint (spec §9): format auto-detect by UA + explicit
 	// suffix. DB-backed when a store is attached, else the in-memory demo store.
 	r.GET("/sub/:token", s.handleSub)
+	// The protocols whose client format is a FILE, not a link. Registered before
+	// the catch-all so it is not swallowed by format sniffing.
+	r.GET("/subconf/:token/:index", s.handleSubNativeConf)
 	r.GET("/sub/:token/*format", s.handleSub)
 
 	// ForgeEdge PULL feed (§6): the Worker's cron fetches this with the token
