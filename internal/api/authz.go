@@ -226,6 +226,7 @@ var adminAuthzRules = []authzRule{
 
 	// --- dashboards and inventory: safe for a viewer to read --------------
 	{methods: get, path: "/api/admin/overview", exact: true, roles: readDash},
+	{methods: get, path: "/api/admin/dashboard", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/stats", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/health/detail", exact: true, roles: readDash},
 	{methods: get, path: "/api/admin/doctor", exact: true, roles: readDash},

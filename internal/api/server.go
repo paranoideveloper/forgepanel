@@ -884,6 +884,9 @@ func (s *Server) routes() {
 			admin.GET("/health/detail", s.handleHealthDetail)
 			admin.GET("/stats", s.handleStats)
 			admin.GET("/overview", s.handleOverview)
+			// The Overview's real data: the machine, the accounts, the inbounds and
+			// what is wrong right now. /overview stays for anything already polling it.
+			admin.GET("/dashboard", s.handleDashboard)
 			admin.GET("/engines", s.handleEngines)
 			// Operator-selectable core versions (FP-ADAPT-014). A cores.go with
 			// no admin. line here is the whole defect class this row exists in.
