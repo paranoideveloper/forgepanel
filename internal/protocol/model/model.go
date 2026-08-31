@@ -14,6 +14,7 @@
 package model
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -461,15 +462,78 @@ type WGPeerEntry struct {
 // client. It embeds WireGuardOptions so the base wg-quick fields are reused.
 type AmneziaWGOptions struct {
 	WireGuardOptions
-	Jc   int   `json:"jc,omitempty"`   // junk packet count (1..128)
-	Jmin int   `json:"jmin,omitempty"` // junk packet min size
-	Jmax int   `json:"jmax,omitempty"` // junk packet max size (Jmin < Jmax <= 1280)
-	S1   int   `json:"s1,omitempty"`   // init packet junk size (S1+56 != S2)
-	S2   int   `json:"s2,omitempty"`   // response packet junk size
-	H1   int64 `json:"h1,omitempty"`   // header magics, distinct and > 4
-	H2   int64 `json:"h2,omitempty"`
-	H3   int64 `json:"h3,omitempty"`
-	H4   int64 `json:"h4,omitempty"`
+
+	// Generation selects which obfuscation set is emitted: "", "1.5", "2.0",
+	// "3.0" or "3.1". It is not cosmetic. AmneziaWG generations are two-sided
+	// and mutually incompatible: a 3.0 client cannot complete a handshake with
+	// a 3.1 server, because RandomTrailers changes the wire format for both
+	// ends. Emitting a field the peer's generation does not know is not a
+	// harmless extra — it is a tunnel that never comes up.
+	//
+	// Empty means 1.5, so every inbound created before this field existed keeps
+	// generating exactly the config it did before.
+	Generation string `json:"generation,omitempty"`
+
+	// ---- 1.5 ----
+	Jc   int      `json:"jc,omitempty"`   // junk packet count (1..128)
+	Jmin int      `json:"jmin,omitempty"` // junk packet min size
+	Jmax int      `json:"jmax,omitempty"` // junk packet max size (Jmin < Jmax <= 1280)
+	S1   int      `json:"s1,omitempty"`   // init packet junk size (S1+56 != S2)
+	S2   int      `json:"s2,omitempty"`   // response packet junk size
+	H1   AWGRange `json:"h1,omitempty"`   // header magics, distinct and > 4; uint32
+	H2   AWGRange `json:"h2,omitempty"`
+	H3   AWGRange `json:"h3,omitempty"`
+	H4   AWGRange `json:"h4,omitempty"`
+
+	// ---- 2.0 ----
+	S3 int    `json:"s3,omitempty"` // >= 12 when HeaderProtectionKey is set
+	S4 int    `json:"s4,omitempty"` // >= 12 when HeaderProtectionKey is set
+	I1 string `json:"i1,omitempty"` // custom junk packets, e.g. "<b 0x160303><r 80>"
+	I2 string `json:"i2,omitempty"`
+	I3 string `json:"i3,omitempty"`
+
+	// ---- 3.0 ----
+	HeaderProtectionKey    string   `json:"header_protection_key,omitempty"` // base64, 32 bytes
+	ContentPaddingAddition AWGRange `json:"content_padding_addition,omitempty"`
+	RekeyAfterTime         AWGRange `json:"rekey_after_time,omitempty"`
+	RekeyTimeout           AWGRange `json:"rekey_timeout,omitempty"`
+	RejectAfterTime        AWGRange `json:"reject_after_time,omitempty"`
+	KeepaliveTimeout       AWGRange `json:"keepalive_timeout,omitempty"`
+	MaxHandshakeAttempts   AWGRange `json:"max_handshake_attempts,omitempty"`
+
+	// ---- 3.1 ----
+	RandomTrailers bool `json:"random_trailers,omitempty"`
+	DisableCookies bool `json:"disable_cookies,omitempty"`
+
+	// AdvancedSecurity is a PEER-level flag, not an interface one.
+	AdvancedSecurity bool `json:"advanced_security,omitempty"`
+}
+
+// AmneziaWG generations, in the exact spelling the UI and API use.
+const (
+	AWG15 = "1.5"
+	AWG20 = "2.0"
+	AWG30 = "3.0"
+	AWG31 = "3.1"
+)
+
+// AWGGenerations is every value Generation accepts, oldest first.
+var AWGGenerations = []string{AWG15, AWG20, AWG30, AWG31}
+
+// Gen returns the effective generation, treating "" as 1.5.
+func (a *AmneziaWGOptions) Gen() string {
+	if a == nil || strings.TrimSpace(a.Generation) == "" {
+		return AWG15
+	}
+	return strings.TrimSpace(a.Generation)
+}
+
+// AtLeast reports whether the effective generation is want or newer.
+func (a *AmneziaWGOptions) AtLeast(want string) bool {
+	rank := map[string]int{AWG15: 0, AWG20: 1, AWG30: 2, AWG31: 3}
+	have, ok1 := rank[a.Gen()]
+	need, ok2 := rank[want]
+	return ok1 && ok2 && have >= need
 }
 
 // ShadowTLSOptions wraps a Shadowsocks inbound behind a real TLS handshake.
@@ -772,6 +836,9 @@ func (n *Node) Validate() error {
 		if n.AmneziaWG.S1 != 0 && n.AmneziaWG.S2 != 0 && n.AmneziaWG.S1+56 == n.AmneziaWG.S2 {
 			return errors.New("amneziawg: S1+56 must not equal S2")
 		}
+		if err := n.AmneziaWG.validateGeneration(); err != nil {
+			return err
+		}
 	case ProtoShadowTLS:
 		if n.ShadowTLS == nil || n.ShadowTLS.Password == "" {
 			return fmt.Errorf("shadowtls: %w", ErrNoCredential)
@@ -1009,18 +1076,19 @@ func (n *Node) Normalize() {
 		if a.S2 == 0 {
 			a.S2 = 574
 		}
-		if a.H1 == 0 {
-			a.H1 = 1234567
+		if a.H1.Empty() {
+			a.H1 = AWGRangeFromInt(1234567)
 		}
-		if a.H2 == 0 {
-			a.H2 = 2345678
+		if a.H2.Empty() {
+			a.H2 = AWGRangeFromInt(2345678)
 		}
-		if a.H3 == 0 {
-			a.H3 = 3456789
+		if a.H3.Empty() {
+			a.H3 = AWGRangeFromInt(3456789)
 		}
-		if a.H4 == 0 {
-			a.H4 = 4567890
+		if a.H4.Empty() {
+			a.H4 = AWGRangeFromInt(4567890)
 		}
+		a.normalizeGeneration()
 	case ProtoShadowTLS:
 		if n.ShadowTLS == nil {
 			n.ShadowTLS = &ShadowTLSOptions{}
@@ -1373,4 +1441,143 @@ func isHex(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+
+// normalizeGeneration fills the defaults each AmneziaWG generation needs.
+//
+// The values are the ones measured working against real 3.0 and 3.1 servers,
+// not invented: S3/S4 clear the >= 12 floor that HeaderProtectionKey imposes,
+// and every timing parameter is a range because a fixed value is exactly the
+// fingerprint randomising them is meant to remove.
+func (a *AmneziaWGOptions) normalizeGeneration() {
+	if !a.AtLeast(AWG20) {
+		return
+	}
+	if a.S3 == 0 {
+		a.S3 = 26
+	}
+	if a.S4 == 0 {
+		a.S4 = 22
+	}
+	if !a.AtLeast(AWG30) {
+		return
+	}
+	// HeaderProtectionKey is what makes a 3.x server refuse every older client,
+	// so it is the one field a 3.x config must not be missing.
+	if a.HeaderProtectionKey == "" {
+		if k, err := randomB64Key32(); err == nil {
+			a.HeaderProtectionKey = k
+		}
+	}
+	// S3/S4 below 12 make the kernel module reject the interface outright
+	// ("Unable to modify interface: Invalid argument") once HPK is set, because
+	// HPK uses S1..S4 as salt. Measured: 11 fails, 12 works.
+	if a.S3 < 12 {
+		a.S3 = 26
+	}
+	if a.S4 < 12 {
+		a.S4 = 22
+	}
+	for _, f := range []struct {
+		p   *AWGRange
+		def string
+	}{
+		{&a.ContentPaddingAddition, "16-128"},
+		{&a.RekeyAfterTime, "100-140"},
+		{&a.RekeyTimeout, "4-7"},
+		{&a.RejectAfterTime, "160-200"},
+		{&a.KeepaliveTimeout, "8-15"},
+		{&a.MaxHandshakeAttempts, "12-20"},
+	} {
+		if f.p.Empty() {
+			*f.p = AWGRange(f.def)
+		}
+	}
+	if a.Gen() == AWG31 {
+		// RandomTrailers is the whole of 3.1 over 3.0. A "3.1" config without it
+		// is a 3.0 config wearing the wrong label, and would connect to a 3.0
+		// server while the operator believes they are running 3.1.
+		a.RandomTrailers = true
+	}
+}
+
+func randomB64Key32() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(b[:]), nil
+}
+
+
+// validateGeneration enforces the constraints AmneziaWG actually imposes, each
+// one measured against a live server rather than read off a docs page.
+func (a *AmneziaWGOptions) validateGeneration() error {
+	gen := a.Gen()
+	known := false
+	for _, g := range AWGGenerations {
+		if g == gen {
+			known = true
+		}
+	}
+	if !known {
+		return fmt.Errorf("amneziawg: unknown generation %q; want one of %s",
+			gen, strings.Join(AWGGenerations, ", "))
+	}
+
+	// H1..H4 are uint32 on the wire. A larger value is not clamped or
+	// rejected with a useful message — awg-quick reports "Configuration
+	// parsing error" with no line number, which is why this check exists here
+	// where the field name can still be named.
+	for _, h := range []struct {
+		name string
+		v    AWGRange
+	}{{"H1", a.H1}, {"H2", a.H2}, {"H3", a.H3}, {"H4", a.H4}} {
+		if h.v.Empty() {
+			continue
+		}
+		lo, hi, ok := h.v.Bounds()
+		if !ok {
+			return fmt.Errorf("amneziawg: %s = %q is not a number or a \"lo-hi\" range", h.name, h.v)
+		}
+		if lo <= 4 {
+			return fmt.Errorf("amneziawg: %s must be greater than 4 (got %d)", h.name, lo)
+		}
+		if hi > 4294967295 {
+			return fmt.Errorf("amneziawg: %s = %s exceeds the uint32 maximum 4294967295", h.name, h.v)
+		}
+	}
+
+	if !a.AtLeast(AWG30) {
+		// Fields from a generation this config does not claim would be written
+		// into the conf by an older panel build and silently break the peer.
+		if a.HeaderProtectionKey != "" {
+			return fmt.Errorf("amneziawg: HeaderProtectionKey needs generation %s or newer, not %s",
+				AWG30, gen)
+		}
+		if a.RandomTrailers || a.DisableCookies {
+			return fmt.Errorf("amneziawg: RandomTrailers/DisableCookies need generation %s, not %s",
+				AWG31, gen)
+		}
+		return nil
+	}
+
+	// Measured on a live 3.1 server: with HeaderProtectionKey set, S3 and S4
+	// below 12 make the module reject the interface with "Unable to modify
+	// interface: Invalid argument". 11 fails, 12 works. HPK salts with S1..S4,
+	// which is why the floor exists at all.
+	if a.HeaderProtectionKey != "" {
+		if a.S3 < 12 || a.S4 < 12 {
+			return fmt.Errorf("amneziawg: HeaderProtectionKey requires S3 and S4 >= 12 "+
+				"(got S3=%d S4=%d); the interface would be rejected as Invalid argument", a.S3, a.S4)
+		}
+		if _, err := base64.StdEncoding.DecodeString(a.HeaderProtectionKey); err != nil {
+			return errors.New("amneziawg: HeaderProtectionKey must be base64")
+		}
+	}
+	if (a.RandomTrailers || a.DisableCookies) && a.Gen() != AWG31 {
+		return fmt.Errorf("amneziawg: RandomTrailers/DisableCookies are %s-only, not %s", AWG31, gen)
+	}
+	return nil
 }

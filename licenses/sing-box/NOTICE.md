@@ -29,8 +29,8 @@ added or removed; only build tags differ.
 | | |
 |---|---|
 | Upstream | https://github.com/SagerNet/sing-box |
-| Version | `v1.13.15` |
-| Source archive | https://github.com/SagerNet/sing-box/archive/refs/tags/v1.13.15.tar.gz |
+| Version | `v1.13.21` |
+| Source archive | https://github.com/SagerNet/sing-box/archive/refs/tags/v1.13.21.tar.gz |
 | Build recipe | `scripts/build-singbox.sh` in this repository |
 
 That script is the complete recipe: it pins the version, sets the tag list, and

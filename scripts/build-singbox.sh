@@ -31,7 +31,7 @@ set -euo pipefail
 
 # Pinned to match internal/core/binmgr. Changing it here without changing it
 # there means the panel verifies a checksum for a version it did not ask for.
-SINGBOX_VERSION="${SINGBOX_VERSION:-1.13.15}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-1.13.21}"
 
 # The official tag set, plus the one the official build omits. Kept as a single
 # sorted string so a diff against `sing-box version` is exact.

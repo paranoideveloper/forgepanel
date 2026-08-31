@@ -28,7 +28,7 @@ import (
 // Pinned versions (spec §6: pinned, checksum-verified).
 const (
 	XrayVersion    = "v26.3.27"
-	SingboxVersion = "1.13.15"
+	SingboxVersion = "1.13.21"
 	BrookVersion   = "v20260101.0"
 )
 
@@ -257,18 +257,18 @@ var pinnedSHA256 = map[string]string{
 	"Xray-windows-arm64-v8a.zip": "35d4ed6ec21224fb22b07c2c3f672e2350cd536f2c74d309150175a76365ea88",
 	// sing-box official release archives: .tar.gz everywhere, .zip on Windows.
 	// These are NOT the ForgePanel builds at the bottom of this map.
-	"sing-box-1.13.15-linux-386.tar.gz":     "4180f34fcab227b1b6912e2a4e3cf9e6d484a7c885b5b0ea9d4cd45c7351527e",
-	"sing-box-1.13.15-linux-amd64.tar.gz":   "a3a3ff223b23c3f4731d0a17cb0ef94c97ce257c70721a5b07dc7ca079203c9f",
-	"sing-box-1.13.15-linux-armv5.tar.gz":   "9a9f4504eef9b4a00e17f56389c69a96df4dfbea3713f5e6ab77323316f415ac",
-	"sing-box-1.13.15-linux-armv6.tar.gz":   "27f068b9ef3069bb682fa72740a852d531d84c1868235a984e1c4628d9da8bc7",
-	"sing-box-1.13.15-linux-armv7.tar.gz":   "30e951f091a80464d2b22a2c5f02fbe55f04b2d3f38a5701d51da3be8cf09761",
-	"sing-box-1.13.15-linux-arm64.tar.gz":   "f0810bbb5722ae36635687c421019defcc8b328d31a0b3c287901f331747ca93",
-	"sing-box-1.13.15-linux-riscv64.tar.gz": "160a68cc4e29de6c733ab110c285820c55660bdd5277bbfbc91566ecfa666da0",
-	"sing-box-1.13.15-darwin-amd64.tar.gz":  "817e04f90f941b718fedd965ff05bfe72abfcc62952888b01751a6dec5547e14",
-	"sing-box-1.13.15-darwin-arm64.tar.gz":  "3452d866834c9572389e5ca73e60d4ee45a7d5b79332188c9a9e533c5fd40a6d",
-	"sing-box-1.13.15-windows-386.zip":      "42cba95de96ffd6cea599fa18ff3328a37738025c7233c9b9e4a382c237c8b50",
-	"sing-box-1.13.15-windows-amd64.zip":    "599b296f6e57511d36d2a6f3011aed1a86fa98418578bbb06bd6dc241b5d8877",
-	"sing-box-1.13.15-windows-arm64.zip":    "82419193e0f087279fd7add4fbe90a26c93396057477e8c014a534ec8b2d63ec",
+	"sing-box-1.13.21-linux-386.tar.gz": "d5e01a4df1e63116a2ca71d2aff3963e4e328699f9b284df521e08697864c67d",
+	"sing-box-1.13.21-linux-amd64.tar.gz": "24f9ef8e7234e13e71e74c3598a4164c5fe07b7b67ccc6e96cf68b54789f72cd",
+	"sing-box-1.13.21-linux-armv5.tar.gz": "1a3f452a7e9b19e463a0bc3a6d3ca5023501ced9c5e75f077d24a6d45b4297fd",
+	"sing-box-1.13.21-linux-armv6.tar.gz": "d827da285e4678ba668b12406ce3c6cd18cef75f41bc343857f7cd099b3e0770",
+	"sing-box-1.13.21-linux-armv7.tar.gz": "a3edb2a40eeba461fa9c6e9e0fc97217e355154132a588abf89fc4f3f4d0240f",
+	"sing-box-1.13.21-linux-arm64.tar.gz": "3e30b876c9a93c19e503e2a2d6249cf05e6a26766553d4b61e1daf48223f304f",
+	"sing-box-1.13.21-linux-riscv64.tar.gz": "7fb119979491aba1deb05491aeaf0b110d36e5670833a865500648981b1bce8d",
+	"sing-box-1.13.21-darwin-amd64.tar.gz": "61093d79211a6ae7b707d30f07be35b1167ca8366bf0dbc06ee5fb35c90dc9e8",
+	"sing-box-1.13.21-darwin-arm64.tar.gz": "62bca85bf08b9145288729cf010c98ea9877b8086f7369cde9e127012d509424",
+	"sing-box-1.13.21-windows-386.zip": "e931f8b678deb7c46f51cba029191681a79427070e6bb79529463b439606d321",
+	"sing-box-1.13.21-windows-amd64.zip": "a03291793d3a3c6e266447a58140657ac099ff278abf3b8ff678932356a62ced",
+	"sing-box-1.13.21-windows-arm64.zip": "ef752d9bffd6d590dd6886b28819a7ae4efee70b8188f9198757d91570efd554",
 	// brook ships one bare binary per platform, no archive.
 	"brook_linux_386":         "7311a61483c805954d0ca49aaf5db9480138cf4ea00d09e2b83d4fd88b1b874b",
 	"brook_linux_amd64":       "7853250042877716376fab14a3a99be44bf242cd69dec11cfa71fada915db372",
@@ -291,8 +291,8 @@ var pinnedSHA256 = map[string]string{
 	//
 	// Reproduce with:  TARGETS="amd64 arm64" scripts/build-singbox.sh
 	// and compare; two independent builds are byte-identical.
-	"sing-box-1.13.15-linux-amd64": "bb4d1b057836e2d955020b4be6c8084023cb6c91f330b50e485e6b8b02dc7563",
-	"sing-box-1.13.15-linux-arm64": "f163bae1ac31e80fed67a9e51463ef943ed4a13ffba35db591546220073eab0a",
+	"sing-box-1.13.21-linux-amd64": "3c7b3ecc4e72adcd8092404496abb31f5293169cd527b007c523172b35886c02",
+	"sing-box-1.13.21-linux-arm64": "6df7cea19a16a8d219332551d1f8f893c6cbf489cebd9551da87f7f5b4c7ac5a",
 }
 
 // compiledDigest reads the table above: the digests this build was shipped with.

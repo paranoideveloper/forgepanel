@@ -51,7 +51,7 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
 # a stale version here is not an error — it is a silent download at every boot.
 FROM alpine:3.21 AS cores
 ARG XRAY_VERSION=v26.3.27
-ARG SINGBOX_VERSION=1.13.15
+ARG SINGBOX_VERSION=1.13.21
 ARG BROOK_VERSION=v20260101.0
 RUN apk add --no-cache curl unzip tar
 RUN set -eux; \

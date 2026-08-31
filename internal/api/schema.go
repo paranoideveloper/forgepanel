@@ -206,10 +206,47 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 			{Key: "amneziawg.jmax", Label: "Jmax (junk max size)", Type: "number", Default: 1000},
 			{Key: "amneziawg.s1", Label: "S1 (init junk)", Type: "number", Default: 86},
 			{Key: "amneziawg.s2", Label: "S2 (response junk)", Type: "number", Default: 574},
-			{Key: "amneziawg.h1", Label: "H1 (header magic)", Type: "number", Default: 1234567},
-			{Key: "amneziawg.h2", Label: "H2 (header magic)", Type: "number", Default: 2345678},
-			{Key: "amneziawg.h3", Label: "H3 (header magic)", Type: "number", Default: 3456789},
-			{Key: "amneziawg.h4", Label: "H4 (header magic)", Type: "number", Default: 4567890},
+			{Key: "amneziawg.h1", Label: "H1 (header magic)", Type: "text", Default: "1234567"},
+			{Key: "amneziawg.h2", Label: "H2 (header magic)", Type: "text", Default: "2345678"},
+			{Key: "amneziawg.h3", Label: "H3 (header magic)", Type: "text", Default: "3456789"},
+			{Key: "amneziawg.h4", Label: "H4 (header magic)", Type: "text", Default: "4567890"},
+
+			// Generations are two-sided and mutually incompatible: a 3.0 client
+			// cannot hand-shake with a 3.1 server. Picking one here is what
+			// decides which keys the generated conf carries.
+			{Key: "amneziawg.generation", Label: "AmneziaWG generation", Type: "select",
+				Options: []string{"1.5", "2.0", "3.0", "3.1"}, Default: "1.5",
+				Help: "Must match the client app. AmneziaVPN supports up to 3.0; the standalone " +
+					"AmneziaWG app 3.1.x supports 3.1. A 3.x server refuses every older client."},
+
+			// ---- 2.0 ----
+			{Key: "amneziawg.s3", Label: "S3 (2.0+)", Type: "number", Default: 26,
+				Help: "Must be >= 12 when a header protection key is set."},
+			{Key: "amneziawg.s4", Label: "S4 (2.0+)", Type: "number", Default: 22,
+				Help: "Must be >= 12 when a header protection key is set."},
+			{Key: "amneziawg.i1", Label: "I1 custom junk packet (2.0+)", Type: "text",
+				Ph: "<b 0x160303><r 80>"},
+			{Key: "amneziawg.i2", Label: "I2 custom junk packet (2.0+)", Type: "text", Ph: "<c><t><r 44>"},
+			{Key: "amneziawg.i3", Label: "I3 custom junk packet (2.0+)", Type: "text", Ph: "<r 104>"},
+
+			// ---- 3.0 ----
+			{Key: "amneziawg.header_protection_key", Label: "Header protection key (3.0+)",
+				Type: "text", Keygen: "ss2022",
+				Help: "Base64, 32 bytes. This is what makes a 3.x server reject older clients."},
+			{Key: "amneziawg.content_padding_addition", Label: "Content padding addition (3.0+)",
+				Type: "text", Default: "16-128", Help: "A single value or a lo-hi range."},
+			{Key: "amneziawg.rekey_after_time", Label: "Rekey after time (3.0+)", Type: "text", Default: "100-140"},
+			{Key: "amneziawg.rekey_timeout", Label: "Rekey timeout (3.0+)", Type: "text", Default: "4-7"},
+			{Key: "amneziawg.reject_after_time", Label: "Reject after time (3.0+)", Type: "text", Default: "160-200"},
+			{Key: "amneziawg.keepalive_timeout", Label: "Keepalive timeout (3.0+)", Type: "text", Default: "8-15"},
+			{Key: "amneziawg.max_handshake_attempts", Label: "Max handshake attempts (3.0+)",
+				Type: "text", Default: "12-20"},
+
+			// ---- 3.1 ----
+			{Key: "amneziawg.random_trailers", Label: "Random trailers (3.1 only)", Type: "bool",
+				Help: "The whole of 3.1 over 3.0, and two-sided: enabling it locks out 3.0 clients."},
+			{Key: "amneziawg.disable_cookies", Label: "Disable cookies (3.1 only)", Type: "bool"},
+			{Key: "amneziawg.advanced_security", Label: "Advanced security (peer)", Type: "bool"},
 		}},
 		// NOTE: SSH is intentionally NOT a creatable inbound. sing-box implements
 		// SSH only as an OUTBOUND (routing THROUGH an SSH server); there is no SSH

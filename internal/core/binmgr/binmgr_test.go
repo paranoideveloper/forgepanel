@@ -20,7 +20,7 @@ func TestVerifyPinnedMandatory(t *testing.T) {
 	}
 	// All three engines (both arches) have a syntactically valid pinned SHA-256.
 	wantEngines := []string{"Xray-linux-64.zip", "Xray-linux-arm64-v8a.zip",
-		"sing-box-1.13.15-linux-amd64.tar.gz", "brook_linux_amd64", "brook_linux_arm64"}
+		"sing-box-1.13.21-linux-amd64.tar.gz", "brook_linux_amd64", "brook_linux_arm64"}
 	for _, name := range wantEngines {
 		h, ok := pinnedSHA256[name]
 		if !ok {

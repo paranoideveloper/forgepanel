@@ -22,7 +22,7 @@ func awgNode() *model.Node {
 
 func TestAmneziaWGNormalizeDefaults(t *testing.T) {
 	a := awgNode().AmneziaWG
-	if a.Jc == 0 || a.Jmin == 0 || a.Jmax == 0 || a.H1 == 0 || a.H4 == 0 {
+	if a.Jc == 0 || a.Jmin == 0 || a.Jmax == 0 || a.H1.Empty() || a.H4.Empty() {
 		t.Fatalf("obfuscation defaults not filled: %+v", a)
 	}
 	if a.Jmin >= a.Jmax {

@@ -106,7 +106,7 @@ the sing-box **binary** we convey, and those obligations are met in full:
 | Obligation | How it is met |
 |---|---|
 | Keep notices intact | `licenses/sing-box/LICENSE` is shipped as a release asset and installed beside the binary; the build refuses to run without it |
-| Provide corresponding source | Unmodified upstream `v1.13.15`; source URL and the complete build recipe are in `licenses/sing-box/NOTICE.md` |
+| Provide corresponding source | Unmodified upstream `v1.13.21`; source URL and the complete build recipe are in `licenses/sing-box/NOTICE.md` |
 | Let recipients verify | The build is reproducible — two independent runs are byte-identical — and the checksum the panel enforces is published |
 | Respect the naming clause | Installed as `sing-box-forgepanel`, never presented as ForgePanel's own work or as endorsed by upstream |
 

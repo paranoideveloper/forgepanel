@@ -83,7 +83,7 @@ LABEL org.opencontainers.image.title="ForgePanel" \
 #   is musl, so without a glibc shim every sing-box exec fails with "no such file
 #   or directory" (exit 127) and Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard/SSH are
 #   all dead in the container. gcompat provides the loader + libc shim; verified by
-#   running the pinned sing-box-1.13.15 binary under it. (Xray ships static and
+#   running the pinned sing-box-1.13.21 binary under it. (Xray ships static and
 #   does not need it, but gcompat is harmless there.)
 # apk index fetches fail on flaky, rate-limited or partly-censored build networks
 # ("temporary error (try again later)"). Retry across several mirrors so the build

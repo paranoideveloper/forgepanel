@@ -438,7 +438,7 @@ func TestNormalizeProtocolDefaults(t *testing.T) {
 			t.Fatal("amneziawg options block must be materialized")
 		}
 		want := AmneziaWGOptions{Jc: 8, Jmin: 50, Jmax: 1000, S1: 86, S2: 574,
-			H1: 1234567, H2: 2345678, H3: 3456789, H4: 4567890}
+			H1: "1234567", H2: "2345678", H3: "3456789", H4: "4567890"}
 		want.MTU = 1420
 		if a.Jc != want.Jc || a.Jmin != want.Jmin || a.Jmax != want.Jmax ||
 			a.S1 != want.S1 || a.S2 != want.S2 || a.MTU != want.MTU ||
