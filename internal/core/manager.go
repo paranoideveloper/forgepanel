@@ -80,8 +80,9 @@ type Controller struct {
 	routingSource func() ([]engine.OutboundSpec, []engine.RuleSpec, []engine.GroupSpec)
 
 	mu      sync.Mutex
-	brook   *BrookManager
-	awg     *AWGManager
+	brook    *BrookManager
+	awg      *AWGManager
+	kernelwg *AWGManager
 	porthop *porthop.Manager
 	// active is the set of engines the last reload gave something to serve, so
 	// Status() reports exactly the cores in use — as it always has.
@@ -102,7 +103,8 @@ func NewController(dataDir string, xrayAPIPort int) *Controller {
 	reapStrayEngines(bins.BinDir)
 	c := &Controller{
 		dataDir: dataDir, xrayAPIPort: xrayAPIPort, bins: bins,
-		brook: NewBrookManager(bins), awg: NewAWGManager(dataDir), porthop: porthop.New(),
+		brook: NewBrookManager(bins), awg: NewAWGManager(dataDir),
+		kernelwg: NewKernelWGManager(dataDir), porthop: porthop.New(),
 		presence: online.NewTracker(0),
 	}
 	// Built once. A failure here is stored rather than panicked on: the panel

@@ -31,6 +31,16 @@ const (
 	EngineAmneziaWG = "amneziawg"
 	EngineBrook     = "brook"
 	EngineForgeDNS  = "forgedns"
+
+	// EngineKernelWG serves plain WireGuard on the kernel datapath (wg-quick +
+	// the in-tree wireguard module) instead of the sing-box userspace endpoint.
+	//
+	// It is NOT the default for ProtoWireGuard, and deliberately so: it needs
+	// root, the module and wireguard-tools, none of which every host has. It is
+	// selected per inbound through Node.Engine, so an operator who has those
+	// opts in. Measured on one box, same client and destination: 2.24-2.49
+	// Gbit/s here against 0.74-0.83 through the userspace endpoint.
+	EngineKernelWG = "kernel-wg"
 	// EngineUnknown is returned for a protocol with no mapping. It is a
 	// deliberate sentinel rather than "": an empty engine reads like "no engine
 	// needed" at a call site, which is how the forgedns drift stayed invisible.
@@ -91,6 +101,30 @@ func ProtocolsForEngine(engine string) []Protocol {
 	for _, p := range AllProtocols() {
 		if EngineFor(p) == engine {
 			out = append(out, p)
+		}
+	}
+	return append(out, alsoServedBy[engine]...)
+}
+
+// alsoServedBy lists protocols an engine can serve WITHOUT being their default.
+//
+// EngineFor stays the single authority on where an inbound goes when nobody
+// says otherwise; this is what makes an explicit Node.Engine resolvable at all.
+// The registry refuses an override to an engine that does not list the
+// protocol, precisely so a mistyped choice cannot hand an inbound to a core
+// with no implementation for it and take down every other inbound on that core.
+var alsoServedBy = map[string][]Protocol{
+	EngineKernelWG: {ProtoWireGuard},
+}
+
+// EnginesFor lists every engine that can serve a protocol, its default first.
+func EnginesFor(p Protocol) []string {
+	out := []string{EngineFor(p)}
+	for eng, ps := range alsoServedBy {
+		for _, q := range ps {
+			if q == p && eng != out[0] {
+				out = append(out, eng)
+			}
 		}
 	}
 	return out

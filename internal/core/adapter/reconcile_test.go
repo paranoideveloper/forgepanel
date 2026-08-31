@@ -17,7 +17,7 @@ import (
 // repaired. This is the test that notices.
 func TestOnlyPerInboundCoresAreReconcilable(t *testing.T) {
 	opts := Options{DataDir: t.TempDir()}
-	reg, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{})
+	reg, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{}, &fakeAWG{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +25,12 @@ func TestOnlyPerInboundCoresAreReconcilable(t *testing.T) {
 	want := map[string]bool{
 		"brook":     true,
 		"amneziawg": true,
+		// kernel-wg reconciles per inbound exactly as AmneziaWG does: each
+		// inbound is one kernel interface, and Reload leaves an interface whose
+		// config is unchanged and already up alone. Running it on a timer brings
+		// back an interface something outside the panel took down, and drops no
+		// established session.
+		"kernel-wg": true,
 		"xray":      false,
 		"sing-box":  false,
 	}
@@ -59,7 +65,7 @@ func TestOnlyPerInboundCoresAreReconcilable(t *testing.T) {
 // error and not a teardown. Maintenance runs on a fresh panel too.
 func TestReconcilingACoreWithNoPlanDoesNothing(t *testing.T) {
 	opts := Options{DataDir: t.TempDir()}
-	reg, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{})
+	reg, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{}, &fakeAWG{})
 	if err != nil {
 		t.Fatal(err)
 	}

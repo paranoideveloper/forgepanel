@@ -24,6 +24,15 @@ import (
 type awgAdapter struct {
 	run InterfaceRunner
 
+	// engine, proto and render are what differ between the AmneziaWG adapter
+	// and the plain-WireGuard kernel adapter. Everything else — reconcile,
+	// health, lifecycle — is identical, so they share one implementation
+	// rather than a copy that drifts.
+	engine string
+	proto  model.Protocol
+	render func(n *model.Node) (string, error)
+	tool   string // userspace tool probed by Detect
+
 	mu   sync.Mutex
 	last Plan
 }
@@ -34,12 +43,32 @@ type awgAdapter struct {
 // to read binmgr.Managed(EngineAmneziaWG) == false, in another package.
 
 // NewAmneziaWG returns the AmneziaWG adapter driving the given reconciler.
-func NewAmneziaWG(run InterfaceRunner) CoreAdapter { return &awgAdapter{run: run} }
+func NewAmneziaWG(run InterfaceRunner) CoreAdapter {
+	return &awgAdapter{
+		run: run, engine: model.EngineAmneziaWG, proto: model.ProtoAmneziaWG, tool: "awg",
+		render: func(n *model.Node) (string, error) {
+			return export.AmneziaWGServerConf(n, []*model.Node{n})
+		},
+	}
+}
 
-func (a *awgAdapter) Name() string { return model.EngineAmneziaWG }
+// NewKernelWG returns the adapter serving plain WireGuard on the kernel
+// datapath. It is never a protocol's default engine — an inbound reaches it
+// only by naming it in Node.Engine — because it needs root, the wireguard
+// module and wireguard-tools, which not every host has.
+func NewKernelWG(run InterfaceRunner) CoreAdapter {
+	return &awgAdapter{
+		run: run, engine: model.EngineKernelWG, proto: model.ProtoWireGuard, tool: "wg",
+		render: func(n *model.Node) (string, error) {
+			return export.WireGuardServerConf(n, []*model.Node{n})
+		},
+	}
+}
+
+func (a *awgAdapter) Name() string { return a.engine }
 
 func (a *awgAdapter) SupportedProtocols() []model.Protocol {
-	return model.ProtocolsForEngine(model.EngineAmneziaWG)
+	return model.ProtocolsForEngine(a.engine)
 }
 
 // SupportedTransports is empty on purpose: AmneziaWG is a raw UDP kernel
@@ -55,7 +84,7 @@ func (a *awgAdapter) Supports(n *model.Node) error { return supportsNode(a, n) }
 // distribution alongside the kernel module, and downloading a userspace tool
 // that does not match the loaded module would be worse than not having it.
 func (a *awgAdapter) Detect() (bool, string, error) {
-	path, err := exec.LookPath("awg")
+	path, err := exec.LookPath(a.tool)
 	if err != nil {
 		return false, "", nil
 	}
@@ -77,20 +106,20 @@ func (a *awgAdapter) GenerateConfig(nodes []*model.Node) ([]byte, error) {
 		if n == nil {
 			return nil, errNilNode
 		}
-		if n.Protocol != model.ProtoAmneziaWG {
+		if n.Protocol != a.proto {
 			return nil, &UnsupportedError{Engine: a.Name(), Protocol: n.Protocol,
 				Reason: "protocol not served by this engine"}
 		}
 		// The single client peer lives on the inbound node itself, which is how
 		// the panel models WireGuard; passing the node as its own peer list is
 		// what the reconciler does too.
-		conf, err := export.AmneziaWGServerConf(n, []*model.Node{n})
+		conf, err := a.render(n)
 		if err != nil {
 			return nil, err
 		}
 		key := strconv.Itoa(n.Port)
 		if _, dup := out[key]; dup {
-			return nil, fmt.Errorf("amneziawg: port %d is claimed by two inbounds", n.Port)
+			return nil, fmt.Errorf("%s: port %d is claimed by two inbounds", a.engine, n.Port)
 		}
 		out[key] = conf
 	}

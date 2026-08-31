@@ -33,11 +33,12 @@ func TestDefaultRegistryAcceptsTheRealManagers(t *testing.T) {
 		adapter.Options{DataDir: dir, XrayAPIPort: 10085, Bins: bins},
 		core.NewBrookManager(bins),
 		core.NewAWGManager(dir),
+		core.NewKernelWGManager(dir),
 	)
 	if err != nil {
 		t.Fatalf("DefaultRegistry with the real managers: %v", err)
 	}
-	want := []string{"xray", "sing-box", "brook", "amneziawg"}
+	want := []string{"xray", "sing-box", "brook", "amneziawg", "kernel-wg"}
 	got := r.Engines()
 	if len(got) != len(want) {
 		t.Fatalf("engines = %v, want %v", got, want)

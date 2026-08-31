@@ -187,6 +187,14 @@ func protocolSchemaList(transports, securities []string) []ProtoSchema {
 			{Key: "wireguard.workers", Label: "Workers", Type: "number",
 				Help: "sing-box endpoint worker count; 0 = one per CPU"},
 			{Key: "wireguard.reserved", Label: "Reserved (WARP)", Type: "csvint", Ph: "0,0,0"},
+			// Measured on one box, same client and destination: the kernel
+			// datapath carried 2.24-2.49 Gbit/s where the sing-box userspace
+			// endpoint carried 0.74-0.83.
+			{Key: "engine", Label: "Datapath", Type: "select",
+				Options: []string{"", "kernel-wg"}, Default: "",
+				Help: "Blank serves this inbound through sing-box, which works everywhere. " +
+					"kernel-wg serves it through the kernel (wg-quick) instead — about 3x the " +
+					"throughput, but it needs root, the wireguard module and wireguard-tools."},
 		}},
 		// AmneziaWG runs in KERNEL mode (amneziawg module + awg-quick). Keys and
 		// tunnel addresses are auto-provisioned; the fields below are the shared

@@ -605,8 +605,17 @@ type SSPluginOptions struct {
 // Node is THE canonical representation. Every renderer, exporter and parser
 // operates on this type and nothing else.
 type Node struct {
-	Tag      string   `json:"tag,omitempty"`
-	Remark   string   `json:"remark,omitempty"`
+	Tag    string `json:"tag,omitempty"`
+	Remark string `json:"remark,omitempty"`
+
+	// Engine overrides which core serves this inbound. Empty means the
+	// protocol's default, EngineFor(Protocol).
+	//
+	// Only an engine that lists the protocol in EnginesFor is accepted; the
+	// registry refuses anything else rather than handing an inbound to a core
+	// with no implementation for it, which would make that core reject its
+	// whole config and stop every OTHER inbound on it.
+	Engine string `json:"engine,omitempty"`
 	Protocol Protocol `json:"protocol"`
 	Address  string   `json:"address"`
 	Port     int      `json:"port"`

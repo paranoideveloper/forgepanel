@@ -44,7 +44,7 @@ func TestPartitionedConfigsAreByteIdenticalToTheWholeListRender(t *testing.T) {
 	}
 
 	opts := Options{DataDir: t.TempDir(), XrayAPIPort: apiPort, Bins: &fakeBins{dir: t.TempDir()}}
-	r, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{})
+	r, err := DefaultRegistry(opts, &fakeBrook{}, &fakeAWG{}, &fakeAWG{})
 	if err != nil {
 		t.Fatal(err)
 	}

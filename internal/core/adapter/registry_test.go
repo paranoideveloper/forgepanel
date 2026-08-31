@@ -12,7 +12,7 @@ import (
 func testRegistry(t *testing.T) (*Registry, *fakeBrook, *fakeAWG) {
 	t.Helper()
 	brook, awg := &fakeBrook{}, &fakeAWG{}
-	r, err := DefaultRegistry(Options{DataDir: t.TempDir(), XrayAPIPort: 10085, Bins: &fakeBins{dir: t.TempDir()}}, brook, awg)
+	r, err := DefaultRegistry(Options{DataDir: t.TempDir(), XrayAPIPort: 10085, Bins: &fakeBins{dir: t.TempDir()}}, brook, awg, awg)
 	if err != nil {
 		t.Fatalf("DefaultRegistry: %v", err)
 	}
@@ -360,7 +360,8 @@ func TestRegisterRejectsUnusableAdapters(t *testing.T) {
 // order turns an intermittent reload failure into one nobody can reproduce.
 func TestRegistrationOrderIsPreserved(t *testing.T) {
 	r, _, _ := testRegistry(t)
-	want := []string{model.EngineXray, model.EngineSingBox, model.EngineBrook, model.EngineAmneziaWG}
+	want := []string{model.EngineXray, model.EngineSingBox, model.EngineBrook,
+		model.EngineAmneziaWG, model.EngineKernelWG}
 	got := r.Engines()
 	if len(got) != len(want) {
 		t.Fatalf("engines = %v, want %v", got, want)
@@ -382,10 +383,10 @@ func TestRegistrationOrderIsPreserved(t *testing.T) {
 
 func TestDefaultRegistryRefusesMissingRunners(t *testing.T) {
 	opts := Options{DataDir: t.TempDir()}
-	if _, err := DefaultRegistry(opts, nil, &fakeAWG{}); err == nil {
+	if _, err := DefaultRegistry(opts, nil, &fakeAWG{}, &fakeAWG{}); err == nil {
 		t.Error("registry built without a Brook runner; brook inbounds would resolve to nothing")
 	}
-	if _, err := DefaultRegistry(opts, &fakeBrook{}, nil); err == nil {
+	if _, err := DefaultRegistry(opts, &fakeBrook{}, nil, &fakeAWG{}); err == nil {
 		t.Error("registry built without an AmneziaWG runner; awg inbounds would resolve to nothing")
 	}
 }

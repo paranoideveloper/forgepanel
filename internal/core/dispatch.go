@@ -59,7 +59,7 @@ var bestEffortEngines = map[string]bool{
 // through. Brook and AmneziaWG are passed as runners because their reconcilers
 // live here, in internal/core, which the adapter package must not import.
 func (c *Controller) buildRegistry() (*adapter.Registry, error) {
-	return adapter.DefaultRegistry(adapter.Options{
+	reg, err := adapter.DefaultRegistry(adapter.Options{
 		DataDir:     c.dataDir,
 		XrayAPIPort: c.xrayAPIPort,
 		Bins:        c.bins,
@@ -95,7 +95,24 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 		EngineEnv: map[string][]string{
 			model.EngineXray: {"XRAY_LOCATION_ASSET=" + c.bins.GeoAssetDir(binmgr.EngineXray)},
 		},
-	}, c.brook, c.awg)
+	}, c.brook, c.awg, c.kernelwg)
+	if err != nil {
+		return nil, err
+	}
+	// Wire the per-inbound engine override.
+	//
+	// The registry has supported this since it was written and nothing ever set
+	// the hook, so Node.Engine could be stored and was never consulted: every
+	// inbound went to its protocol's default core regardless. Resolve still
+	// refuses an engine that does not serve the protocol, so a bad value is a
+	// clear routing error rather than a core that rejects its whole config.
+	reg.EngineChoice = func(n *model.Node) string {
+		if n == nil {
+			return ""
+		}
+		return strings.TrimSpace(n.Engine)
+	}
+	return reg, nil
 }
 
 // dispatch applies each adapter's share of a reload.

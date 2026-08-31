@@ -235,12 +235,15 @@ func (r *Registry) Partition(specs []engine.InboundSpec, certPath, keyPath strin
 // and no config file. Wrapping it here would mean inventing a Plan it cannot
 // use. TestForgeDNSIsTheOnlyUnroutableProtocol pins that as a decision rather
 // than an oversight.
-func DefaultRegistry(opts Options, brook BrookRunner, awg InterfaceRunner) (*Registry, error) {
+func DefaultRegistry(opts Options, brook BrookRunner, awg, kernelWG InterfaceRunner) (*Registry, error) {
 	if brook == nil {
 		return nil, fmt.Errorf("adapter: DefaultRegistry needs a Brook runner")
 	}
 	if awg == nil {
 		return nil, fmt.Errorf("adapter: DefaultRegistry needs an AmneziaWG runner")
+	}
+	if kernelWG == nil {
+		return nil, fmt.Errorf("adapter: DefaultRegistry needs a kernel WireGuard runner")
 	}
 	r := NewRegistry()
 	for _, a := range []CoreAdapter{
@@ -248,6 +251,7 @@ func DefaultRegistry(opts Options, brook BrookRunner, awg InterfaceRunner) (*Reg
 		NewSingbox(opts),
 		NewBrook(opts, brook),
 		NewAmneziaWG(awg),
+		NewKernelWG(kernelWG),
 	} {
 		if err := r.Register(a); err != nil {
 			return nil, err
