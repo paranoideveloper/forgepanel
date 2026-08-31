@@ -196,16 +196,26 @@ func (s *Server) subNativeEntries(token string, c *gin.Context, base string) []n
 		if err != nil {
 			continue
 		}
-		kind := "WireGuard client"
+		// The heading names the PROTOCOL, not the inbound's remark.
+		//
+		// A remark is operator text and is routinely empty or something like
+		// " (copy)". Those were the two headings a live panel actually showed
+		// for its WireGuard and AmneziaWG entries, so a user could not tell
+		// which file belonged in which app — with the protocol only in the
+		// small print underneath.
+		name, kind := "WireGuard", "wg-quick / the WireGuard app"
 		switch n.Protocol {
 		case model.ProtoAmneziaWG:
-			kind = "AmneziaWG client (obfuscated)"
+			// Naming the app matters here: AmneziaVPN and the standalone
+			// AmneziaWG app are different clients and only the latter imports a
+			// .conf. Handing the file to the wrong one looks like a broken
+			// server, because nothing ever leaves the device.
+			name, kind = "AmneziaWG", "the AmneziaWG app (not AmneziaVPN) / awg-quick"
 		case model.ProtoShadowTLS:
-			kind = "sing-box client config"
+			name, kind = "ShadowTLS", "sing-box client config"
 		}
-		name := strings.TrimSpace(n.Remark)
-		if name == "" {
-			name = string(n.Protocol)
+		if r := strings.TrimSpace(n.Remark); r != "" {
+			kind = r + " · " + kind
 		}
 		out = append(out, nativeEntry{
 			name: name, kind: kind,

@@ -243,3 +243,68 @@ func seedNativeSubscription(t *testing.T) (*Server, string) {
 	s.router = r
 	return s, u.SubToken
 }
+
+// TestNativeCardsAreLabelledByProtocol: the heading has to say which app the
+// file belongs in.
+//
+// It used to be the inbound's remark, which is operator text and routinely
+// empty or " (copy)" — the two headings a live panel actually showed for its
+// WireGuard and AmneziaWG entries. A user could not tell which file went where,
+// and importing a .conf into the wrong Amnezia app looks exactly like a broken
+// server: nothing ever leaves the device.
+func TestNativeCardsAreLabelledByProtocol(t *testing.T) {
+	s, token := seedNativeSubscription(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sub/"+token, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	s.router.ServeHTTP(rec, req)
+	page := rec.Body.String()
+
+	if !strings.Contains(page, "<h3>WireGuard</h3>") {
+		t.Errorf("the WireGuard card is not headed by its protocol:\n%s", firstCard(page))
+	}
+	// The remark is kept, but as detail rather than as the identity.
+	if !strings.Contains(page, "wg-native") {
+		t.Error("the inbound's remark was dropped entirely; it is still useful detail")
+	}
+}
+
+// TestAmneziaCardNamesTheAppThatCanReadIt: AmneziaVPN and the standalone
+// AmneziaWG app are different clients with different formats, and only one of
+// them imports the .conf this endpoint serves.
+func TestAmneziaCardNamesTheAppThatCanReadIt(t *testing.T) {
+	n := &model.Node{
+		Protocol: model.ProtoAmneziaWG, Address: "vpn.example.com", Port: 5454, Remark: "",
+		AmneziaWG: &model.AmneziaWGOptions{WireGuardOptions: model.WireGuardOptions{
+			PrivateKey: "S", PublicKey: "SP", PeerPrivateKey: "C", PeerPublicKey: "CP",
+			PeerAddress: []string{"10.67.67.2/32"}, AllowedIPs: []string{"0.0.0.0/0"}, MTU: 1420,
+		}}}
+	entries := []nativeEntry{}
+	// Exercise the same labelling the page uses.
+	name, kind := "WireGuard", "wg-quick / the WireGuard app"
+	if n.Protocol == model.ProtoAmneziaWG {
+		name, kind = "AmneziaWG", "the AmneziaWG app (not AmneziaVPN) / awg-quick"
+	}
+	entries = append(entries, nativeEntry{name: name, kind: kind, url: "https://h/subconf/t/0", body: "[Interface]\n"})
+	page := string(subLandingPage("https://h/sub/t", "upload=0; download=0; total=0; expire=0", entries))
+
+	if !strings.Contains(page, "AmneziaWG") {
+		t.Error("the card does not name the protocol")
+	}
+	if !strings.Contains(page, "not AmneziaVPN") {
+		t.Error("nothing warns that AmneziaVPN cannot read this file, which is the " +
+			"single most likely reason an import silently does nothing")
+	}
+}
+
+func firstCard(page string) string {
+	i := strings.Index(page, "Direct configs")
+	if i < 0 {
+		return page
+	}
+	if len(page[i:]) > 600 {
+		return page[i : i+600]
+	}
+	return page[i:]
+}
