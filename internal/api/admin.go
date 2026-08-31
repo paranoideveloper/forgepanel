@@ -228,6 +228,12 @@ func (s *Server) handleCreateInbound(c *gin.Context) {
 		apierr.Fail(c, bad)
 		return
 	}
+	// BEFORE applyCreateDefaults, which would otherwise fill the tunnel address
+	// from a constant and leave nothing for this to choose. Every WireGuard
+	// inbound used to get 10.66.66.0/24 and every AmneziaWG one 10.67.67.0/24,
+	// so a second inbound of either protocol landed on the first one's prefix
+	// and silently carried nothing.
+	s.allocateTunnelSubnet(&n)
 	applyCreateDefaults(&n)   // panel fills in keys/dest/flow/creds so it "just works"
 	s.applyDomain(&n)         // inherit default domain + cascade to SNI/Host/etc.
 	s.applyPaaSAddressing(&n) // behind a platform edge the address is not ours to choose
