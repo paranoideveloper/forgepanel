@@ -155,6 +155,7 @@ func AmneziaWGServerConf(server *model.Node, peers []*model.Node) (string, error
 	fmt.Fprintf(&b, "Address = %s\n", strings.Join(saddr, ", "))
 	fmt.Fprintf(&b, "ListenPort = %d\n", server.Port)
 	awgObfuscation(&b, a)
+	wgQuickNAT(&b, saddr)
 	// Per-client peers when the panel has resolved them. This is the path that
 	// makes several users on one WireGuard inbound possible at all; the loop
 	// below stays for an inbound with none assigned, which renders exactly as

@@ -110,7 +110,28 @@ func (c *Controller) buildRegistry() (*adapter.Registry, error) {
 		if n == nil {
 			return ""
 		}
-		return strings.TrimSpace(n.Engine)
+		if e := strings.TrimSpace(n.Engine); e != "" {
+			return e
+		}
+		// WireGuard defaults to the KERNEL where the host can run it.
+		//
+		// sing-box's wireguard endpoint is an outbound construct. As a server it
+		// completes a handshake and answers traffic addressed to its own tunnel
+		// address — so it looks alive, and a client can even ping the gateway —
+		// but it forwards nothing onward. Measured against sing-box 1.13.21 with
+		// fresh keys: handshake succeeds, every request through the tunnel times
+		// out, under every routing configuration tried. A WireGuard inbound
+		// served that way is a tunnel to nowhere.
+		//
+		// So the default follows what actually works. A host without the module
+		// or the tools still gets the sing-box endpoint rather than nothing, and
+		// the Engines page reports which one is serving.
+		if n.Protocol == model.ProtoWireGuard {
+			if ok, _ := KernelWGReady(); ok {
+				return model.EngineKernelWG
+			}
+		}
+		return ""
 	}
 	return reg, nil
 }

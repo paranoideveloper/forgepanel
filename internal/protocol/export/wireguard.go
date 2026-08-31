@@ -95,6 +95,7 @@ func WireGuardServerConf(server *model.Node, peers []*model.Node) (string, error
 	if w.MTU > 0 {
 		fmt.Fprintf(&b, "MTU = %d\n", w.MTU)
 	}
+	wgQuickNAT(&b, saddr)
 
 	// No PersistentKeepalive on any peer below. These are roaming clients whose
 	// endpoint is unknown until they dial in, and keepalive means "send

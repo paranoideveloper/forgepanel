@@ -274,3 +274,16 @@ func AmneziaWGReady() (bool, string) {
 	}
 	return true, ""
 }
+
+
+// KernelWGReady reports whether this box can serve plain WireGuard on the
+// kernel datapath, and why not when it cannot.
+func KernelWGReady() (bool, string) {
+	if !wgKernelFlavour.toolsAvailable() {
+		return false, "wg/wg-quick tools are not installed on this server"
+	}
+	if err := wgKernelFlavour.moduleReady(); err != nil {
+		return false, "wireguard kernel module unavailable: " + err.Error()
+	}
+	return true, ""
+}
