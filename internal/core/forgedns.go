@@ -37,6 +37,9 @@ type ForgeDNSController struct {
 	started  bool
 	lastErr  string
 	upErr    string
+	// portNotes records ports the panel moved so the front router could hold
+	// the public one. Reported, never silent.
+	portNotes []string
 
 	// Front router: one public port in front of several supervised upstream
 	// zones. Each upstream zone binds its own UDP port, and real resolvers only
@@ -258,6 +261,10 @@ func (c *ForgeDNSController) Status() map[string]any {
 	out := map[string]any{
 		"listening": c.started, "addr": c.addr, "zones": zones,
 		"last_error": c.lastErr, "upstream_error": c.upErr,
+		// The ports the panel moved so the router could hold the public one. An
+		// operator whose zone silently left :53 has no way to discover where it
+		// went; this is that way.
+		"port_notes": append([]string(nil), c.portNotes...),
 		// Folded into the existing status rather than given its own route: the
 		// front router is not a separate subsystem to an operator, it is how
 		// this one is serving the port, and a panel that shows the zones but not
@@ -296,11 +303,39 @@ func (c *ForgeDNSController) syncUpstream(specs []ZoneSpec) []string {
 		out = append(out, *sp.Upstream)
 		served = append(served, sp.Zone)
 	}
+	// Give each zone a port of its own before supervising any of them.
+	//
+	// Without this every zone renders UDP_PORT 53, the first to start wins the
+	// socket and the rest fail — leaving one listening backend, which is fewer
+	// than the front router will multiplex, so the router never starts either.
+	// See internal/core/forgedns_ports.go.
+	moved := allocatePrivatePorts(out)
+
 	if err := c.up.Sync(out); err != nil {
 		msg = err.Error()
 	}
+	c.setPortNotes(moved)
 	c.setUpErr(msg)
 	return served
+}
+
+// setPortNotes records the ports the panel moved on the operator's behalf.
+//
+// Surfaced rather than silent: a tunnel that moved from 53 to 15353 without
+// explanation is a tunnel whose operator spends an evening wondering why their
+// dig fails, and the answer — "the front router holds 53 now" — is not
+// guessable from the outside.
+func (c *ForgeDNSController) setPortNotes(notes []string) {
+	c.mu.Lock()
+	c.portNotes = notes
+	c.mu.Unlock()
+}
+
+// PortNotes returns the allocation notes for the API.
+func (c *ForgeDNSController) PortNotes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.portNotes...)
 }
 
 func (c *ForgeDNSController) setUpErr(msg string) {

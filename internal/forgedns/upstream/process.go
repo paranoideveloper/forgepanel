@@ -462,6 +462,16 @@ func primaryIPv4() string {
 // having to set DNSStubListener=no. A non-wildcard host is always honored as-is,
 // and a host with no stub conflict keeps the wildcard so the zone answers on
 // every interface as before.
+// EffectiveBindHost is effectiveBindHost for callers outside this package.
+//
+// The front router needs exactly the same answer: it binds the public DNS port
+// too, and on a stock systemd host a WILDCARD bind of :53 fails because
+// systemd-resolved holds 127.0.0.53:53 — measured, EADDRINUSE — while a bind of
+// the machine's own address succeeds. The workaround existed here for the
+// supervised tunnels and not for the router in front of them, so the tunnels
+// started and the thing that makes them reachable did not.
+func EffectiveBindHost(bindHost string, port int) string { return effectiveBindHost(bindHost, port) }
+
 func effectiveBindHost(bindHost string, port int) string {
 	if !isWildcardHost(bindHost) {
 		return bindHost

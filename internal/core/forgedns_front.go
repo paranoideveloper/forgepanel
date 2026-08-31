@@ -253,16 +253,35 @@ func (c *ForgeDNSController) syncFrontRouter(nativeZones int) string {
 	if err != nil {
 		return "front router not started: " + err.Error()
 	}
-	udp, err := net.ListenPacket("udp", c.addr)
-	if err != nil {
-		return fmt.Sprintf("front router could not bind %s/udp: %v", c.addr, err)
+	// The address the router can actually hold.
+	//
+	// c.addr is a wildcard (":53") by default, and on a stock systemd host that
+	// bind FAILS: systemd-resolved holds 127.0.0.53:53, so 0.0.0.0:53 is
+	// EADDRINUSE while the machine's own address binds fine. Measured on a live
+	// Ubuntu 22.04 box, where this alone kept the router down while all three
+	// tunnels ran happily behind it — reachable by nobody.
+	//
+	// upstream.EffectiveBindHost is the same policy the supervised tunnels use,
+	// so the router lands on the same interface they would have.
+	bindAddr := c.addr
+	if host, port, err := net.SplitHostPort(c.addr); err == nil {
+		if p, perr := strconv.Atoi(port); perr == nil {
+			if eff := upstream.EffectiveBindHost(host, p); eff != host {
+				bindAddr = net.JoinHostPort(eff, port)
+			}
+		}
 	}
-	tcp, err := net.Listen("tcp", c.addr)
+
+	udp, err := net.ListenPacket("udp", bindAddr)
+	if err != nil {
+		return fmt.Sprintf("front router could not bind %s/udp: %v", bindAddr, err)
+	}
+	tcp, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		// UDP alone would answer most queries and silently fail the large ones
 		// that fall back to TCP, which is the hardest kind of failure to trace.
 		_ = udp.Close()
-		return fmt.Sprintf("front router could not bind %s/tcp: %v", c.addr, err)
+		return fmt.Sprintf("front router could not bind %s/tcp: %v", bindAddr, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &frontRunner{srv: srv, udp: udp, tcp: tcp, cancel: cancel}
@@ -274,7 +293,7 @@ func (c *ForgeDNSController) syncFrontRouter(nativeZones int) string {
 	// service, and losing 853 because something else on the host holds it must
 	// not take the tunnel down with it. The reason is reported instead.
 	if n := countTLS(backends, func(b frontrouter.Backend) string { return b.TLSAddr }); n > 1 {
-		if ln, err := net.Listen("tcp", tlsFrontAddr(c.addr, publicDoTPort)); err != nil {
+		if ln, err := net.Listen("tcp", tlsFrontAddr(bindAddr, publicDoTPort)); err != nil {
 			skipped = append(skipped, fmt.Sprintf("DoT not multiplexed: %v", err))
 		} else {
 			run.dot = ln
@@ -282,7 +301,7 @@ func (c *ForgeDNSController) syncFrontRouter(nativeZones int) string {
 		}
 	}
 	if n := countTLS(backends, func(b frontrouter.Backend) string { return b.HTTPSAddr }); n > 1 {
-		if ln, err := net.Listen("tcp", tlsFrontAddr(c.addr, publicDoHPort)); err != nil {
+		if ln, err := net.Listen("tcp", tlsFrontAddr(bindAddr, publicDoHPort)); err != nil {
 			skipped = append(skipped, fmt.Sprintf("DoH not multiplexed: %v", err))
 		} else {
 			run.doh = ln
