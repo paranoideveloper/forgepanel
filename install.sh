@@ -49,6 +49,19 @@ PANEL_DOMAIN="${FORGEPANEL_DOMAIN:-}"
 PANEL_HTTPS="${FORGEPANEL_HTTPS:-}"
 ACME_EMAIL="${FORGEPANEL_ACME_EMAIL:-}"
 VERSION="${FORGEPANEL_VERSION:-}"
+
+# Where release assets come from. A host that cannot reach GitHub is not an
+# exotic case for this panel: the servers it runs on are frequently the ones
+# behind a restrictive egress filter, and on such a box every download below
+# fails while the rest of the internet works fine.
+#
+#   ASSET_DIR  install from a directory of already-downloaded assets
+#   MIRROR     fetch them from somewhere other than github.com
+#
+# Both keep every checksum check that the online path runs; they change where
+# the bytes come from, not whether they are verified.
+ASSET_DIR="${FORGEPANEL_ASSET_DIR:-}"
+MIRROR="${FORGEPANEL_MIRROR:-}"
 ASSUME_YES="${FORGEPANEL_ASSUME_YES:-0}"
 UI_PREF="${FORGEPANEL_UI:-auto}"
 DO_UNINSTALL=0
@@ -145,6 +158,10 @@ Options:
       --no-https         Force auto-HTTPS off
       --data <dir>       Data directory (default /var/lib/forgepanel)
       --version <tag>    Install a specific release tag instead of the latest
+      --from-dir <dir>   Install from already-downloaded release assets, for a
+                         host that cannot reach GitHub. Checksums still apply.
+      --mirror <url>     Fetch release assets from this base URL instead of
+                         github.com
       --update           Alias for --repair; update verified release assets
       --repair           Reinstall matching binaries and repair the service
       --dry-run          Print the installation plan without modifying the host
@@ -177,6 +194,10 @@ parse_args() {
       --no-https)   HTTPS_FORCED=0; HTTPS_EXPLICIT=1; shift ;;
       --data)       DATA_DIR="${2:-}"; shift 2 ;;
       --data=*)     DATA_DIR="${1#*=}"; shift ;;
+      --from-dir)   ASSET_DIR="${2:-}"; shift 2 ;;
+      --from-dir=*) ASSET_DIR="${1#*=}"; shift ;;
+      --mirror)     MIRROR="${2:-}"; shift 2 ;;
+      --mirror=*)   MIRROR="${1#*=}"; shift ;;
       --version)    VERSION="${2:-}"; shift 2 ;;
       --version=*)  VERSION="${1#*=}"; shift ;;
       --repair)     REPAIR=1; shift ;;
@@ -594,12 +615,46 @@ do_uninstall() {
 # ---------------------------------------------------------------------------
 # Wizard steps
 # ---------------------------------------------------------------------------
+# json_scalar reads one top-level scalar out of a JSON file. python3 is used
+# when present because it cannot be fooled by a value containing braces; the sed
+# fallback keeps this working on a stripped image with no interpreter.
+json_scalar() {
+  local file="$1" key="$2" out=""
+  if command -v python3 >/dev/null 2>&1; then
+    out=$(python3 -c "
+import json,sys
+try:
+    v=json.load(open(sys.argv[1])).get(sys.argv[2])
+except Exception:
+    sys.exit(0)
+if v is None or isinstance(v,(dict,list)): sys.exit(0)
+if isinstance(v,bool): print('true' if v else 'false')
+else: print(v)
+" "$file" "$key" 2>/dev/null)
+  else
+    out=$(sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\).*/\1/p" "$file" | head -n1)
+  fi
+  printf '%s' "$out"
+}
+
 load_existing_config() {
   if [[ -f "$UNIT_PATH" || -x "$BIN_PATH" ]]; then
     UPGRADE=1
   fi
   if [[ -s "${DATA_DIR}/panel.json" ]]; then
     PANEL_CONFIG_EXISTS=1
+    # Read the live settings back, do not just note that they exist.
+    #
+    # Returning here without them meant an upgrade ran the wizard defaults: a
+    # panel on any port but 2053 was replaced, health-checked on 2053, failed,
+    # and rolled back. `forgectl update` was therefore broken on every box whose
+    # operator had changed the port — while reporting a validation failure that
+    # named nothing. The values are only DEFAULTS here; an explicit --port or
+    # --domain on the command line still wins below.
+    local pj="${DATA_DIR}/panel.json"
+    [[ -n "$PANEL_PORT" ]]   || PANEL_PORT=$(json_scalar "$pj" port)
+    [[ -n "$PANEL_DOMAIN" ]] || PANEL_DOMAIN=$(json_scalar "$pj" domain)
+    [[ -n "$PANEL_HTTPS" ]]  || PANEL_HTTPS=$(json_scalar "$pj" https_enabled)
     return 0
   fi
   # Legacy releases persisted mutable values in the unit environment. Read
@@ -653,6 +708,30 @@ step_version() {
   step 3 "Resolving the release to install"
   if [[ -n "$VERSION" ]]; then
     ok "Using pinned version: ${VERSION}"
+    return 0
+  fi
+  # Offline: the assets in the directory ARE the release, and the version is
+  # only ever used to build a download URL that offline mode does not use.
+  # Asking GitHub here would fail on precisely the host --from-dir exists for.
+  if [[ -n "$ASSET_DIR" ]]; then
+    # Take the version from the binary that is about to be installed, and do
+    # NOT invent one. The install verifies afterwards that the swapped binary
+    # reports this exact string, which is what catches a truncated download or
+    # the wrong architecture; a synthesised value fails that check every time
+    # and rolls the upgrade back with no useful reason given.
+    local panel_asset="${ASSET_DIR}/forgepanel-linux-${ARCH}"
+    if [[ ! -x "$panel_asset" ]]; then
+      chmod +x "$panel_asset" 2>/dev/null || true
+    fi
+    if [[ -f "$panel_asset" ]]; then
+      VERSION=$("$panel_asset" --version 2>/dev/null | awk '{print $2}' | head -n1)
+    fi
+    if [[ -z "$VERSION" ]]; then
+      err "Could not read a version from ${panel_asset}."
+      printf '   Point --from-dir at a directory of release assets for this architecture (%s).\n\n' "$ARCH" >&2
+      exit 1
+    fi
+    ok "Installing ${VERSION} from ${ASSET_DIR}"
     return 0
   fi
   info "Querying GitHub for the latest release..."
@@ -947,6 +1026,18 @@ step_summary() {
 download_to() {
   # download_to <url> <dest>; returns non-zero on failure
   local url="$1" dest="$2"
+  # Offline install: take the asset from a local directory by its basename.
+  # Everything downstream — the checksum files, the signature checks, the
+  # sing-box adoption — is unchanged, so an offline install is verified exactly
+  # as an online one is.
+  if [[ -n "$ASSET_DIR" ]]; then
+    local name="${url##*/}"
+    if [[ -f "${ASSET_DIR}/${name}" ]]; then
+      cp -f "${ASSET_DIR}/${name}" "$dest"
+      return 0
+    fi
+    return 1
+  fi
   if command -v curl >/dev/null 2>&1; then
     if [[ "$INTERACTIVE" == "1" && "$UI" == "plain" ]]; then
       curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --progress-bar -o "$dest" "$url"
@@ -1095,6 +1186,7 @@ step_install() {
   step 7 "Installing"
 
   local base="https://github.com/${REPO}/releases/download/${VERSION}"
+  [[ -n "$MIRROR" ]] && base="${MIRROR%/}"
   local tmp data_created=0 was_active=0
   tmp=$(mktemp -d /tmp/forgepanel-install.XXXXXX)
   # shellcheck disable=SC2064

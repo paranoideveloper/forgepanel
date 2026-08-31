@@ -1072,11 +1072,21 @@ func cmdUpdate(args []string) error {
 	checkOnly := fs.Bool("check", false, "only check for a newer release")
 	yes := fs.Bool("yes", false, "install the update without another confirmation")
 	data := fs.String("data", defaultDataDir(), "panel data directory")
+	fromDir := fs.String("from-dir", "", "install from a directory of already-downloaded release assets")
+	mirror := fs.String("mirror", "", "fetch release assets from this base URL instead of github.com")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: forgectl update [--check] [--yes] [--data <dir>]")
+		return errors.New("usage: forgectl update [--check] [--yes] [--data <dir>] " +
+			"[--from-dir <dir>] [--mirror <url>]")
+	}
+	// An offline install does not consult GitHub at all. The host that needs
+	// this is precisely the one that cannot reach api.github.com, so asking it
+	// for the release metadata first would fail before the local assets were
+	// ever looked at.
+	if *fromDir != "" {
+		return updateFromDir(*fromDir, *data, *yes)
 	}
 	metadata, err := latestRelease()
 	if err != nil {
@@ -1125,7 +1135,11 @@ func cmdUpdate(args []string) error {
 	if err := os.WriteFile(installer, script, 0o700); err != nil {
 		return err
 	}
-	cmd := exec.Command("bash", installer, "--yes", "--version", metadata.TagName, "--data", *data)
+	instArgs := []string{installer, "--yes", "--version", metadata.TagName, "--data", *data}
+	if *mirror != "" {
+		instArgs = append(instArgs, "--mirror", *mirror)
+	}
+	cmd := exec.Command("bash", instArgs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("verified installer failed: %w", err)
@@ -1237,4 +1251,50 @@ func runMenuChoice(choice string, reader *bufio.Reader) error {
 	default:
 		return errors.New("unknown choice")
 	}
+}
+
+
+// updateFromDir installs a release from a directory of already-downloaded
+// assets, for a host that cannot reach GitHub.
+//
+// That host is not a rare one for this panel: the servers it runs on are often
+// the ones behind a restrictive egress filter, where every other part of the
+// internet works and github.com does not. Before this there was no supported
+// way to update such a box at all — the only option was to place binaries by
+// hand, which skips the checksums the online path enforces.
+//
+// The installer does the work, so placement, unit files and the sing-box
+// adoption stay in exactly one implementation; this only points it at local
+// bytes instead of the network.
+func updateFromDir(dir, data string, yes bool) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	installer := filepath.Join(abs, "install.sh")
+	if _, err := os.Stat(installer); err != nil {
+		return fmt.Errorf("%s does not contain install.sh: download the release assets into it first", abs)
+	}
+	// The installer verifies every asset it places against the checksum files
+	// beside them. It cannot verify ITSELF that way — nothing in the directory
+	// signs it — so an operator pointing at a directory is trusting its
+	// contents, and says so out loud rather than being asked to notice.
+	if !yes {
+		if !interactiveTerminal() {
+			return errors.New("non-interactive offline update requires --yes")
+		}
+		if !confirmLocal(fmt.Sprintf("Install ForgePanel from %s? [y/N]", abs)) {
+			fmt.Println("update cancelled")
+			return nil
+		}
+	}
+	cmd := exec.Command("bash", installer, "--yes", "--from-dir", abs, "--data", data)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("offline installer failed: %w", err)
+	}
+	if cfg, err := loadLocalConfig(data); err == nil {
+		auditLocal(cfg, "installation.update", "offline:"+abs, "ok")
+	}
+	return nil
 }

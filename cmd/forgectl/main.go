@@ -119,7 +119,7 @@ Usage:
   forgectl firewall <status|cleanup> [--json]
   forgectl uninstall [--keep-data|--purge] [--dry-run] [--yes] [--force] [--json]
   forgectl repair [--data <dir>]
-  forgectl update [--check] [--yes] [--data <dir>]
+  forgectl update [--check] [--yes] [--data <dir>] [--from-dir <dir>] [--mirror <url>]
   forgectl keygen <reality|uuid|shortid|ss2022|wireguard|ssh|password|mldsa65> [method]
   forgectl convert <link> <uri|xray|singbox|clash>
   forgectl render <link> <xray|singbox>
