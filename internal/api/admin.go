@@ -689,14 +689,25 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 }
 
 func (s *Server) handleDeleteUser(c *gin.Context) {
-	id := parseID(c)
+	// Scoped like every other user route, through userOr404.
+	//
+	// This one went straight to DeleteUserCascade on a raw path id. The route
+	// is tenantMgmt, so a RESELLER could delete any user in the panel —
+	// another reseller's customers, or the owner's — and deletion is the one
+	// operation in the set with nothing to undo it. The other six user
+	// handlers all scope; this was the gap.
+	u, _, ok := s.userOr404(c)
+	if !ok {
+		return
+	}
+	id := u.ID
 	// Read the name BEFORE the row goes. The audit trail recorded a bare row id,
 	// which is unresolvable the moment the row is gone — the one entry where
 	// knowing WHO was deleted is the entire point — and a webhook receiver
 	// cannot act on a number either.
-	target := strconv.FormatUint(uint64(id), 10)
-	if u, err := s.db.UserByID(id); err == nil && u.Username != "" {
-		target = u.Username
+	target := u.Username
+	if target == "" {
+		target = strconv.FormatUint(uint64(id), 10)
 	}
 	if err := s.db.DeleteUserCascade(id); err != nil {
 		failErr(c, 500, err)

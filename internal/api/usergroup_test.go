@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"strconv"
 	"testing"
 	"time"
 
@@ -75,6 +76,7 @@ func newUGFixture(t *testing.T) *ugFixture {
 	api.PATCH("/users/:id", s.handleUpdateUser)
 	api.PUT("/users/:id/inbounds", s.handleSetUserInbounds)
 	api.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
+	api.DELETE("/users/:id", s.handleDeleteUser)
 	api.GET("/groups/:id", s.handleGetGroup)
 	api.PATCH("/groups/:id", s.handleUpdateGroup)
 	api.DELETE("/groups/:id", s.handleDeleteGroup)
@@ -762,3 +764,55 @@ func TestIPHeldUserExcludedFromEngine(t *testing.T) {
 		t.Errorf("status = %q, want active — an IP hold must not overwrite the account's real state", got.Status)
 	}
 }
+
+// TestAResellerCannotDeleteSomeoneElsesUser is a privilege-escalation guard.
+//
+// handleDeleteUser went straight to DeleteUserCascade on the raw path id while
+// every other user route scoped through userOr404. /api/admin/users is
+// tenantMgmt, so a RESELLER could delete any user in the panel — another
+// reseller's customers, or the owner's — and deletion is the one operation in
+// the set with nothing to undo it.
+func TestAResellerCannotDeleteSomeoneElsesUser(t *testing.T) {
+	f := newUGFixture(t)
+
+	// f.user belongs to nobody (OwnerAdminID 0), so it is outside the
+	// reseller's tenancy.
+	rec := f.do(t, http.MethodDelete, "/api/admin/users/"+itoaU(f.user.ID), f.resellerTok, "")
+	if rec.Code != 404 {
+		t.Fatalf("reseller deleted a user outside their tenancy: got %d, want 404\n%s",
+			rec.Code, rec.Body.String())
+	}
+	// 404 rather than 403 on purpose: a reseller must not be able to probe
+	// which user ids exist outside their tenancy.
+	if _, err := f.s.db.UserByID(f.user.ID); err != nil {
+		t.Fatal("the user was deleted anyway")
+	}
+
+	// The owner may still delete it, or the guard has gone too far.
+	rec = f.do(t, http.MethodDelete, "/api/admin/users/"+itoaU(f.user.ID), f.ownerTok, "")
+	if rec.Code != 200 {
+		t.Fatalf("owner could not delete: got %d\n%s", rec.Code, rec.Body.String())
+	}
+	if _, err := f.s.db.UserByID(f.user.ID); err == nil {
+		t.Error("owner's delete did not remove the user")
+	}
+}
+
+// TestAResellerCanDeleteTheirOwnUser: the scoping must not block the operation
+// resellers are supposed to have.
+func TestAResellerCanDeleteTheirOwnUser(t *testing.T) {
+	f := newUGFixture(t)
+
+	mine := &store.User{Username: "mine", GroupID: f.group.ID, Status: store.StatusActive,
+		SubToken: "tok-mine", UUID: "11111111-2222-3333-4444-555555555555",
+		OwnerAdminID: f.resellerID}
+	if err := f.s.db.CreateUser(mine); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.do(t, http.MethodDelete, "/api/admin/users/"+itoaU(mine.ID), f.resellerTok, "")
+	if rec.Code != 200 {
+		t.Fatalf("reseller could not delete their own user: got %d\n%s", rec.Code, rec.Body.String())
+	}
+}
+
+func itoaU(v uint) string { return strconv.FormatUint(uint64(v), 10) }
