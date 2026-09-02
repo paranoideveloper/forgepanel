@@ -1,5 +1,165 @@
 # Changelog
 
+## v1.22.0 — The tunnels that connected and carried nothing
+
+Nine commits. Most of them are one story: a WireGuard or AmneziaWG inbound
+could complete a handshake, answer a ping to its own gateway, and reach
+nothing on the internet. Four separate causes, each found by connecting a
+real client to the panel's own exported config rather than by reading code.
+
+### Fixed — WireGuard and AmneziaWG
+
+- **No egress NAT.** The generated server config had no `PostUp`, so no
+  MASQUERADE was ever installed and every forwarded packet left the box with
+  a private source address. Adding only that rule by hand took an AmneziaWG
+  inbound from nothing to 21.7 MB/s, which is what identified it. Both kernel
+  server configs now carry the NAT, the FORWARD accepts (a DROP policy
+  discards the packet *after* NAT, which looks identical to having no NAT)
+  and `ip_forward`, with a `PostDown` that removes exactly what `PostUp`
+  added.
+- **sing-box cannot serve WireGuard.** Its `endpoints[].type=wireguard` is an
+  *outbound* construct: as a server it completes a handshake and answers
+  traffic addressed to its own tunnel address — so it looks alive and a client
+  can ping the gateway — but it forwards nothing onward. Verified against
+  sing-box 1.13.21 with fresh keys in an isolated namespace under no route,
+  `route.final`, `auto_detect_interface`, an explicit inbound rule, a sniff
+  action, and a `0.0.0.0/0` peer. A control run proved the same instance and
+  the same direct outbound reached the internet through a socks inbound.
+  **WireGuard now defaults to the kernel datapath** wherever the host can run
+  it; a host without the module still gets the sing-box endpoint.
+- **`AllowedIPs = 0.0.0.0/0, ::/0` on an IPv4-only tunnel.** Clients installed
+  a `::/0` route into an interface with no IPv6 address, so every IPv6
+  destination blackholed. Invisible on an IPv4-only test host — it survived a
+  namespace test, a Linux client and a live external check — and severe on a
+  real dual-stack device, where happy-eyeballs prefers AAAA. The export now
+  offers only the families the tunnel has an address for.
+- **Every tunnel inbound got the same subnet.** WireGuard was hard-coded to
+  `10.66.66.0/24` and AmneziaWG to `10.67.67.0/24`, so a *second* inbound of
+  either protocol produced two interfaces holding the same address, two routes
+  for one prefix, and two peers on the same client IP. The kernel answers for
+  one; the other handshakes and its return traffic leaves by the wrong
+  interface. Each inbound now takes the next free `/24` from its protocol's
+  block, and the first keeps its historical prefix so an upgrade never moves a
+  tunnel whose config has already been handed out.
+
+Measured end to end from an external client after the fixes: WireGuard
+60.7 MB/s, AmneziaWG 50.7 MB/s — both had been carrying zero bytes.
+
+### Fixed — security
+
+- **A reseller could delete any user in the panel**, including another
+  reseller's customers or the owner's. `handleDeleteUser` went straight to
+  `DeleteUserCascade` on the raw path id while all six other user routes scope
+  through `userOr404` first, and `/api/admin/users` is `tenantMgmt`. Deletion
+  is the one operation in that set with nothing to undo it. It now 404s,
+  matching the other routes, so a reseller cannot probe which user ids exist
+  outside their tenancy.
+- **Engine state is owner+admin for reads, not just mutations.** It sat in the
+  dashboard-read set, and its payload carries each core's recent log lines —
+  for Xray, per-connection accept lines with client addresses and
+  destinations.
+
+### Fixed — supervision
+
+- **A Brook process that died instantly lost the message saying why.** The
+  reaper called `cmd.Wait()` while both output pumps were still reading;
+  `StdoutPipe`/`StderrPipe` are explicit that `Wait` closes the pipes, so when
+  `Wait` won the race the crash output was dropped — and for a process that
+  dies on startup that is the entire diagnosis. It surfaced as a supervisor
+  test timing out under load rather than as a wrong answer, so it read like a
+  slow machine and had already had its patience raised to sixty seconds.
+  Proven by reverting the ordering under a 40-run test: run 4 kept none of the
+  output.
+
+### Added
+
+- **`forgectl update --from-dir` and `--mirror`.** The hosts this panel runs on
+  are frequently behind a restrictive egress filter; one reaches Cloudflare,
+  the Ubuntu archives and Launchpad but cannot open a socket to any GitHub
+  host. There was no supported way to update such a box at all — only placing
+  binaries by hand, which skips every checksum the online path enforces. Both
+  new modes keep all of it.
+- **A "Direct configs" section** on the subscription page for the protocols a
+  subscription URL cannot carry, each card headed by its protocol and naming
+  the client that can read it. AmneziaVPN and the standalone AmneziaWG app are
+  different clients with different formats, and only the latter imports a
+  `.conf`.
+
+### Fixed — the updater
+
+- **An upgrade discarded the panel's own port and domain.**
+  `load_existing_config` saw `panel.json`, set a flag and returned without
+  reading it, so a non-interactive upgrade ran the wizard defaults, replaced
+  the binaries, health-checked port 2053 and rolled back reporting only
+  "Installation did not pass validation". Every box on a non-default port was
+  un-updatable, and the failure named nothing.
+- **The release shipped a stale sing-box.** `.singbox-stage/` lives outside
+  `dist/`, so `--clean` never touched it and the upload glob is a version
+  wildcard; v1.21.0 went out carrying both 1.13.21 and a leftover 1.13.15.
+
+### Fixed — the form
+
+- **Save is refused while the server says the config is invalid.**
+  `/studio/preview` already ran the same `model.Validate()` as the create
+  endpoint and returned `ok: false` with the reason; the form ignored that
+  field and left Save live, so the operator pressed it and got a toast
+  repeating a message they had scrolled past. Only the server's own verdict
+  refuses — never an advisory warning, never a preview still in flight or one
+  that failed to reach the server. No validation rule is duplicated in the
+  frontend.
+
+## v1.21.0 — Presets that actually connect, AmneziaWG 3.1, and a dashboard
+
+Eight commits. The theme is the gap between "the panel wrote a config file"
+and "something can connect to it".
+
+### Added
+
+- **Six new presets** — Hysteria2, TUIC v5, AnyTLS, ShadowTLS+SS2022,
+  WireGuard and AmneziaWG — taking the catalogue from 7 to 13. Each is gated
+  on what the deployment can actually carry, so a UDP protocol is not created
+  on a platform that routes no UDP.
+- **AmneziaWG 2.0, 3.0 and 3.1.** The panel could only generate 1.5-era
+  configs, so against any 3.x server it produced something that never
+  completes a handshake. Adds S3/S4 and the I1–I3 custom junk packets,
+  `HeaderProtectionKey`, `ContentPaddingAddition`, the rekey/keepalive timing
+  ranges, `AdvancedSecurity`, and 3.1's `RandomTrailers` and `DisableCookies`.
+  H1–H4 became ranges, which an int could not hold. A generation selector
+  decides which keys are written, because these parameters are two-sided: a
+  3.x key in a 1.5 peer's config does not degrade, it stops the handshake.
+- **An Engines page.** `/api/admin/engines` had always reported live core
+  state — pid, restarts, responsiveness, recent log lines, kernel interfaces —
+  and the only way to read any of it was curl.
+- **An operational Overview.** CPU, memory, disk, network, uptimes, account
+  and inbound counts, protocol distribution, read from `/proc` and the
+  database.
+- **Kernel WireGuard as a selectable datapath** (`kernel-wg`), and the
+  per-inbound engine override it needed: `Registry.EngineChoice` had existed
+  since the registry was written and nothing ever set the hook.
+- **Native client configs** for the protocols a subscription URL cannot carry,
+  with a QR of the config itself.
+
+### Fixed
+
+- **ShadowTLS could never authenticate anyone.** The served inbound keyed each
+  user on their own password while the subscription handed out the inbound's
+  template password, so every connection died with `hmac mismatch` while the
+  port looked open.
+- **The CDN presets' 526.** The CDN host was never registered in the domain
+  registry, so certificate issuance was refused and the origin served no TLS.
+- **A WireGuard share link carried the server's private key.**
+- **`WireGuardOptions.Peers` was rendered by nothing**, so an inbound with five
+  users assigned still served one peer.
+- **ForgeDNS could only ever run one of its three backends**, which all bound
+  the same port.
+
+### Changed
+
+- sing-box 1.13.15 → 1.13.21, with the ForgePanel build carrying
+  `with_v2ray_api` rebuilt to match. Without it, hysteria2, TUIC, AnyTLS,
+  ShadowTLS and WireGuard are unmetered.
+
+
 ## v1.20.0 — Remote nodes, two languages, and a panel that knows where it is running
 
 The largest release so far: 175 commits since v1.19.1. The headline is that

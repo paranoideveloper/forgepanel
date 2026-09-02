@@ -173,16 +173,34 @@ func probeInbound(t *testing.T, dir, xrayBin, sbBin string, srv *model.Node, ori
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	// curl the origin through the socks proxy.
-	out, err := exec.Command("curl", "-s", "--max-time", "8",
-		"-x", "socks5h://127.0.0.1:"+strconv.Itoa(socks), originURL).CombinedOutput()
+	// curl the origin through the socks proxy, retrying a few times.
+	//
+	// An accepting SOCKS port is not the same as a ready client: xray binds the
+	// listener before it has finished loading the outbound, so the first request
+	// through a just-started core can be reset — curl exit 56, "failure in
+	// receiving network data", which reads like a broken transport. Under a
+	// parallel suite where every test in this package spawns two real cores, it
+	// showed up as whole rows of the matrix failing at once.
+	//
+	// Retrying does not weaken the assertion. A transport that genuinely does
+	// not work fails every attempt; only a core that was still coming up is
+	// given the extra moment it needed.
+	var out []byte
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		out, err = exec.Command("curl", "-s", "--max-time", "15",
+			"-x", "socks5h://127.0.0.1:"+strconv.Itoa(socks), originURL).CombinedOutput()
+		if err == nil && strings.Contains(string(out), "FORGEPANEL-OK") {
+			return true, ""
+		}
+	}
 	if err != nil {
 		return false, "curl: " + strings.TrimSpace(string(out)) + " " + err.Error()
 	}
-	if !strings.Contains(string(out), "FORGEPANEL-OK") {
-		return false, "unexpected body: " + strings.TrimSpace(string(out))
-	}
-	return true, ""
+	return false, "unexpected body: " + strings.TrimSpace(string(out))
 }
 
 func clientXray(n *model.Node, socks int) ([]byte, error) {

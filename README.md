@@ -162,15 +162,32 @@ There is exactly one canonical representation of a proxy config — the panel re
 | Engine | Protocols |
 |--------|-----------|
 | xray | VLESS · VMess · Trojan · Shadowsocks · SOCKS · HTTP |
-| sing-box | Hysteria2 · TUIC · AnyTLS · ShadowTLS · WireGuard |
+| sing-box | Hysteria2 · TUIC · AnyTLS · ShadowTLS |
+| kernel-wg | WireGuard (kernel mode) |
 | brook | Brook (all modes) |
 | amneziawg | AmneziaWG (kernel mode) |
+
+**WireGuard runs on the kernel too.** sing-box's `wireguard` endpoint is an
+*outbound* construct: as a server it completes a handshake and answers traffic
+addressed to its own tunnel address, but it forwards nothing onward — a tunnel
+that connects and carries nothing. WireGuard is therefore served by `wg-quick`
+and the in-tree `wireguard` module wherever the host can run them, measured at
+about 3x the throughput of the userspace path (2.2–2.5 Gbit/s against
+0.75–0.85 on one box, same client and destination). A host without the module
+or `wireguard-tools` still gets the sing-box endpoint, and the Engines page
+says which is serving.
 
 **AmneziaWG (kernel mode).** ForgePanel runs AmneziaWG through the real
 [`amneziawg` kernel module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module)
 + `awg-quick` — not a userspace shim — so tunnels run at full kernel-WireGuard
-speed with the obfuscation (`Jc/Jmin/Jmax/S1/S2/H1..H4`) that evades WireGuard
-DPI blocks. Create an AmneziaWG inbound and the panel provisions the keys,
+speed with the obfuscation that evades WireGuard DPI blocks. All four
+generations are supported: **1.5** (`Jc/Jmin/Jmax/S1/S2/H1..H4`), **2.0**
+(`S3/S4`, the `I1..I3` custom junk packets, and H-value *ranges*), **3.0**
+(`HeaderProtectionKey`, `ContentPaddingAddition`, the rekey/keepalive timing
+ranges, peer `AdvancedSecurity`) and **3.1** (`RandomTrailers`,
+`DisableCookies`). The generation is selected per inbound, because these
+parameters are two-sided — a 3.x key in a config whose peer speaks 1.5 does not
+degrade, it stops the handshake. Create an AmneziaWG inbound and the panel provisions the keys,
 writes the server `awg-quick` config, and brings the interface up; the client
 config downloads as a ready-to-import `.conf`. The server needs the `amneziawg`
 module + `amneziawg-tools` installed (`modprobe amneziawg`); until then the panel

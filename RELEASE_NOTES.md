@@ -1,3 +1,134 @@
+# ForgePanel v1.22.0 — Release Notes
+
+Nine commits since v1.21.0. Most of them are one story, and the *diagnosis* is
+the useful part in each case.
+
+## A tunnel that connects and carries nothing
+
+A WireGuard or AmneziaWG inbound would complete its handshake, answer a ping to
+its own gateway, and reach nothing on the internet. That combination is what
+made it hard: every server-side check said healthy.
+
+Four separate causes, each found by connecting a real client to the panel's own
+exported config rather than by reading code.
+
+**1. No egress NAT.** The generated server config had no `PostUp`, so no
+MASQUERADE was ever installed and every forwarded packet left the box with a
+private source address. Adding only that rule by hand took an AmneziaWG inbound
+from nothing to 1MB at 21.7 MB/s, which is what identified it.
+
+**2. sing-box cannot serve WireGuard.** Its `endpoints[].type=wireguard` is an
+*outbound* construct. As a server it completes a handshake and answers traffic
+addressed to its own tunnel address — hence the working gateway ping — but it
+forwards nothing onward. Verified against sing-box 1.13.21 with fresh keys in an
+isolated namespace, under no route, `route.final`, `auto_detect_interface`, an
+explicit inbound rule, a sniff action, and a `0.0.0.0/0` peer. A control run
+proved the same instance and the same `direct` outbound reached the internet
+through a socks inbound, so it is the endpoint's forwarding and not egress.
+WireGuard now defaults to the kernel datapath.
+
+**3. `AllowedIPs = 0.0.0.0/0, ::/0` on an IPv4-only tunnel.** The client
+installs a `::/0` route into an interface with no IPv6 address, so every IPv6
+destination blackholes. This is invisible on an IPv4-only host — it survived a
+namespace test, a Linux `wg-quick` client and a live external check, all of
+which reported 50–60 MB/s — and severe on a real dual-stack device, where
+happy-eyeballs prefers AAAA and most large sites publish one.
+
+**4. Every tunnel inbound got the same subnet.** WireGuard was hard-coded to
+`10.66.66.0/24` and AmneziaWG to `10.67.67.0/24`. A *second* inbound of either
+protocol produced two kernel interfaces holding the same address and two routes
+for one prefix:
+
+```
+awg5454   10.67.67.1/24
+awg8448   10.67.67.1/24
+10.67.67.0/24 dev awg5454
+10.67.67.0/24 dev awg8448
+```
+
+The kernel answers for one of them; the other handshakes and its return traffic
+leaves through the wrong interface. Each inbound now takes the next free `/24`
+from its protocol's block, and the first keeps its historical prefix so an
+upgrade never moves a tunnel whose config has already been handed out.
+
+Measured end to end from an external client after the fixes: **WireGuard
+60.7 MB/s, AmneziaWG 50.7 MB/s** — both had been carrying zero bytes.
+
+## A reseller could delete anyone's customers
+
+`handleDeleteUser` went straight to `DeleteUserCascade` on the raw path id.
+Every other user route — update, get, set-inbounds, reset-credentials,
+sub-revoked, apply-template — scopes through `userOr404` first. This one did
+not, and `/api/admin/users` is `tenantMgmt`, so a reseller could delete any user
+in the panel: another reseller's customers, or the owner's. Deletion is the one
+operation in that set with nothing to undo it.
+
+Confirmed by reverting the fix under the new test: the reseller's DELETE
+returned 200 and the row was gone. It now 404s, matching the other routes, so a
+reseller cannot probe which user ids exist outside their tenancy.
+
+Separately, engine state moved to owner+admin for **reads** as well as
+mutations. It had been in the dashboard-read set, and its payload carries each
+core's recent log lines — for Xray, per-connection accept lines with client
+addresses and destinations.
+
+## A crashed Brook process lost the message saying why
+
+The reaper called `cmd.Wait()` while both output pumps were still reading.
+`StdoutPipe`/`StderrPipe` are explicit that `Wait` closes the pipes, so the two
+raced: when `Wait` won, the readers saw a closed pipe and the process's last
+output was dropped — and for a process that dies on startup that is all of it.
+The panel then reported an inbound that exited for no stated reason, which is
+exactly the failure its log ring exists to prevent.
+
+It surfaced as a supervisor test timing out under load rather than as a wrong
+answer, so it read like a slow machine for a long time and had already had its
+patience raised to sixty seconds. It was never slow: once the race was lost the
+condition could not become true. Proven by reverting the ordering under a 40-run
+test — run 4 kept none of the output.
+
+## Updating a box that cannot reach GitHub
+
+The hosts this panel runs on are frequently the ones behind a restrictive egress
+filter. One reaches Cloudflare, example.com, the Ubuntu archives and Launchpad
+and cannot open a socket to any GitHub host. `forgectl update` failed at the
+first call and the only remaining option was placing binaries by hand, which
+skips every checksum the online path enforces.
+
+```
+forgectl update --from-dir /path/to/assets
+forgectl update --mirror  https://your-host/forgepanel/v1.22.0
+```
+
+Both keep all of it: the offline branch sits inside `download_to`, the one place
+bytes enter the installer.
+
+Two updater bugs fell out of building that. An upgrade **discarded the panel's
+own port and domain** — `load_existing_config` saw `panel.json`, set a flag and
+returned without reading it, so a non-interactive upgrade ran the wizard
+defaults, health-checked port 2053 and rolled back reporting only "Installation
+did not pass validation". Every box on a non-default port was un-updatable, and
+the failure named nothing. And the release **shipped a stale sing-box**:
+`.singbox-stage/` lives outside `dist/` so `--clean` never touched it, and
+v1.21.0 went out carrying both 1.13.21 and a leftover 1.13.15.
+
+## Save no longer offers to fail
+
+`/studio/preview` already ran the same `model.Validate()` as the create endpoint
+and returned `ok: false` with the reason. The form ignored that field, rendered
+the errors in the preview column beside the generated config, and left Save
+live — so the operator pressed it and got a toast repeating a message they had
+already scrolled past. The sharpest case is AmneziaWG's `S1+56 != S2` rule,
+which nothing in the form hints at.
+
+Only the server's own verdict refuses a click: never an advisory warning, never
+a preview still in flight or one that failed to reach the server, and the
+verdict is tagged with the edit it describes so a late reply cannot refuse a
+save the backend would now accept. No validation rule is duplicated in the
+frontend.
+
+---
+
 # ForgePanel v1.20.0 — Release Notes
 
 > **Note on this file.** It stopped being maintained after v1.10.0; v1.11 through

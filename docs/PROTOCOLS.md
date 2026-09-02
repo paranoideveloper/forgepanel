@@ -105,31 +105,40 @@ never the client's UUID or password, both of which would then appear in engine
 logs). That identifier is what makes traffic attributable to one user rather than
 to the inbound as a whole.
 
-**Collection, however, is currently Xray-only.** The panel reads counters via
-`xray api statsquery`, which covers every Xray-served protocol: VLESS, VMess,
-Trojan, Shadowsocks, SOCKS and HTTP. Quota enforcement and traffic resets work
+**Xray-served protocols** — VLESS, VMess, Trojan, Shadowsocks, SOCKS and HTTP —
+are read via `xray api statsquery`. Quota enforcement and traffic resets work
 for those.
 
-Protocols served by sing-box — **Hysteria2, TUIC, AnyTLS, ShadowTLS and
-WireGuard** — carry correct per-user names in their configs, and sing-box
-attributes traffic to them internally, but the panel does not currently collect
-those counters. The reason is upstream: per-user totals would come from
-`experimental.v2ray_api`, and the **official sing-box release archives are not
-built with it** — starting one fails with `v2ray api is not included in this
-build, rebuild with -tags with_v2ray_api`. The binary manager pins those official
-archives by SHA-256, so enabling it would mean taking over the sing-box build and
-its supply chain.
+**sing-box-served protocols** — Hysteria2, TUIC, AnyTLS and ShadowTLS — are
+metered too, but only on a build that carries `with_v2ray_api`. Per-user totals
+come from `experimental.v2ray_api`, and the **official sing-box release archives
+are not built with it**: starting one fails with `v2ray api is not included in
+this build`. `clash_api`, which official builds do include, reports live
+connections rather than cumulative totals, so polling it would miss every
+connection that closed between polls — quotas would appear enforced while
+silently leaking traffic, which is worse than reporting nothing because the
+failure is invisible.
 
-`clash_api`, which official builds *do* include, reports live connections rather
-than cumulative per-user totals. Polling it would miss every connection that
-closed between polls, so quotas would appear enforced while silently leaking
-traffic — worse than reporting nothing, because the failure would be invisible.
+So ForgePanel builds its own sing-box (`scripts/build-singbox.sh`): the same
+pinned upstream version, the official tag set plus that one tag, built with
+`-trimpath` and a pinned toolchain so two independent builds are byte-identical.
+The release ships it beside the panel binary and `binmgr` adopts it after
+verifying it against a pinned checksum.
 
-Practical consequence: **do not rely on traffic quotas for users whose only
-inbound is Hysteria2, TUIC, AnyTLS, ShadowTLS or WireGuard.** Expiry and
-enable/disable still apply to them normally, since those do not depend on
-counters. Closing the gap needs either a self-built sing-box with
-`with_v2ray_api` or upstream shipping it by default.
+**When that build is absent the panel still runs**, on the upstream archive,
+and those protocols are simply unmetered — a deliberate fallback rather than a
+failure, since refusing to start would be a worse trade for an operator who
+does not sell metered plans. The "Traffic metering" health subsystem says which
+of the two is in use, so the state is never silent.
+
+Practical consequence: **check the Traffic metering health row before relying on
+quotas for users whose only inbound is Hysteria2, TUIC, AnyTLS or ShadowTLS.**
+Expiry and enable/disable apply to them regardless, since those do not depend on
+counters.
+
+WireGuard and AmneziaWG are not in either list: both are served by a kernel
+interface rather than a supervised core, and their accounting comes from the
+interface counters.
 
 ---
 
@@ -388,13 +397,43 @@ with the padding scheme newline-joined.
 
 ## WireGuard
 
-**Canonical ID** `wireguard` · **Engine** Xray · **Uses transport** no
+**Canonical ID** `wireguard` · **Engine** kernel-wg, falling back to sing-box ·
+**Uses transport** no
 
 WireGuard is a full VPN rather than an application proxy: a modern, small, fast
 kernel-or-userspace tunnel with excellent cryptography and no obfuscation
 whatsoever. Its handshake is trivially identifiable and it is blocked wherever
-blocking is systematic. It earns its place here as a chained outbound and,
-specifically, as the transport for Cloudflare WARP.
+blocking is systematic. It serves as an inbound, as a chained outbound, and as
+the transport for Cloudflare WARP.
+
+**Which datapath serves it.** sing-box's `wireguard` endpoint is an *outbound*
+construct. As a server it completes a handshake and answers traffic addressed to
+its own tunnel address — so it looks alive, and a client can even ping the
+gateway — but it forwards nothing onward. So an inbound is served by `wg-quick`
+and the in-tree `wireguard` module wherever the host can run them, which is also
+about three times faster: 2.2–2.5 Gbit/s against 0.75–0.85 for the userspace
+path, measured on one box with the same client and destination. A host with
+neither the module nor `wireguard-tools` still gets the sing-box endpoint, and
+the Engines page reports which is serving. `Node.Engine` overrides the choice
+per inbound.
+
+**Egress.** The generated server config installs its own NAT (`PostUp`
+MASQUERADE on the tunnel's own source prefix, the two FORWARD accepts, and
+`ip_forward`), removing exactly that on `PostDown`. Without it the tunnel
+handshakes, answers a ping to the gateway, and reaches nothing: every forwarded
+packet leaves the box with a private source address.
+
+**Addressing.** Each inbound is allocated the next free `/24` from `10.66.`,
+skipping anything another inbound holds — WireGuard and AmneziaWG are checked
+together, since two inbounds on one prefix collide whatever their protocol. The
+first WireGuard inbound keeps `10.66.66.0/24`, so an upgrade never moves a
+tunnel whose config has already been handed out. Per-user peer addresses come
+from the pool in `internal/wgpeer`.
+
+The exported client config offers only the address families the tunnel actually
+has an address for: advertising `::/0` on an IPv4-only tunnel makes a dual-stack
+client route IPv6 into an interface with no IPv6 address and blackhole every
+AAAA destination — invisible on an IPv4-only test host, severe on a phone.
 
 **Required:** `WireGuardOptions.PrivateKey` (local) and `PublicKey` (peer).
 `Validate()` rejects a node missing either.
@@ -418,7 +457,56 @@ one-click WARP outbound generator possible.
 
 `UUID`, `Password`, `Username`, `Flow`, `Encryption` and `AlterID` are cleared.
 Exported as
-`wireguard://privatekey@host:port?publickey=&presharedkey=&address=&mtu=&reserved=#remark`.
+`wireguard://privatekey@host:port?publickey=&presharedkey=&address=&mtu=&reserved=#remark`,
+and — because a link is not what these clients import — as a native `wg-quick`
+`.conf` from `/subconf/<token>/<n>`, carrying the CLIENT's private key and never
+the server's.
+
+---
+
+## AmneziaWG
+
+**Canonical ID** `amneziawg` · **Engine** amneziawg (kernel) · **Uses transport** no
+
+AmneziaWG is WireGuard plus obfuscation: the same cryptography and datapath,
+with the handshake and packet shapes altered so the trivially identifiable
+WireGuard fingerprint is gone. It is the protocol to reach for where WireGuard
+itself is blocked by DPI rather than by address.
+
+It runs through the real [`amneziawg` kernel
+module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module) +
+`awg-quick`, not a userspace shim, so it runs at kernel speed. The host needs
+`amneziawg` and `amneziawg-tools` (`ppa:amnezia/ppa` on Ubuntu, plus
+`linux-headers-$(uname -r)` for the DKMS build). Until they are installed the
+panel still writes the configs and reports the shortfall in engine status rather
+than presenting an inbound that cannot serve.
+
+**Generations.** The parameters are two-sided: a key from a newer generation in
+a config whose peer speaks an older one does not degrade, it stops the
+handshake. So the generation is selected per inbound and only that generation's
+keys are written.
+
+| Generation | Adds |
+|---|---|
+| `1.5` | `Jc`, `Jmin`, `Jmax`, `S1`, `S2`, `H1`–`H4` |
+| `2.0` | `S3`, `S4`, the `I1`–`I3` custom junk packets, and H-value *ranges* (`1500000000-1500999999`) |
+| `3.0` | `HeaderProtectionKey`, `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`, peer-level `AdvancedSecurity` |
+| `3.1` | `RandomTrailers`, `DisableCookies` |
+
+Two constraints are enforced because the module reports them with errors that
+name no field: `H1`–`H4` must fit in a uint32 (`awg-quick` says only
+"Configuration parsing error", with no line number), and `HeaderProtectionKey`
+requires `S3` and `S4` of at least 12 — 11 is rejected as "Unable to modify
+interface: Invalid argument", because HPK salts with `S1`–`S4`.
+
+Addressing, egress NAT and address-family matching work exactly as for
+WireGuard, from the `10.67.` block.
+
+**Client apps.** AmneziaVPN and the standalone AmneziaWG app are different
+clients with different formats — `vpn://` and `.conf` respectively — and only
+the latter imports what `/subconf/<token>/<n>` serves. AmneziaVPN supports up to
+3.0. Handing the file to the wrong app looks exactly like a broken server: the
+import appears to succeed and no packet ever leaves the device.
 
 ---
 
