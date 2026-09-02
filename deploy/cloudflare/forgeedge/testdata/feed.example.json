@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "generated_at": "2026-08-07T09:00:00Z",
+  "panel": { "name": "ForgePanel", "base_url": "https://panel.example.com" },
+  "users": [{
+    "id": "u_7f3a", "sub_token": "SUBTOKEN123", "email": "a@b.c", "enabled": true,
+    "expires_at": "2026-12-31T00:00:00Z", "used_traffic": 1234567, "data_limit": 10737418240,
+    "vless_uuid": "11111111-2222-4333-8444-555555555555",
+    "trojan_password": "user-trojan-pw",
+    "nodes": [
+      { "protocol":"hysteria2","address":"vps.example.com","port":8443,"password":"hy2pass","remark":"VPS Hysteria2","tag":"VPS Hysteria2",
+        "transport":{"network":"tcp"},"security":{"type":"tls","server_name":"vps.example.com","alpn":["h3"]},
+        "hysteria2":{"up_mbps":50,"down_mbps":200} },
+      { "protocol":"vless","address":"203.0.113.10","port":443,"uuid":"11111111-2222-4333-8444-555555555555","flow":"xtls-rprx-vision",
+        "remark":"VPS REALITY","tag":"VPS REALITY","transport":{"network":"tcp"},
+        "security":{"type":"reality","fingerprint":"chrome","reality":{"public_key":"PUBKEY","short_id":"aabb","server_names":["www.datadoghq.com"]}} }
+    ]
+  }],
+  "shared_nodes": [
+    { "protocol":"forgedns","address":"ns1.tunnel.example.com","port":53,"remark":"ForgeDNS tunnel","tag":"ForgeDNS tunnel",
+      "transport":{"network":"tcp"},"security":{"type":"none"},
+      "forgedns":{"adapter":"stormdns","zone":"t.example.com","rrtype":"TXT","key":"k"} }
+  ]
+}

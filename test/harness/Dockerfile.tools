@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+#
+# The harness driver and the isolated origin ("internetd"), in one image. Both
+# are built with the `harness` build tag, which is what keeps every line of them
+# out of `go build ./...` and `go test ./...` for the product itself.
+#
+# The image ships no proxy core. xray and sing-box are bind-mounted from the same
+# cache the panel container uses, so the client side of every test runs the exact
+# binary the server side runs.
+#
+# Build from the repository root:
+#   docker build -f test/harness/Dockerfile.tools -t forgepanel-harness-tools .
+FROM golang:1.25-alpine AS build
+ENV GOTOOLCHAIN=auto
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -tags harness -trimpath -o /out/harness   ./test/harness/cmd/harness && \
+    CGO_ENABLED=0 GOOS=linux go build -tags harness -trimpath -o /out/internetd ./test/harness/cmd/internetd
+
+# alpine + gcompat, matching Dockerfile.panel and production. The client side
+# runs the same glibc-linked sing-box the server side does, so it needs the same
+# shim; see that file's header for why this base is the load-bearing choice.
+FROM alpine:3.21
+
+# ca-certificates for outbound TLS, gcompat so the pinned sing-box can exec, and
+# the tools an operator reaches for when a case fails and the container is up.
+RUN apk add --no-cache ca-certificates gcompat curl bind-tools iproute2
+
+COPY --from=build /out/harness   /usr/local/bin/harness
+COPY --from=build /out/internetd /usr/local/bin/internetd
+
+# Root: the driver spawns proxy cores and opens raw sockets for the UDP probes,
+# and this container is a test fixture that never leaves the harness network.
+WORKDIR /results
+
+CMD ["/usr/local/bin/harness"]

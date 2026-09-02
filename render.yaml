@@ -1,0 +1,37 @@
+# ForgePanel on Render.
+#
+#   Render dashboard -> New -> Blueprint -> point it at this repository.
+#
+# The plan below is `starter`, not `free`, and that is not an upsell. A free
+# Render web service CANNOT attach a persistent disk, and it sleeps after 15
+# minutes without traffic. Both are fatal here rather than merely inconvenient:
+#
+#   * no disk means /var/lib/forgepanel is the container filesystem, so every
+#     deploy and every restart throws away the admin account, every inbound,
+#     every user and all traffic accounting — silently, looking exactly like a
+#     fresh install;
+#   * sleeping means the proxy is DOWN, not slow. A VPN client does not send a
+#     warm-up request and wait 30 seconds for a cold start; it fails.
+#
+# Render also injects RENDER_EXTERNAL_HOSTNAME, which is what the panel detects
+# to enter PaaS mode (internal/config/paas.go). Nothing else has to be set.
+
+services:
+  - type: web
+    name: forgepanel
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./deploy/paas/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: false
+    disk:
+      name: forgepanel-data
+      mountPath: /var/lib/forgepanel
+      sizeGB: 1
+    envVars:
+      # The panel derives its public hostname from RENDER_EXTERNAL_HOSTNAME and
+      # its bind port from PORT, both injected by Render. Set FORGEPANEL_DOMAIN
+      # only if you put a custom domain in front.
+      - key: FORGEPANEL_PAAS
+        value: "1"

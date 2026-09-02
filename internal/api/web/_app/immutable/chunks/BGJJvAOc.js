@@ -1,0 +1,1 @@
+var e=120;function t(){return e*1e3}function n(t){let n=typeof t==`number`?t:Number(t);return Number.isFinite(n)&&n>0&&(e=n),e}function r(e,n=Date.now()){if(e==null||e===``)return!1;let r=e instanceof Date?e.getTime():new Date(e).getTime();return!Number.isNaN(r)&&n-r<t()}export{n,r as t};

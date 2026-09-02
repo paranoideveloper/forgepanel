@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+		<meta name="theme-color" content="#0B0F16" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<style>
+			/*
+			 * Design tokens.
+			 *
+			 * Before this the palette was 531 colour literals restated across 29
+			 * files — 309 hex values and 222 rgba(255,255,255,a). The alpha-white
+			 * ones are what made a light theme impossible rather than merely
+			 * tedious: muted text written as rgba(255,255,255,.55) is invisible on
+			 * a light background by construction, so no amount of swapping the
+			 * page background would have produced a readable page.
+			 *
+			 * Dark is defined on :root and light is the override, because dark is
+			 * what every one of those literals already encoded — so the dark theme
+			 * renders byte-identically to before and only light is new.
+			 */
+			:root {
+				--bg: #0F1420;
+				--bg-deep: #090D16;
+				--card: #141A24;
+				--card-deep: #10141C;
+				--raised: #1A2230;
+
+				--fg: #ffffff;
+				/* Text, by emphasis. The names are the old alphas' jobs, not their
+				   numbers, so a light theme can pick different alphas for the same
+				   role without every call site changing. */
+				--t-1: rgba(255, 255, 255, 0.92);
+				--t-2: rgba(255, 255, 255, 0.75);
+				--t-3: rgba(255, 255, 255, 0.7);
+				--t-4: rgba(255, 255, 255, 0.65);
+				--t-5: rgba(255, 255, 255, 0.6);
+				--t-6: rgba(255, 255, 255, 0.55);
+				--t-7: rgba(255, 255, 255, 0.5);
+				--t-8: rgba(255, 255, 255, 0.45);
+				--mut: #8A97B8;
+
+				/* Hairlines and tinted surfaces. */
+				--ln-1: rgba(255, 255, 255, 0.04);
+				--ln-2: rgba(255, 255, 255, 0.06);
+				--ln-3: rgba(255, 255, 255, 0.08);
+				--ln-4: rgba(255, 255, 255, 0.1);
+				--ln-5: rgba(255, 255, 255, 0.12);
+
+				--acc: #FF7A1A;
+				--acc-2: #ffa15c;
+				--acc-soft: #1A1204;
+				/* Foreground ON the accent. Stays dark in BOTH themes: the accent is
+				   a light orange either way, so this is not a colour that flips. */
+				--on-acc: #10141C;
+
+				--ok: #27D17C;
+				--ok-2: #3FB950;
+				--warn: #D99B2B;
+				--warn-2: #FFC24B;
+				--bad: #FF4D4D;
+				--bad-2: #F85149;
+				--bad-3: #FF6B6B;
+
+				--scrim: rgba(0, 0, 0, 0.65);
+				--shadow: rgba(0, 0, 0, 0.6);
+				/* A card over a gradient. Translucent on purpose, so it cannot be
+				   --card and has to flip on its own. */
+				--card-glass: rgba(20, 26, 36, 0.85);
+				--card-glass-2: rgba(20, 26, 36, 0.7);
+				/* Aliases: several components already write var(--border, #23304a)
+				   and friends. The fallback fired every time because the name was
+				   never defined, which is a hardcoded colour wearing a var(). */
+				--border: var(--ln-4);
+				--accent: var(--acc);
+				--bg-input: var(--card-deep);
+				--text: var(--t-1);
+				color-scheme: dark;
+			}
+
+			:root[data-theme='light'] {
+				--bg: #F4F6F9;
+				--bg-deep: #E9ECF1;
+				--card: #FFFFFF;
+				--card-deep: #F7F8FA;
+				--raised: #EDF0F4;
+
+				--fg: #0F1420;
+				--t-1: rgba(15, 20, 32, 0.92);
+				--t-2: rgba(15, 20, 32, 0.78);
+				--t-3: rgba(15, 20, 32, 0.72);
+				--t-4: rgba(15, 20, 32, 0.66);
+				--t-5: rgba(15, 20, 32, 0.6);
+				--t-6: rgba(15, 20, 32, 0.56);
+				--t-7: rgba(15, 20, 32, 0.5);
+				--t-8: rgba(15, 20, 32, 0.46);
+				--mut: #5B6880;
+
+				--ln-1: rgba(15, 20, 32, 0.04);
+				--ln-2: rgba(15, 20, 32, 0.07);
+				--ln-3: rgba(15, 20, 32, 0.1);
+				--ln-4: rgba(15, 20, 32, 0.13);
+				--ln-5: rgba(15, 20, 32, 0.16);
+
+				/* Darkened so they carry on white; the dark-theme values are chosen
+				   to glow on near-black and fail contrast on paper. */
+				--acc: #D45E00;
+				--acc-2: #B84F00;
+				--acc-soft: #FFF1E4;
+				--on-acc: #FFFFFF;
+
+				--ok: #0A7F4F;
+				--ok-2: #087045;
+				--warn: #8A5A00;
+				--warn-2: #7A4F00;
+				--bad: #C42B21;
+				--bad-2: #B0241B;
+				--bad-3: #CC3A30;
+
+				--scrim: rgba(15, 20, 32, 0.45);
+				--shadow: rgba(15, 20, 32, 0.18);
+				--card-glass: rgba(255, 255, 255, 0.92);
+				--card-glass-2: rgba(255, 255, 255, 0.82);
+				color-scheme: light;
+			}
+		</style>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

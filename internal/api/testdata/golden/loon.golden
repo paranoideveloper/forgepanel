@@ -1,0 +1,7 @@
+#!name=ForgePanel
+[Proxy]
+vmess-ws = vmess, a.example.com, 443, username=11111111-2222-3333-4444-555555555555, tls=true, sni=a.example.com, ws=true, ws-path=/ws, ws-headers=Host:a.example.com
+trojan = trojan, b.example.com, 443, password=trojanpass, sni=b.example.com
+ss = ss, c.example.com, 8388, encrypt-method=2022-blake3-aes-128-gcm, password=MTIzNDU2Nzg5MDEyMzQ1Ng==
+socks = socks5, d.example.com, 1080, username=u, password=p
+http = http, e.example.com, 8080, username=hu, password=hp

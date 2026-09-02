@@ -1,0 +1,42 @@
+[Unit]
+Description=ForgeEdge Bot — deploy & manage Cloudflare Worker edges from Telegram
+Documentation=https://github.com/paranoideveloper/forgepanel/blob/main/docs/EDGE_BOT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/forgeedge-bot
+
+# Required: the @BotFather token and the owner's Telegram id live here.
+# The service will not start until FORGEEDGE_BOT_TOKEN and FORGEEDGE_BOT_OWNER
+# are set. Copy packaging/forgeedge-bot.env.example into place and fill it in.
+EnvironmentFile=/etc/forgeedge-bot/forgeedge-bot.env
+Environment=FORGEEDGE_BOT_DATA=/var/lib/forgeedge-bot
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+# The bot makes only outbound HTTPS (Telegram + the Cloudflare API), so it needs
+# no privileges and runs as a systemd-managed dynamic user. The state directory
+# (encrypted credentials + master key) persists across restarts at 0700.
+DynamicUser=yes
+StateDirectory=forgeedge-bot
+StateDirectoryMode=0700
+
+# Hardening — nothing here needs the filesystem beyond its own state dir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/lib/forgeedge-bot
+
+[Install]
+WantedBy=multi-user.target

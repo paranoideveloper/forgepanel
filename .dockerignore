@@ -1,0 +1,73 @@
+# Keep the build context to source + go.mod/go.sum. Everything below either
+# bloats the context or would be rebuilt inside the image anyway.
+
+# VCS
+.git
+.gitignore
+.github
+
+# Build output. The binary names are root-anchored so they cannot shadow the
+# cmd/forgepanel, cmd/forgectl and cmd/forgenode source directories.
+bin/
+dist/
+build/
+out/
+*.exe
+*.test
+*.out
+/forgepanel
+/forgectl
+/forgenode
+
+# Packaging / CI descriptors (not needed to compile)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+.goreleaser.yaml
+.goreleaser.yml
+Makefile
+packaging/
+deploy/
+# …except the PaaS entrypoint, which the PaaS image copies in. Excluding the
+# whole deploy tree used to be right when nothing in it was ever built into an
+# image; deploy/paas/Dockerfile needs its sibling script, and a COPY that names
+# an ignored path fails with "not found" rather than saying it was filtered out
+# of the context — so the error names the file and the fix is in this one.
+#
+# It has already gone wrong once: renaming deploy/railway to deploy/paas left
+# this line pointing at a path that no longer existed and both images stopped
+# building. TestEveryDockerfileCOPYSurvivesDockerignore now compares the two.
+!deploy/paas/entrypoint.sh
+
+# Docs — README is kept out of the image; docs/ is published with releases.
+docs/
+*.md
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+data/
+var/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# JS tooling (the web assets are plain static files, nothing to install)
+node_modules/
+web/dist/
+
+# Reference clones + downloaded core binaries: not needed to compile the image.
+third_party/
+test/harness/.cache/

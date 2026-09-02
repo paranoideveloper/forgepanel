@@ -1,0 +1,6 @@
+[server_local]
+vmess=a.example.com:443, method=chacha20-poly1305, password=11111111-2222-3333-4444-555555555555, obfs=ws, obfs-uri=/ws, obfs-host=a.example.com, tag=vmess-ws
+trojan=b.example.com:443, password=trojanpass, over-tls=true, tls-host=b.example.com, tag=trojan
+shadowsocks=c.example.com:8388, method=2022-blake3-aes-128-gcm, password=MTIzNDU2Nzg5MDEyMzQ1Ng==, tag=ss
+socks5=d.example.com:1080, username=u, password=p, tag=socks
+http=e.example.com:8080, username=hu, password=hp, tag=http

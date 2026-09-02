@@ -1,0 +1,250 @@
+# ForgePanel release pipeline.
+#
+# Assets are published as RAW binaries named `<binary>-<os>-<arch>` — install.sh
+# downloads `forgepanel-linux-amd64` / `forgepanel-linux-arm64` by that exact
+# name, so do not switch the archive format without updating the installer.
+#
+#   goreleaser release --snapshot --clean   # local dry run
+#   goreleaser release --clean              # tagged release (needs GITHUB_TOKEN)
+version: 2
+
+project_name: forgepanel
+
+before:
+  hooks:
+    - go mod download
+    # install.sh and its checksum are published as release assets (see
+    # release.extra_files) because the documented one-command install fetches
+    # them by name; generate the checksum next to the script so `sha256sum -c`
+    # works from the download directory.
+    - sh -c 'sha256sum install.sh > install.sh.sha256'
+    # Build the sing-box ForgePanel ships. Per-user counters for the protocols
+    # only sing-box serves (hysteria2, tuic, anytls, shadowtls, wireguard) exist
+    # only in a build carrying with_v2ray_api, which the official release
+    # archives are not — so on an official binary those protocols are UNMETERED
+    # and their users' quotas cannot be enforced. The script pins the same
+    # upstream version, keeps the official tag set, and builds reproducibly:
+    # rebuild it yourself and the checksum matches.
+    # Staged OUTSIDE dist/. goreleaser 2.x checks that dist is empty AFTER the
+    # before-hooks run, so a hook that writes into dist fails the build with
+    # "dist is not empty, remove it before running goreleaser or use the --clean
+    # flag" — advice that cannot help, because --clean is already in use and the
+    # hook repopulates dist after the clean.
+    # The stage is REMOVED first. It is outside dist/, so --clean does not touch
+    # it, and the upload glob below is a wildcard on the version: a stage left
+    # over from the previous release ships that release's sing-box as an extra
+    # asset of this one. v1.21.0 went out carrying both 1.13.21 and a stale
+    # 1.13.15 for exactly that reason.
+    - sh -c 'rm -rf .singbox-stage && TARGETS="amd64 arm64" ./scripts/build-singbox.sh .singbox-stage'
+
+builds:
+  - id: forgepanel
+    main: ./cmd/forgepanel
+    binary: forgepanel
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+
+  - id: forgectl
+    main: ./cmd/forgectl
+    binary: forgectl
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # forgectl is the only command with a `version` var to stamp
+    # (cmd/forgectl/version.go); `forgectl version` prints it.
+    ldflags:
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+      - -X main.version={{ .Tag }}
+
+  - id: forgenode
+    main: ./cmd/forgenode
+    binary: forgenode
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+
+  # forgeedge-bot is a standalone Telegram bot (docs/EDGE_BOT.md). It is separate
+  # from the panel — its own process and encrypted state — but reuses
+  # internal/edge, so it embeds the same Worker bundle the panel deploys.
+  - id: forgeedge-bot
+    main: ./cmd/forgeedge-bot
+    binary: forgeedge-bot
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/forgepanel/forgepanel/internal/version.Version={{ .Tag }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/forgepanel/forgepanel/internal/version.Date={{ .Date }}
+
+archives:
+  # Raw, uncompressed binaries: forgepanel-linux-amd64, forgectl-linux-arm64, …
+  - id: binaries
+    formats: [binary]
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+
+nfpms:
+  - id: packages
+    package_name: forgepanel
+    ids: [forgepanel, forgectl, forgenode]
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: ForgePanel
+    homepage: https://github.com/paranoideveloper/forgepanel
+    maintainer: ForgePanel maintainers <noreply@users.noreply.github.com>
+    description: Self-hosted proxy management panel with a config studio, subscriptions and remote nodes.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    # ca-certificates is required for TLS (ACME + fetching the proxy cores). The
+    # network tools are soft dependencies — only some features (AmneziaWG,
+    # port-hopping, ForgeDNS firewalling) need them, and the panel degrades
+    # gracefully without them. Package names differ across deb/rpm, so the soft
+    # deps are set per-format below.
+    dependencies:
+      - ca-certificates
+    overrides:
+      deb:
+        recommends:
+          - wireguard-tools
+          - iptables
+          - nftables
+          - iproute2
+      rpm:
+        recommends:
+          - wireguard-tools
+          - iptables
+          - nftables
+          - iproute
+    contents:
+      - src: packaging/systemd/forgepanel.service
+        dst: /etc/systemd/system/forgepanel.service
+        file_info:
+          mode: 0644
+
+      # Data directory — holds the SQLite database, secrets and certificates.
+      - dst: /var/lib/forgepanel
+        type: dir
+        file_info:
+          mode: 0700
+
+      - dst: /etc/forgepanel
+        type: dir
+        file_info:
+          mode: 0750
+
+      # Optional overrides sourced by the unit (EnvironmentFile=-...). Shipped
+      # fully commented out, so it documents the knobs without changing
+      # behaviour. noreplace keeps operator edits across upgrades, and stops the
+      # package from clobbering a file install.sh may already have written.
+      - src: packaging/forgepanel.env.example
+        dst: /etc/forgepanel/forgepanel.env
+        type: config|noreplace
+        file_info:
+          mode: 0640
+
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+      postremove: packaging/scripts/postremove.sh
+
+# An SBOM per released artifact, so a consumer can audit what is inside
+# without unpacking it. Requires syft on PATH (the release workflow
+# installs it before invoking goreleaser).
+sboms:
+  - id: archive
+    artifacts: archive
+  - id: packages
+    artifacts: package
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  github:
+    owner: paranoideveloper
+    name: forgepanel
+  draft: false
+  # The one-command installer and its checksum ride along as release assets so
+  # `curl .../install.sh` in the README/INSTALL actually resolves.
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.sh.sha256
+    # The standalone ForgeEdge bot's systemd unit and env template, so an
+    # operator can wire it up without cloning the repo (docs/EDGE_BOT.md).
+    - glob: ./packaging/systemd/forgeedge-bot.service
+    - glob: ./packaging/forgeedge-bot.env.example
+    # The sing-box we build, per architecture, plus its checksums. install.sh
+    # places it beside the panel binary, where binmgr finds and verifies it.
+    - glob: ./.singbox-stage/sing-box-*-linux-*
+    - glob: ./.singbox-stage/checksums.txt
+      name_template: singbox-checksums.txt
+    # sing-box is GPL-3.0; conveying the binary requires its notices.
+    - glob: ./.singbox-stage/sing-box-LICENSE
+    - glob: ./.singbox-stage/sing-box-NOTICE.md
+  prerelease: auto
+  footer: |
+    ## Install
+
+    A pipeline that produces checksums, SBOMs and signatures should not then ask
+    you to pipe an unverified script from a moving branch straight into a root
+    shell. Fetch the pinned installer for THIS release and check it first:
+
+    ```
+    curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/{{ .Tag }}/install.sh
+    curl -fsSLO https://github.com/paranoideveloper/forgepanel/releases/download/{{ .Tag }}/install.sh.sha256
+    sha256sum -c install.sh.sha256 && sudo bash install.sh
+    ```
+
+    ### Docker
+
+    ```
+    docker run -d --name forgepanel --restart unless-stopped \
+      -p 2053:2053 -v forgepanel-data:/var/lib/forgepanel \
+      ghcr.io/paranoideveloper/forgepanel:{{ .Tag }}
+    ```
+
+    Or with Compose — see `docker-compose.yml` in the repository.
+
+    The image runs as a non-root user with only `CAP_NET_BIND_SERVICE`, which is
+    what lets it bind 80/443/53 without being root.

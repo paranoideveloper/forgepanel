@@ -1,0 +1,88 @@
+# ForgePanel on Fly.io.
+#
+#   fly launch --no-deploy --copy-config
+#   fly volumes create forgepanel_data --size 1
+#   fly deploy
+#
+# Fly is the most capable of the PaaS targets, and the reason is in the
+# [[services]] blocks below rather than anywhere in the panel: it will route raw
+# TCP and UDP, not only HTTP. Railway, Render and Koyeb give a container exactly
+# one HTTP port, which is why the panel refuses everything but ws, httpupgrade
+# and xhttp there. Here that limit is the platform's default, not its ceiling.
+#
+# What each block buys, and what it costs:
+#
+#   * 80/443 — the ordinary edge. ws / httpupgrade / xhttp inbounds share this
+#     port with the panel itself, separated by their transport path. Works on a
+#     shared IPv4, costs nothing, and is all Railway can ever do.
+#
+#   * 8443 raw TCP — no `handlers`, so Fly passes the bytes through without
+#     terminating TLS. That is what REALITY needs: it performs its own TLS
+#     handshake and an edge that terminates first destroys it. Needs a dedicated
+#     IPv4 (`fly ips allocate-v4`), which is billed.
+#
+#   * 443/udp — Hysteria2, TUIC, QUIC. Also needs the dedicated IPv4, and comes
+#     with a constraint the panel has to respect: Fly does NOT rewrite the port
+#     for UDP, and the app must bind `fly-global-services`, not 0.0.0.0. Tell
+#     the panel with FORGEPANEL_PAAS_UDP_PORTS so it offers those protocols
+#     instead of refusing them.
+#
+# The two extra blocks are commented out because they are useless — worse,
+# actively broken — without the dedicated IPv4. Allocate it, uncomment, and set
+# the matching FORGEPANEL_PAAS_*_PORTS.
+
+app = "forgepanel"
+primary_region = "ams"
+
+[build]
+  dockerfile = "deploy/paas/Dockerfile"
+
+[env]
+  FORGEPANEL_PAAS = "1"
+  FORGEPANEL_DATA = "/var/lib/forgepanel"
+  # Uncomment together with the service blocks below, AFTER allocating a
+  # dedicated IPv4. Listing a port here that Fly does not actually route makes
+  # the panel offer an inbound that cannot be reached, which is worse than
+  # refusing it.
+  # FORGEPANEL_PAAS_TCP_PORTS = "8443"
+  # FORGEPANEL_PAAS_UDP_PORTS = "443"
+
+[mounts]
+  source = "forgepanel_data"
+  destination = "/var/lib/forgepanel"
+
+# The panel, and every path-routed inbound sharing its port.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 2000
+    soft_limit = 1500
+
+# A machine that stops is a proxy that is down. Fly's default is to suspend an
+# idle app, and a VPN client does not retry politely through a cold start.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Raw TCP pass-through, for REALITY and anything else that does its own TLS.
+# Requires: fly ips allocate-v4
+# [[services]]
+#   protocol = "tcp"
+#   internal_port = 8443
+#   [[services.ports]]
+#     port = 8443
+
+# UDP, for Hysteria2 / TUIC / QUIC.
+# Requires: fly ips allocate-v4, and the app binds fly-global-services:443.
+# Fly does not rewrite the port, so internal and external must match.
+# [[services]]
+#   protocol = "udp"
+#   internal_port = 443
+#   [[services.ports]]
+#     port = 443

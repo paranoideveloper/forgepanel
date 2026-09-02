@@ -1,0 +1,308 @@
+name: Release
+
+# One version tag publishes BOTH artifact types from one commit and one test
+# run: downloadable binaries on the GitHub Release, and a matching multi-arch
+# image in GHCR. Nothing publishes unless every gate passes, and the final job
+# verifies what was actually published rather than assuming it worked.
+#
+# ACTION PINNING: official actions are referenced at their major-version tag,
+# which is this project's existing policy and matches ci.yml. If that policy
+# tightens to immutable SHAs, change both workflows together.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Least privilege at the top; each job widens only what it needs.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate. A tag must not publish anything that does not vet, build, test, or
+  # produce a working container image.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: gofmt · vet · test · docker build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify gofmt
+        run: |
+          unformatted="$(gofmt -l . | grep -v '^vendor/' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed for:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./... -short -count=1
+
+      # Build the image here too, so a broken Dockerfile fails the release
+      # BEFORE any binary is published, rather than leaving the two halves of a
+      # release out of step.
+      - name: Validate the container build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: |
+            VERSION=${{ github.ref_name }}
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # A tag with a hyphenated suffix (v1.2.0-rc1, -beta.2) is a prerelease
+          # and must never move the floating tags.
+          if printf '%s' "$version" | grep -q -- '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Binaries + checksums + SBOM -> GitHub Release.
+  # ---------------------------------------------------------------------------
+  binaries:
+    name: binaries (goreleaser)
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release and upload assets
+      id-token: write   # keyless signing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # goreleaser needs history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Keep generated release-only files out of the git worktree before
+      # GoReleaser validates its source state, then upload them to the release.
+      - name: Upload verified installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          sha256sum install.sh > install.sh.sha256
+          gh release upload "$VERSION" install.sh install.sh.sha256 --clobber
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch image -> GHCR, from the same commit as the binaries.
+  # ---------------------------------------------------------------------------
+  image:
+    name: ghcr image (amd64 + arm64)
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
+      id-token: write   # keyless cosign signing + provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag policy: a stable release publishes vX.Y.Z, X.Y, X and latest.
+      # A prerelease publishes ONLY its exact tag — latest and the floating
+      # major/minor tags must never point at a prerelease.
+      - name: Compute image tags
+        id: tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.gate.outputs.prerelease == 'false' }}
+            type=semver,pattern={{major}},enable=${{ needs.gate.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.gate.outputs.prerelease == 'false' }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.gate.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.tags.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.gate.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ fromJSON(steps.tags.outputs.json).labels['org.opencontainers.image.created'] }}
+          # Build provenance and an SBOM travel with the image in the registry.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: sigstore/cosign-installer@v3
+
+      # Keyless Sigstore signing: the identity comes from this workflow's OIDC
+      # token, so there is no private key to store or leak.
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+  # ---------------------------------------------------------------------------
+  # Verify what was actually published. Everything above can succeed and still
+  # leave a release that does not work; this job checks the result.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: verify published release
+    needs: [gate, binaries, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every expected binary is present, and its checksum matches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl && cd dl
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'forgepanel-linux-*' --pattern 'forgectl-linux-*' \
+            --pattern 'forgenode-linux-*' --pattern 'checksums.txt' \
+            --pattern 'install.sh' --pattern 'install.sh.sha256'
+          for f in forgepanel-linux-amd64 forgepanel-linux-arm64 \
+                   forgectl-linux-amd64 forgectl-linux-arm64 \
+                   install.sh install.sh.sha256; do
+            [ -f "$f" ] || { echo "::error::missing release asset: $f"; exit 1; }
+          done
+          # checksums.txt also covers the deb/rpm packages, which are not
+          # downloaded here; verify only the lines for what we fetched.
+          grep -E 'forgepanel-linux|forgectl-linux|forgenode-linux' checksums.txt > subset.txt
+          sha256sum -c subset.txt
+          sha256sum -c install.sh.sha256
+
+      - name: The published binary reports the tag, not "dev"
+        run: |
+          set -euo pipefail
+          chmod +x dl/forgepanel-linux-amd64
+          out="$(./dl/forgepanel-linux-amd64 --version)"
+          echo "binary: $out"
+          case "$out" in
+            *"$VERSION"*) ;;
+            *) echo "::error::binary reports '$out', expected $VERSION"; exit 1 ;;
+          esac
+          case "$out" in
+            *" dev "*) echo "::error::tagged build reports 'dev'"; exit 1 ;;
+          esac
+
+      - name: The GHCR manifest covers amd64 and arm64
+        run: |
+          set -euo pipefail
+          img="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          docker buildx imagetools inspect "$img" | tee m.txt
+          grep -q 'linux/amd64' m.txt || { echo "::error::no amd64 in manifest"; exit 1; }
+          grep -q 'linux/arm64' m.txt || { echo "::error::no arm64 in manifest"; exit 1; }
+
+      - name: The image starts, is healthy, migrates, and persists its data
+        run: |
+          set -euo pipefail
+          img="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          docker volume create fp-verify >/dev/null
+          docker run -d --name fp-verify -p 2053:2053 -v fp-verify:/var/lib/forgepanel "$img"
+
+          for i in $(seq 1 60); do
+            [ "$(docker inspect fp-verify --format '{{.State.Health.Status}}')" = healthy ] && break
+            sleep 2
+          done
+          st="$(docker inspect fp-verify --format '{{.State.Health.Status}}')"
+          [ "$st" = healthy ] || { docker logs fp-verify; echo "::error::healthcheck: $st"; exit 1; }
+
+          # Binary and image must report the same version.
+          curl -fsS http://127.0.0.1:2053/healthz | tee h.json
+          grep -q "$VERSION" h.json || { echo "::error::image reports the wrong version"; exit 1; }
+
+          # Migrations ran if the schema is usable: complete first-run setup.
+          tok="$(docker exec fp-verify cat /var/lib/forgepanel/setup-token.txt | tr -d '\r\n')"
+          curl -fsS -X POST http://127.0.0.1:2053/api/setup/init \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\":\"$tok\",\"username\":\"admin\",\"password\":\"Verify!23456\",\"password_confirm\":\"Verify!23456\"}"
+
+          # Recreate on the same volume: state must survive.
+          docker rm -f fp-verify >/dev/null
+          docker run -d --name fp-verify -p 2053:2053 -v fp-verify:/var/lib/forgepanel "$img"
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:2053/healthz >/dev/null 2>&1 && break; sleep 2; done
+          curl -fsS http://127.0.0.1:2053/api/setup/status | grep -q '"setup_required":false' \
+            || { echo "::error::data did not survive container recreation"; exit 1; }
+
+          # And it must still refuse two instances on one data directory.
+          if docker run --rm -v fp-verify:/var/lib/forgepanel "$img" 2>&1 | grep -q 'already using'; then
+            echo "data-directory lock holds"
+          else
+            echo "::error::a second instance was allowed onto the same data directory"; exit 1
+          fi
+          docker rm -f fp-verify >/dev/null
+
+      - name: latest points at this stable release
+        if: needs.gate.outputs.prerelease == 'false'
+        run: |
+          set -euo pipefail
+          a="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:latest" --format '{{.Manifest.Digest}}')"
+          b="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${VERSION}" --format '{{.Manifest.Digest}}')"
+          [ "$a" = "$b" ] || { echo "::error::latest ($a) != $VERSION ($b)"; exit 1; }
+
+      - name: a prerelease must NOT have moved latest
+        if: needs.gate.outputs.prerelease == 'true'
+        run: |
+          set -euo pipefail
+          b="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${VERSION}" --format '{{.Manifest.Digest}}')"
+          if a="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:latest" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
+            [ "$a" != "$b" ] || { echo "::error::a prerelease moved :latest"; exit 1; }
+          else
+            echo "no :latest yet — fine"
+          fi

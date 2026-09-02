@@ -1,0 +1,76 @@
+# syntax=docker/dockerfile:1
+#
+# ForgePanel, built for the connectivity harness.
+#
+# It mirrors the production Dockerfile at the repository root — same builder,
+# same static CGO-free build, same non-root runtime user and data directory —
+# with two deliberate differences:
+#
+#   * The frontend build (bun) is skipped. The harness drives the REST API, and
+#     the committed assets under internal/api/web satisfy the //go:embed, so
+#     bringing a JS toolchain into the image would only slow the run down.
+#   * The proxy cores are NOT downloaded here. They are bind-mounted at the exact
+#     path internal/core/binmgr resolves, so the panel and the client container
+#     drive byte-identical binaries and a run needs no network.
+#
+# RUNTIME BASE. This image mirrors production: alpine:3.21 with the same runtime
+# package set. That is deliberate and load-bearing.
+#
+# The sing-box release archive binmgr pins is dynamically linked against glibc,
+# so on a bare Alpine it cannot be executed at all — `sh: …/sing-box: not found`,
+# exit 127 — which made every sing-box protocol (Hysteria2, TUIC, AnyTLS,
+# ShadowTLS, WireGuard, SSH) dead in the shipped container. The production
+# Dockerfile now installs `gcompat`, which supplies the glibc shim.
+#
+# Running the harness panel on the same base is what turns that fix into
+# something proven rather than asserted: if gcompat were ever dropped, every
+# sing-box row in the matrix would go red here. run.sh additionally re-execs each
+# pinned core inside the production runtime package set on every run and records
+# the outcome in results/preflight.json.
+#
+# Build from the repository root:
+#   docker build -f test/harness/Dockerfile.panel -t forgepanel-harness-panel .
+FROM golang:1.25-alpine AS build
+ENV GOTOOLCHAIN=auto
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=harness
+ARG COMMIT=harness
+ARG BUILD_DATE=harness
+RUN VP=github.com/forgepanel/forgepanel/internal/version && \
+    LD="-s -w -X ${VP}.Version=${VERSION} -X ${VP}.Commit=${COMMIT} -X ${VP}.Date=${BUILD_DATE}" && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgepanel ./cmd/forgepanel && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LD}" -o /out/forgectl   ./cmd/forgectl
+
+FROM alpine:3.21
+
+# The same packages the production runtime stage installs, plus curl for the
+# healthcheck. gcompat is the one that matters: without it the pinned sing-box
+# cannot be exec'd at all.
+RUN apk add --no-cache ca-certificates tzdata libcap gcompat curl
+
+COPY --from=build /out/forgepanel /usr/local/bin/forgepanel
+COPY --from=build /out/forgectl   /usr/local/bin/forgectl
+
+# Same privilege model as production: a non-root user plus the single capability
+# that covers binding low ports. The harness uses high ports, but running with a
+# different privilege model than production would make its results say less.
+RUN addgroup -g 65532 -S forge && \
+    adduser -u 65532 -S -G forge -h /var/lib/forgepanel forge && \
+    mkdir -p /var/lib/forgepanel/bin && \
+    chown -R forge:forge /var/lib/forgepanel && \
+    setcap cap_net_bind_service=+ep /usr/local/bin/forgepanel
+
+ENV FORGEPANEL_DATA=/var/lib/forgepanel
+WORKDIR /var/lib/forgepanel
+USER forge
+
+HEALTHCHECK --interval=3s --timeout=4s --start-period=3s --retries=20 \
+  CMD curl -fsS "http://127.0.0.1:${FORGEPANEL_PANEL_PORT:-2053}/healthz" || exit 1
+
+CMD ["/usr/local/bin/forgepanel"]

@@ -1,0 +1,124 @@
+# ForgePanel §4 connectivity harness.
+#
+# Three services on two networks, arranged so that a passing test cannot be
+# explained by anything except a working tunnel:
+#
+#     client ──[ edge, internal ]── panel ──[ transit ]── internet
+#
+#   * `edge` is `internal: true`. The client container has no default route, no
+#     DNS entry for the origin, and no path to anything but the panel.
+#   * `internet` sits only on `transit`, which the client is not attached to.
+#     The harness asserts this before it runs anything: if the origin answers a
+#     direct dial, the whole run is declared untrustworthy and fails.
+#   * `panel` bridges the two. It is the only host that can reach both, which is
+#     precisely the property a proxy server has in production.
+#
+# `transit` is a normal bridge network rather than an internal one, so the panel
+# also has real egress. That is deliberate: it lets a REALITY inbound use a real
+# public steal-site when you want to test that, without weakening the client's
+# isolation, which is the isolation the results depend on.
+#
+# Run it with ./run.sh — the script fetches the pinned cores into .cache/bin,
+# reads the one-time setup token out of the panel, and passes it to the driver.
+name: forgepanel-harness
+
+services:
+  # The isolated "internet": deterministic HTTP payloads, an HTTPS copy, a TLS
+  # 1.3 listener that serves as a REALITY dest, and a UDP DNS responder that is
+  # authoritative for names that exist nowhere else.
+  internet:
+    build:
+      context: ../..
+      dockerfile: test/harness/Dockerfile.tools
+    image: forgepanel-harness-tools:local
+    container_name: forgepanel-harness-internet
+    command:
+      - /usr/local/bin/internetd
+      - -http=8080
+      - -tls=8443
+      - -steal=443
+      - -dns=53
+    networks:
+      transit:
+        aliases:
+          - internet
+          - origin.harness.test
+          - steal.harness.test
+          - www.harness.test
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/internetd", "-healthcheck", "-http=8080"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
+
+  # The panel under test, running the real supervised cores.
+  panel:
+    build:
+      context: ../..
+      dockerfile: test/harness/Dockerfile.panel
+    image: forgepanel-harness-panel:local
+    container_name: forgepanel-harness-panel
+    depends_on:
+      internet:
+        condition: service_healthy
+    environment:
+      FORGEPANEL_DATA: /var/lib/forgepanel
+      FORGEPANEL_PANEL_PORT: "2053"
+      # ForgeDNS is not under test here; move it off 53 so it can never contend
+      # with the origin's resolver or need a capability to bind.
+      FORGEPANEL_DNS_PORT: "5300"
+    volumes:
+      - panel-data:/var/lib/forgepanel
+      # The pinned cores, at the exact path internal/core/binmgr resolves
+      # (<data>/bin/<engine>-<version>/<name>). Mounted read-only: the panel
+      # must run these and cannot substitute its own download.
+      - ./.cache/bin:/var/lib/forgepanel/bin:ro
+    networks:
+      edge:
+        aliases: [panel]
+      transit:
+        aliases: [panel]
+    # Hysteria2 port-hopping programs nftables rules. The harness does not enable
+    # port hopping, so the capability is deliberately absent: anything that needs
+    # it must report an error rather than appear to work.
+    security_opt:
+      - no-new-privileges:true
+
+  # The subscriber. Runs the driver, which launches real client cores from the
+  # configs the panel hands out.
+  client:
+    build:
+      context: ../..
+      dockerfile: test/harness/Dockerfile.tools
+    image: forgepanel-harness-tools:local
+    container_name: forgepanel-harness-client
+    depends_on:
+      - panel
+    environment:
+      HARNESS_PANEL_URL: https://panel:2053
+      HARNESS_ORIGIN_HOST: internet
+      HARNESS_ORIGIN_HTTP: "8080"
+      HARNESS_ORIGIN_TLS: "8443"
+      HARNESS_ORIGIN_DNS: "53"
+      HARNESS_RESULTS: /results
+      HARNESS_REALITY_DEST: steal.harness.test:443
+      HARNESS_XRAY_BIN: /cores/xray-${HARNESS_XRAY_VERSION:-v26.3.27}/xray
+      HARNESS_SINGBOX_BIN: /cores/sing-box-${HARNESS_SINGBOX_VERSION:-1.13.21}/sing-box
+      HARNESS_SETUP_TOKEN: ${HARNESS_SETUP_TOKEN:-}
+      HARNESS_ADMIN_USER: ${HARNESS_ADMIN_USER:-harness}
+      HARNESS_ADMIN_PASS: ${HARNESS_ADMIN_PASS:-Harness-Probe-9143}
+    volumes:
+      - ./.cache/bin:/cores:ro
+      - ./results:/results
+    networks:
+      # Only `edge`. This is the load-bearing line of the whole file.
+      - edge
+
+networks:
+  edge:
+    internal: true
+  transit: {}
+
+volumes:
+  panel-data: {}

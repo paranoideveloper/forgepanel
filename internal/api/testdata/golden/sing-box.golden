@@ -1,0 +1,106 @@
+{
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "listen_port": 10808,
+      "tag": "in",
+      "type": "mixed"
+    }
+  ],
+  "log": {
+    "level": "warn"
+  },
+  "outbounds": [
+    {
+      "alter_id": 0,
+      "security": "auto",
+      "server": "a.example.com",
+      "server_port": 443,
+      "tag": "proxy-2",
+      "tls": {
+        "enabled": true,
+        "server_name": "a.example.com"
+      },
+      "transport": {
+        "headers": {
+          "Host": "a.example.com"
+        },
+        "path": "/ws",
+        "type": "ws"
+      },
+      "type": "vmess",
+      "uuid": "11111111-2222-3333-4444-555555555555"
+    },
+    {
+      "password": "trojanpass",
+      "server": "b.example.com",
+      "server_port": 443,
+      "tag": "proxy-3",
+      "tls": {
+        "enabled": true,
+        "server_name": "b.example.com"
+      },
+      "type": "trojan"
+    },
+    {
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "MTIzNDU2Nzg5MDEyMzQ1Ng==",
+      "server": "c.example.com",
+      "server_port": 8388,
+      "tag": "proxy-4",
+      "type": "shadowsocks"
+    },
+    {
+      "password": "p",
+      "server": "d.example.com",
+      "server_port": 1080,
+      "tag": "proxy-5",
+      "type": "socks",
+      "username": "u",
+      "version": "5"
+    },
+    {
+      "password": "hp",
+      "server": "e.example.com",
+      "server_port": 8080,
+      "tag": "proxy-6",
+      "type": "http",
+      "username": "hu"
+    },
+    {
+      "interval": "60s",
+      "outbounds": [
+        "proxy-2",
+        "proxy-3",
+        "proxy-4",
+        "proxy-5",
+        "proxy-6"
+      ],
+      "tag": "auto",
+      "tolerance": 50,
+      "type": "urltest",
+      "url": "http://www.gstatic.com/generate_204"
+    },
+    {
+      "default": "auto",
+      "outbounds": [
+        "auto",
+        "proxy-2",
+        "proxy-3",
+        "proxy-4",
+        "proxy-5",
+        "proxy-6",
+        "direct"
+      ],
+      "tag": "proxy",
+      "type": "selector"
+    },
+    {
+      "tag": "direct",
+      "type": "direct"
+    }
+  ],
+  "route": {
+    "final": "proxy"
+  }
+}

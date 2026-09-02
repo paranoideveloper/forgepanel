@@ -1,0 +1,368 @@
+name: CI & Quality Assurance
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  code-hygiene:
+    name: Code Hygiene & Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Go Code Formatting Check
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not formatted with gofmt:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Go Mod Tidy Check
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go.mod or go.sum is out of sync. Please run 'go mod tidy' and commit."
+            exit 1
+          fi
+
+      - name: Go Vet Analysis
+        run: go vet ./...
+
+      - name: Staticcheck Analysis
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: Shell Script Linting
+        uses: ludeeus/action-shellcheck@master
+        with:
+          # `sc-files` is not a valid input for this action (it was silently
+          # ignored and produced a warning). The action lints every tracked shell
+          # script by default; third_party clones are gitignored so never present.
+          ignore_paths: third_party node_modules
+
+      - name: GoReleaser Config Check
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          args: check
+
+  test-protocol-export-engine:
+    name: "Test Suite: Protocol Models, Link Exporters & Keygen"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Protocol Engine & Exporter Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/protocol/...
+
+  test-database-store-migrations:
+    name: "Test Suite: SQLite Store Repositories & Migrations"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run SQLite Store & Migration Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/store/... ./internal/migrate/...
+
+  test-core-porthop-supervisor:
+    name: "Test Suite: Core Engines, Port Hopping & Process Supervisor"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Core & Process Supervisor Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/core/... ./internal/deploy/...
+
+  test-api-auth-services:
+    name: "Test Suite: REST API, Authentication & Panel Services"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run REST API, Auth & Service Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/api/... ./internal/auth/... ./internal/service/... ./internal/settings/...
+
+  test-forgedns-transport-stack:
+    name: "Test Suite: ForgeDNS Codec & Transport Server Stack"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run ForgeDNS Transport Tests
+        run: go test -shuffle=on -count=1 -v -cover ./internal/forgedns/...
+
+  test-lifecycle-config-backup:
+    name: "Test Suite: Backup Archives, Certs, Config & Lifecycle Manager"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Lifecycle, Backup & Subsystem Tests
+        run: |
+          go test -shuffle=on -count=1 -v -cover \
+            ./internal/backup/... ./internal/cert/... ./internal/config/... \
+            ./internal/job/... ./internal/lifecycle/... ./internal/telegram/... ./internal/version/...
+
+  test-cli-node-binaries:
+    name: "Test Suite: CLI Admin, Node Agent & Panel Binaries"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run CLI & Node Binary Tests
+        run: go test -shuffle=on -count=1 -v -cover ./cmd/...
+
+  race-detector:
+    name: Concurrency & Data Race Detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run Race Detector
+        run: go test -race -v ./internal/cert ./internal/config ./internal/telegram ./internal/lifecycle ./internal/forgedns/... ./internal/protocol/... ./internal/settings
+
+  govulncheck:
+    name: Security Vulnerability Audit (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run Security Analysis
+        run: govulncheck ./...
+
+  e2e-smoke-test:
+    name: End-to-End Binary Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Set up Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build All Binaries
+        run: make build
+
+      - name: Verify Binary Execution
+        run: |
+          ./bin/forgectl version
+          ./bin/forgenode --version || true
+
+  cross-compile:
+    name: Cross-Compilation Matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64, 386]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Build Binaries (${{ matrix.goos }}/${{ matrix.goarch }})
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgepanel-${{ matrix.goarch }} ./cmd/forgepanel
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgectl-${{ matrix.goarch }} ./cmd/forgectl
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/forgenode-${{ matrix.goarch }} ./cmd/forgenode
+
+  test-frontend-svelte-suite:
+    name: Frontend Svelte 5 & TypeScript Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && bun install
+
+      - name: Svelte TypeScript Type Check
+        run: cd frontend && bun run check
+
+      - name: Run Vitest Unit Tests & Coverage
+        run: cd frontend && bun run test --coverage
+
+  forgeedge-worker:
+    name: "ForgeEdge Worker Tests & Go-TS Drift Guard"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      # PINNED, unlike the other jobs: the bundle freshness guard below is a
+      # byte comparison against a minified build, and bun's minifier renames
+      # identifiers between releases. On `latest` this job would go red on an
+      # unrelated bun release, against a bundle nobody touched.
+      - name: Set up Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install Worker Dependencies
+        run: cd deploy/cloudflare/forgeedge && bun install
+
+      - name: Worker Type Check
+        run: cd deploy/cloudflare/forgeedge && bunx tsc --noEmit
+
+      - name: Worker Test Suite
+        run: cd deploy/cloudflare/forgeedge && bun test
+
+      # The panel deploys internal/edge/assets/forgeedge.worker.js (//go:embed in
+      # internal/edge/bundle.go), never src/. Regenerating it is a manual
+      # `make edge-bundle`, so without this guard a Worker change can be written,
+      # tested, merged green — and reach zero deployed Workers. It is exactly how
+      # the committed bundle came to be two minifier versions behind its source.
+      - name: ForgeEdge Bundle Freshness
+        run: |
+          cd deploy/cloudflare/forgeedge
+          bun build src/worker.ts --outfile /tmp/forgeedge.fresh.js \
+            --format=esm --target=browser --external cloudflare:sockets --minify
+          cmp /tmp/forgeedge.fresh.js ../../../internal/edge/assets/forgeedge.worker.js \
+            || { echo "::error::internal/edge/assets/forgeedge.worker.js is stale — run 'make edge-bundle' with bun 1.4.0"; exit 1; }
+
+      # Drift guard: regenerate the golden fixtures from the REAL Go exporters
+      # (internal/protocol/{model,export,render}) and assert the TypeScript mirror
+      # is byte-identical. A red golden test means the edge and the VPS would emit
+      # different links for the same node.
+      - name: Go-TS Canonical Model Drift Guard
+        run: |
+          go run deploy/cloudflare/forgeedge/testdata/gen/main.go
+          cd deploy/cloudflare/forgeedge && bun test test/golden.test.ts
+
+  docker-build:
+    name: Docker Container Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: docker build -t forgepanel:ci .
+
+  ci-pass:
+    name: Required CI Status Gate
+    needs:
+      - code-hygiene
+      - test-protocol-export-engine
+      - test-database-store-migrations
+      - test-core-porthop-supervisor
+      - test-api-auth-services
+      - test-forgedns-transport-stack
+      - test-lifecycle-config-backup
+      - test-cli-node-binaries
+      - test-frontend-svelte-suite
+      - race-detector
+      - govulncheck
+      - e2e-smoke-test
+      - cross-compile
+      - forgeedge-worker
+      - docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: All Decoupled Matrix Tests Passed
+        run: echo "All required decoupled matrix test categories and quality gates passed successfully!"

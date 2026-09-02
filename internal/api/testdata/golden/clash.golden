@@ -1,0 +1,64 @@
+proxies:
+  - name: vmess-ws
+    type: vmess
+    server: a.example.com
+    port: 443
+    alterId: 0
+    cipher: auto
+    network: ws
+    tls: true
+    udp: true
+    uuid: 11111111-2222-3333-4444-555555555555
+    ws-opts:
+      headers:
+        Host: a.example.com
+      path: /ws
+  - name: trojan
+    type: trojan
+    server: b.example.com
+    port: 443
+    password: trojanpass
+    udp: true
+  - name: ss
+    type: ss
+    server: c.example.com
+    port: 8388
+    cipher: 2022-blake3-aes-128-gcm
+    password: MTIzNDU2Nzg5MDEyMzQ1Ng==
+    udp: true
+  - name: socks
+    type: socks5
+    server: d.example.com
+    port: 1080
+    password: p
+    udp: true
+    username: u
+  - name: http
+    type: http
+    server: e.example.com
+    port: 8080
+    password: hp
+    username: hu
+proxy-groups:
+  - name: Best Ping
+    type: url-test
+    interval: 60
+    proxies:
+      - vmess-ws
+      - trojan
+      - ss
+      - socks
+      - http
+    tolerance: 50
+    url: "http://www.gstatic.com/generate_204"
+  - name: PROXY
+    type: select
+    proxies:
+      - Best Ping
+      - vmess-ws
+      - trojan
+      - ss
+      - socks
+      - http
+rules:
+  - "MATCH,PROXY"

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: vet · build · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Tracks the version declared in go.mod (currently 1.25).
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify gofmt
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      # -short skips the live connectivity matrix (internal/core), which
+      # downloads real engine binaries, binds fixed ports in the 20000s and
+      # drives curl through actual tunnels. It is genuinely flaky under load and
+      # takes ~30s versus ~4s; the full matrix runs in the job below instead.
+      - name: Test
+        run: go test ./... -short -count=1
+
+  # Real proxy traffic — opt-in, because fixed ports plus external downloads make
+  # it unfit to gate every push. Run it before cutting a release.
+  matrix-tests:
+    name: full connectivity matrix
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test (full)
+        run: go test ./... -count=1
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: forgepanel:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

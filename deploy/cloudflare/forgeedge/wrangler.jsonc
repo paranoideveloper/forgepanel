@@ -1,0 +1,29 @@
+{
+  // ForgeEdge — Cloudflare Worker deployment target for ForgePanel.
+  //
+  // Everything ForgeEdge needs at runtime lives in KV (and, optionally, D1).
+  // There are NO required dashboard environment variables: the first request
+  // bootstraps the config, mints the compulsory secure path, and prints the
+  // panel URL into the Worker log. `vars` below are optional overrides only.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "forgeedge",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-08-01",
+  // nodejs_compat is NOT required: ForgeEdge ships its own SHA-224 and uses
+  // WebCrypto for everything else. It is enabled only because `cloudflare:sockets`
+  // pairs with it in most templates and costs nothing.
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "kv_namespaces": [{ "binding": "KV" }],
+  // D1 is OPTIONAL. Uncomment to keep a config/audit history table alongside KV.
+  // "d1_databases": [{ "binding": "DB", "database_name": "forgeedge" }],
+  "triggers": {
+    // Clean-IP refresh + WARP endpoint re-rank + daily update check.
+    "crons": ["17 */6 * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true }
+  }
+}
