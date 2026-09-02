@@ -185,3 +185,43 @@ func TestALiveBrookProcessIsReportedAsRunning(t *testing.T) {
 	}
 	_ = fmt.Sprint(st)
 }
+
+// TestBrookKeepsTheOutputOfAProcessThatDiesInstantly pins the pipe-drain order.
+//
+// cmd.StdoutPipe/StderrPipe are explicit that Wait closes the pipes, so a reaper
+// calling Wait while the pumps are still reading races them. Wait won under
+// load, the readers saw a closed pipe, and the process's last output — the
+// crash message that is the whole diagnosis — was dropped. It surfaced as this
+// suite timing out rather than as a wrong answer, which is why it read like a
+// slow machine for so long.
+//
+// Run enough times to lose the race if the order is ever reversed again.
+func TestBrookKeepsTheOutputOfAProcessThatDiesInstantly(t *testing.T) {
+	const want = "listen tcp 0.0.0.0:9997: bind: address already in use"
+	for i := 0; i < 40; i++ {
+		bin := fakeBrook(t, `echo "`+want+`" >&2; exit 1`)
+		b := NewBrookManager(nil)
+		p, err := b.startBrook(bin, nil, 9997, "sig", "wsserver")
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		var got []string
+		for time.Now().Before(deadline) {
+			exited, _, _, _ := p.snapshot()
+			got = p.logs.Snapshot()
+			if exited && len(got) > 0 {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		if len(got) == 0 {
+			t.Fatalf("run %d: the process exited with its diagnosis on stderr and the "+
+				"panel kept none of it", i)
+		}
+		joined := strings.Join(got, "\n")
+		if !strings.Contains(joined, want) {
+			t.Fatalf("run %d: kept %q, want the engine's own words", i, joined)
+		}
+	}
+}

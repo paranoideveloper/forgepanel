@@ -51,8 +51,29 @@ func runRouter(t *testing.T, tbl *Table, opts Options) (string, *Server) {
 	return pub.LocalAddr().String(), srv
 }
 
-// ask sends one query and returns the reply, or nil on timeout.
+// ask sends one query and returns the reply, or nil if none arrives within
+// wait. A nil is a legitimate RESULT for the tests that assert a drop or a
+// dead-backend timeout, so this deliberately does not fail the test itself.
 func ask(t *testing.T, routerAddr, name string) []byte {
+	return askWithin(t, routerAddr, name, 2*time.Second)
+}
+
+// askReply is for the tests where a reply IS the assertion. It waits far longer
+// and says what went wrong: those tests reported a timeout as "no reply from
+// the router", which reads like a routing bug and hides that the box was simply
+// loaded. The duration is a function of scheduler pressure, not of the code
+// under test, so it is generous rather than tuned, and costs nothing when the
+// reply arrives.
+func askReply(t *testing.T, routerAddr, name string) []byte {
+	t.Helper()
+	b := askWithin(t, routerAddr, name, 20*time.Second)
+	if b == nil {
+		t.Errorf("no reply for %s within 20s", name)
+	}
+	return b
+}
+
+func askWithin(t *testing.T, routerAddr, name string, wait time.Duration) []byte {
 	t.Helper()
 	conn, err := net.Dial("udp", routerAddr)
 	if err != nil {
@@ -62,7 +83,7 @@ func ask(t *testing.T, routerAddr, name string) []byte {
 	if _, err := conn.Write(buildQuery(name)); err != nil {
 		t.Fatalf("write query: %v", err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(wait))
 	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil {
@@ -94,7 +115,7 @@ func TestRouterDeliversEachSuffixToItsOwnBackend(t *testing.T) {
 		{"payload.beta.example.com", 0xB2},
 		{"alpha.example.com", 0xA1},
 	} {
-		reply := ask(t, addr, tc.name)
+		reply := askReply(t, addr, tc.name)
 		if reply == nil {
 			t.Fatalf("%s: no reply from the router", tc.name)
 		}

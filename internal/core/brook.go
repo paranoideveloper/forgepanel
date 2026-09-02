@@ -39,6 +39,16 @@ type brookProc struct {
 	// endpoint, and could not be diagnosed from the panel at all.
 	logs *supervisor.LogRing
 
+	// pumps is what the reaper waits on before calling cmd.Wait().
+	//
+	// StdoutPipe/StderrPipe are explicit that Wait closes the pipes, so calling
+	// it while the pumps are still reading races them: Wait wins, the readers
+	// see a closed pipe, and the process's LAST output — the crash message
+	// that is the entire diagnosis — is dropped. That is the failure mode this
+	// whole field exists to prevent, and it showed up as a supervisor test
+	// that timed out under load rather than as a wrong answer.
+	pumps sync.WaitGroup
+
 	// The reaper's findings. A Brook process that died was never noticed: the
 	// manager reported whatever it had started, with its old PID, indefinitely —
 	// so the panel showed a dead inbound as running. Nothing called Wait either,
@@ -215,8 +225,9 @@ func (b *BrookManager) startBrook(bin string, args []string, port int, sig, mode
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("brook start :%d: %w", port, err)
 	}
-	go pumpBrook(p, stdout)
-	go pumpBrook(p, stderr)
+	p.pumps.Add(2)
+	go func() { defer p.pumps.Done(); pumpBrook(p, stdout) }()
+	go func() { defer p.pumps.Done(); pumpBrook(p, stderr) }()
 	go b.reap(p, bin, args)
 	return p, nil
 }
@@ -238,6 +249,10 @@ func pumpBrook(p *brookProc, r io.Reader) {
 // a crashed Brook inbound used to stay down until an unrelated edit happened to
 // trigger a Sync.
 func (b *BrookManager) reap(p *brookProc, bin string, args []string) {
+	// Drain both streams to EOF BEFORE Wait. Wait closes the pipes, so calling
+	// it first truncates whatever the process was still writing — and for a
+	// process that dies on startup that is all of it.
+	p.pumps.Wait()
 	err := p.cmd.Wait()
 	p.markExited(err)
 	if p.isStopping() {
