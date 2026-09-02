@@ -420,6 +420,7 @@ export const fa: Record<string, string> = {
 	'inbound.remark': 'یادداشت',
 	'inbound.rendering': 'در حال ساخت…',
 	'inbound.save_inbound': 'ذخیرهٔ ورودی',
+	'inbound.invalid_config': 'این پیکربندی معتبر نیست — پیش از ذخیره آن را اصلاح کنید.',
 	'inbound.saving': 'در حال ذخیره…',
 	'inbound.security': 'امنیت',
 	'inbound.security_moved': 'امنیت از {from} به {to} تغییر کرد: {why}',

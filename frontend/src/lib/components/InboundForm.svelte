@@ -21,7 +21,12 @@
   let loadError = $state('');
 
   // live preview
-  let preview = $state<{ uri?: string; xray?: string; singbox?: string; clash?: string; errors?: any[] } | null>(null);
+  let preview = $state<{ ok?: boolean; uri?: string; xray?: string; singbox?: string; clash?: string; errors?: any[] } | null>(null);
+  // Which edit the current preview describes. /studio/preview is debounced and
+  // async, so a reply can land after the operator has typed again; blocking Save
+  // on a stale verdict would refuse a save the backend would accept.
+  let previewSeq = $state(0);
+  let previewedSeq = $state(-1);
   let previewTab = $state<'uri' | 'xray' | 'singbox' | 'clash'>('uri');
   let previewing = $state(false);
 
@@ -271,6 +276,7 @@
 
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
   function schedulePreview() {
+    previewSeq++;
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = setTimeout(runPreview, 250);
   }
@@ -278,15 +284,36 @@
   async function runPreview() {
     if (!schema) return;
     previewing = true;
+    const seq = previewSeq;
     try {
       const node = buildNode(schema, proto, transport, security, values, editId ? originalNode : null);
       preview = await apiFetch('/studio/preview', { method: 'POST', body: JSON.stringify(node) });
+      previewedSeq = seq;
     } catch (e: any) {
+      // A preview that could not be reached says nothing about the config, so
+      // it must not block Save — only a verdict from the server does.
       preview = { errors: [{ severity: 'error', message: e.message || tr('inbound.preview_failed') }] };
+      previewedSeq = -1;
     } finally {
       previewing = false;
     }
   }
+
+  // The reason Save is refused, or '' when it is allowed.
+  //
+  // /studio/preview runs the SAME model.Validate() the create endpoint runs, so
+  // ok:false means the save is going to come back 400. It used to be shown only
+  // in the preview column beside the rendered config and Save stayed live, so
+  // the operator pressed it and got a toast with the same message they had
+  // already scrolled past. This refuses the click and says why, next to it.
+  //
+  // Only the server's own verdict blocks. Advisory doctor findings are warnings
+  // and a stale or failed preview blocks nothing.
+  const blockedReason = $derived.by(() => {
+    if (previewedSeq !== previewSeq || preview?.ok !== false) return '';
+    const fatal = (preview?.errors ?? []).find((e: any) => e?.severity === 'error');
+    return fatal?.message || tr('inbound.invalid_config');
+  });
 
   async function generate(f: Field) {
     if (!f.keygen) return;
@@ -548,7 +575,12 @@
         </div>
       {/if}
 
-      <button class="save" data-testid="save-inbound" onclick={save} disabled={saving}>
+      {#if blockedReason}
+        <div class="blocked" data-testid="save-blocked">{blockedReason}</div>
+      {/if}
+      <button class="save" data-testid="save-inbound" onclick={save}
+              disabled={saving || !!blockedReason}
+              title={blockedReason}>
         {saving ? tr('inbound.saving') : editId ? tr('inbound.update_inbound') : tr('inbound.save_inbound')}
       </button>
     </div>
@@ -664,6 +696,10 @@
   .tabs button.active { background: rgba(255,122,26,0.15); color: var(--acc); border-color: var(--acc); }
   .copy { background: var(--raised); color: var(--fg); border: 1px solid var(--ln-4); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
   pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; color: var(--ok); font-family: monospace; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-all; max-height: 480px; }
+  .blocked {
+    margin: 10px 0 6px; padding: 9px 11px; border-radius: 9px; font-size: 12.5px; line-height: 1.45;
+    background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.25);
+  }
   .errors { margin-bottom: 8px; }
   .e { font-size: 12px; padding: 4px 8px; border-radius: 6px; margin-bottom: 4px; }
   .e.error { background: rgba(255,77,77,0.15); color: var(--bad); }

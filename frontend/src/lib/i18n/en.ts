@@ -427,6 +427,7 @@ export const en: Record<string, string> = {
 	'inbound.remark': 'Remark',
 	'inbound.rendering': 'rendering…',
 	'inbound.save_inbound': 'Save Inbound',
+	'inbound.invalid_config': 'This configuration is not valid — fix it before saving.',
 	'inbound.saving': 'Saving…',
 	'inbound.security': 'Security',
 	'inbound.security_moved': 'Security moved from {from} to {to}: {why}',
