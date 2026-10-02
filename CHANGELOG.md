@@ -2,8 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- **Traffic used** on the Overview: the total users have consumed (download
+  and upload), from the same counters quotas are enforced on.
+
 ### Fixed — PaaS
 
+- **The Overview showed the host, not the container.** Inside a platform
+  container `/proc` describes the whole machine: on Railway the dashboard read
+  48 cores, 372 GB of memory and a 2.4 TB disk for a service whose allowance
+  was 2 vCPUs and 1 GB with no disk of its own. CPU and memory now come from
+  the container's cgroup (CPU as real utilisation of its quota), a data
+  directory with no volume shows its own size and that it is wiped on
+  redeploy, and uptime is the container's. A normal server is unchanged.
 - **Every Railway config in the xray-format subscription failed** with "peer
   cert is unrecognized (against pinnedPeerCertSha256)". The panel pinned its
   own self-signed certificate, but behind a platform edge the client's TLS ends

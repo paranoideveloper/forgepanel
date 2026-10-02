@@ -35,6 +35,9 @@ type Memory struct {
 	// about to become slow in a way CPU and memory percentages do not show.
 	SwapTotal uint64 `json:"swap_total"`
 	SwapUsed  uint64 `json:"swap_used"`
+	// Limited is set when Total is a container's memory limit rather than the
+	// host's RAM.
+	Limited bool `json:"limited"`
 }
 
 // Disk is a filesystem snapshot, in bytes.
@@ -43,6 +46,12 @@ type Disk struct {
 	Total uint64 `json:"total"`
 	Used  uint64 `json:"used"`
 	Free  uint64 `json:"free"`
+	// Ephemeral is set when the path sits on a container's writable layer
+	// (overlay) rather than a volume. That layer is carved out of the HOST's
+	// disk with no size of its own and is discarded on every redeploy, so the
+	// host's total and free space would be misleading: only Used is reported,
+	// as the size of the directory itself.
+	Ephemeral bool `json:"ephemeral"`
 }
 
 // CPU describes load. Percent is load-over-cores, which is a real measurement
@@ -54,6 +63,12 @@ type CPU struct {
 	Load5   float64 `json:"load5"`
 	Load15  float64 `json:"load15"`
 	Percent float64 `json:"percent"`
+	// Limited is set inside a container with a CPU quota. LimitCores is that
+	// quota in CPUs, and Percent is then real utilisation of it measured from
+	// the cgroup's CPU time — the load averages are the host's and do not
+	// describe this container at all.
+	Limited    bool    `json:"limited"`
+	LimitCores float64 `json:"limit_cores,omitempty"`
 }
 
 // Network is cumulative interface counters since boot, in bytes.
@@ -75,6 +90,8 @@ type Host struct {
 	Kernel   string `json:"kernel"`
 	Arch     string `json:"arch"`
 	Uptime   int64  `json:"uptime_seconds"`
+	// Container is set when Uptime is the container's rather than the host's.
+	Container bool `json:"container"`
 }
 
 // Snapshot is everything, read together.
@@ -118,6 +135,12 @@ func ReadCPU() CPU {
 	c.Percent = c.Load1 / float64(c.Cores) * 100
 	if c.Percent > 100 {
 		c.Percent = 100
+	}
+	if lim := cgroupCPULimit(); lim > 0 && lim < float64(c.Cores) {
+		c.Limited, c.LimitCores = true, lim
+		if p, ok := cgroupCPUPercent(lim); ok {
+			c.Percent = p
+		}
 	}
 	return c
 }
@@ -165,6 +188,17 @@ func ReadMemory() Memory {
 	if swapTotal >= swapFree {
 		m.SwapUsed = swapTotal - swapFree
 	}
+	// A cgroup limit below the host's RAM is this container's real ceiling. An
+	// "unlimited" v1 limit is a huge sentinel and never passes this test.
+	if lim, used, ok := cgroupMemory(); ok && lim > 0 && (total == 0 || lim < total) {
+		m.Total, m.Used, m.Limited = lim, used, true
+		if used > lim {
+			m.Used = lim
+		}
+		m.Available = m.Total - m.Used
+		// Host swap is not this container's.
+		m.SwapTotal, m.SwapUsed = 0, 0
+	}
 	return m
 }
 
@@ -174,6 +208,11 @@ func ReadDisk(path string) Disk {
 		path = "/"
 	}
 	d := Disk{Path: path}
+	if mountFSType(path) == "overlay" {
+		d.Ephemeral = true
+		d.Used = dirSize(path)
+		return d
+	}
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return d
@@ -258,6 +297,11 @@ func ReadHost() Host {
 		if f := strings.Fields(string(b)); len(f) > 0 {
 			if secs, err := strconv.ParseFloat(f[0], 64); err == nil {
 				h.Uptime = int64(secs)
+				if mountFSType("/") == "overlay" {
+					if up, ok := containerUptime(secs); ok {
+						h.Uptime, h.Container = up, true
+					}
+				}
 			}
 		}
 	}

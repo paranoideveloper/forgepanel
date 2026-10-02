@@ -15,16 +15,17 @@
     version: string;
     panel: { uptime_seconds: number; public_address?: string };
     system: {
-      cpu: { cores: number; load1: number; load5: number; load15: number; percent: number };
-      memory: { total: number; used: number; available: number; swap_total: number; swap_used: number };
-      disk: { path: string; total: number; used: number; free: number };
+      cpu: { cores: number; load1: number; load5: number; load15: number; percent: number; limited?: boolean; limit_cores?: number };
+      memory: { total: number; used: number; available: number; swap_total: number; swap_used: number; limited?: boolean };
+      disk: { path: string; total: number; used: number; free: number; ephemeral?: boolean };
       network: { rx_bytes: number; tx_bytes: number };
-      host: { hostname: string; os: string; kernel: string; arch: string; uptime_seconds: number };
+      host: { hostname: string; os: string; kernel: string; arch: string; uptime_seconds: number; container?: boolean };
     };
     traffic: { rx_bytes: number; tx_bytes: number; rx_bytes_per_s: number; tx_bytes_per_s: number };
     accounts: {
       users: number; active: number; disabled: number; expired: number; online: number;
       admins: number; owners: number; resellers: number; viewers: number;
+      traffic_used?: number; traffic_upload?: number; traffic_download?: number;
     };
     inbounds: {
       total: number; enabled: number; disabled: number; not_serving: number;
@@ -130,8 +131,15 @@
       <header><span>{tr('overview.cpu_load')}</span><strong>{d.system.cpu.percent.toFixed(0)}%</strong></header>
       <div class="bar"><div class="fill {level(d.system.cpu.percent)}" style="width:{d.system.cpu.percent}%"></div></div>
       <footer>
-        {d.system.cpu.load1.toFixed(2)} · {d.system.cpu.load5.toFixed(2)} · {d.system.cpu.load15.toFixed(2)}
-        <span class="dim">· {d.system.cpu.cores} {tr('overview.cores')}</span>
+        {#if d.system.cpu.limited}
+          <!-- Inside a container the load averages are the host's; the quota is
+               what this service actually has. -->
+          {+(d.system.cpu.limit_cores ?? 0).toFixed(2)} {tr('overview.vcpu')}
+          <span class="dim">· {tr('overview.container_limit')}</span>
+        {:else}
+          {d.system.cpu.load1.toFixed(2)} · {d.system.cpu.load5.toFixed(2)} · {d.system.cpu.load15.toFixed(2)}
+          <span class="dim">· {d.system.cpu.cores} {tr('overview.cores')}</span>
+        {/if}
       </footer>
     </section>
 
@@ -141,17 +149,27 @@
         style="width:{pct(d.system.memory.used, d.system.memory.total)}%"></div></div>
       <footer>
         {bytes(d.system.memory.used)} / {bytes(d.system.memory.total)}
-        <span class="dim">· {bytes(d.system.memory.available)} {tr('overview.available')}</span>
+        <span class="dim">· {d.system.memory.limited ? tr('overview.container_limit') : `${bytes(d.system.memory.available)} ${tr('overview.available')}`}</span>
       </footer>
     </section>
 
-    <section class="card gauge">
-      <header><span>{tr('overview.disk')}</span><strong>{pct(d.system.disk.used, d.system.disk.total)}%</strong></header>
-      <div class="bar"><div class="fill {level(pct(d.system.disk.used, d.system.disk.total))}"
-        style="width:{pct(d.system.disk.used, d.system.disk.total)}%"></div></div>
-      <footer>{bytes(d.system.disk.used)} / {bytes(d.system.disk.total)}
-        <span class="dim">· {bytes(d.system.disk.free)} {tr('overview.free')}</span></footer>
-    </section>
+    {#if d.system.disk.ephemeral}
+      <!-- No volume: the data directory sits on the container's own layer, a
+           slice of the host's disk with no size of its own that is thrown away
+           on every redeploy. The host's total would be someone else's disk. -->
+      <section class="card gauge" data-testid="disk-ephemeral">
+        <header><span>{tr('overview.disk')}</span><strong>{bytes(d.system.disk.used)}</strong></header>
+        <footer><span class="warn">{tr('overview.no_volume')}</span></footer>
+      </section>
+    {:else}
+      <section class="card gauge">
+        <header><span>{tr('overview.disk')}</span><strong>{pct(d.system.disk.used, d.system.disk.total)}%</strong></header>
+        <div class="bar"><div class="fill {level(pct(d.system.disk.used, d.system.disk.total))}"
+          style="width:{pct(d.system.disk.used, d.system.disk.total)}%"></div></div>
+        <footer>{bytes(d.system.disk.used)} / {bytes(d.system.disk.total)}
+          <span class="dim">· {bytes(d.system.disk.free)} {tr('overview.free')}</span></footer>
+      </section>
+    {/if}
 
     <section class="card gauge">
       <header><span>{tr('overview.traffic_now')}</span>
@@ -159,6 +177,17 @@
       <footer>
         ↑ {bytes(d.traffic.tx_bytes_per_s)}/s
         <span class="dim">· {tr('overview.since_boot')} ↓ {bytes(d.traffic.rx_bytes)} ↑ {bytes(d.traffic.tx_bytes)}</span>
+      </footer>
+    </section>
+
+    <!-- What users have consumed: the counters quotas are enforced on, so this
+         is the number a plan is sold against, not the NIC's. -->
+    <section class="card gauge" data-testid="traffic-used">
+      <header><span>{tr('overview.traffic_used')}</span>
+        <strong>{bytes(d.accounts.traffic_used ?? 0)}</strong></header>
+      <footer>
+        ↓ {bytes(d.accounts.traffic_download ?? 0)} ↑ {bytes(d.accounts.traffic_upload ?? 0)}
+        <span class="dim">· {tr('overview.by_all_users')}</span>
       </footer>
     </section>
   </div>
@@ -229,7 +258,7 @@
       <dt>{tr('overview.hostname')}</dt><dd>{d.system.host.hostname || '—'}</dd>
       <dt>{tr('overview.operating_system')}</dt><dd>{d.system.host.os || '—'}</dd>
       <dt>{tr('overview.kernel')}</dt><dd>{d.system.host.kernel || '—'} ({d.system.host.arch})</dd>
-      <dt>{tr('overview.server_uptime')}</dt><dd>{duration(d.system.host.uptime_seconds)}</dd>
+      <dt>{d.system.host.container ? tr('overview.container_uptime') : tr('overview.server_uptime')}</dt><dd>{duration(d.system.host.uptime_seconds)}</dd>
       <dt>{tr('overview.panel_uptime')}</dt><dd>{duration(panel?.uptime_seconds)}</dd>
       <dt>{tr('overview.panel_version')}</dt><dd>{d.version}</dd>
       {#if panel?.public_address}

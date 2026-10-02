@@ -65,6 +65,12 @@ type accountTotals struct {
 	Owners    int64 `json:"owners"`
 	Resellers int64 `json:"resellers"`
 	Viewers   int64 `json:"viewers"`
+	// TrafficUsed is what users have consumed, from the same counters quotas
+	// are enforced on. Upload/Download are the attributed halves and can sum
+	// to less than TrafficUsed: a remote node reports one combined figure.
+	TrafficUsed     int64 `json:"traffic_used"`
+	TrafficUpload   int64 `json:"traffic_upload"`
+	TrafficDownload int64 `json:"traffic_download"`
 }
 
 // inboundTotals is the what.
@@ -148,6 +154,9 @@ func (s *Server) dashboardCounts() (accountTotals, inboundTotals, []string) {
 		online := time.Now().Add(-2 * time.Minute)
 		for _, u := range users {
 			acc.Users++
+			acc.TrafficUsed += u.UsedTraffic
+			acc.TrafficUpload += u.UploadTraffic
+			acc.TrafficDownload += u.DownloadTraffic
 			switch u.Status {
 			case store.StatusActive:
 				acc.Active++

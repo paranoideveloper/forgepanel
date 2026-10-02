@@ -95,3 +95,37 @@ describe('OverviewView', () => {
     expect(await screen.findByText('Refresh')).toBeTruthy();
   });
 });
+
+// Inside a platform container /proc is the HOST's: on Railway the cards read
+// 48 cores, 372 GB and a 2.4 TB disk for a 2 vCPU / 1 GB service with no
+// volume. The container's own figures replace them.
+describe('OverviewView in a container', () => {
+  const container = structuredClone(dashboard) as any;
+  container.system.cpu = { cores: 48, load1: 21.7, load5: 18.6, load15: 17.9, percent: 3, limited: true, limit_cores: 2 };
+  container.system.memory = { total: 999997440, used: 161640448, available: 838356992, swap_total: 0, swap_used: 0, limited: true };
+  container.system.disk = { path: '/var/lib/forgepanel', total: 0, used: 179752960, free: 0, ephemeral: true };
+  container.system.host = { ...container.system.host, uptime_seconds: 3600, container: true };
+  container.accounts = { ...container.accounts, traffic_used: 5368709120, traffic_upload: 1073741824, traffic_download: 4294967296 };
+
+  beforeEach(() => {
+    (globalThis as any).fetch = async () => ({ ok: true, json: async () => container }) as Response;
+  });
+
+  it('shows the container limits, not the host', async () => {
+    render(OverviewView);
+    expect(await screen.findByText((t) => t.includes('2 vCPU'))).toBeTruthy();
+    expect(screen.queryByText((t) => t.includes('48 cores'))).toBeNull();
+    expect(screen.queryByText((t) => t.includes('21.70'))).toBeNull(); // host load average
+    expect(screen.getByText('Container uptime')).toBeTruthy();
+    // No volume: the size of the data itself, and why there is no total.
+    const disk = screen.getByTestId('disk-ephemeral');
+    expect(disk.textContent).toContain('no volume');
+  });
+
+  it('shows how much traffic users have used', async () => {
+    render(OverviewView);
+    const card = await screen.findByTestId('traffic-used');
+    expect(card.textContent).toContain('Traffic used');
+    expect(card.textContent).toMatch(/5(\.0)?\s*GB/);
+  });
+});
