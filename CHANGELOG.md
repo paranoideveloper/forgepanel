@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed — PaaS
+
+- **Every Railway config in the xray-format subscription failed** with "peer
+  cert is unrecognized (against pinnedPeerCertSha256)". The panel pinned its
+  own self-signed certificate, but behind a platform edge the client's TLS ends
+  at the edge, which presents the platform's public certificate. Edge-routed
+  inbounds now export with normal verification; an inbound on a port the
+  platform routes raw (Fly) keeps the pin. Found by connecting real clients to a
+  real Railway deployment: 0/12 before, 12/12 after (direct and from Iran).
+
 ## v1.23.0 — Current engines, and what each upgrade would have broken
 
 The pinned cores move forward: **Xray v26.7.28**, **sing-box 1.14.2**,

@@ -303,6 +303,15 @@ func (s *Server) applyExportDefaults(n *model.Node) {
 	if s.hasRealCert(n.SNI()) {
 		return
 	}
+	// Behind a platform edge the client's TLS ends at the EDGE, which presents
+	// the platform's public certificate; the panel's self-signed one never
+	// reaches the client. Pinning it (or turning off verification) made every
+	// Railway config in the xray-format subscription fail with "peer cert is
+	// unrecognized (against pinnedPeerCertSha256)". Only an inbound on a port
+	// the platform routes raw (Fly) serves its own TLS and still needs the pin.
+	if pa := s.paas(); pa.Enabled && !paasRoutable(pa, n).OwnPort {
+		return
+	}
 	// Self-signed cert. Xray 26 removed allowInsecure outright, so an xray client
 	// can only accept the panel's self-signed cert by pinning its exact SHA-256
 	// (tlsSettings.pinnedPeerCertSha256, hex-encoded). Pin the very cert the
