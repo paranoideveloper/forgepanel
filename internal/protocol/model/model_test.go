@@ -104,8 +104,24 @@ func TestKeySizeForMethod(t *testing.T) {
 			t.Errorf("method %q flagged as SIP022 but is not a 2022-blake3 method", m)
 		}
 	}
-	if len(AllShadowsocksMethods()) != 8 {
-		t.Fatalf("AllShadowsocksMethods() = %v, want 8 entries", AllShadowsocksMethods())
+	if len(AllShadowsocksMethods()) != 7 {
+		t.Fatalf("AllShadowsocksMethods() = %v, want 7 entries", AllShadowsocksMethods())
+	}
+}
+
+// Xray v26.7.11 rejects "none" outright and fails the WHOLE config when one
+// inbound uses it. A stored "none" inbound has to be refused on its own, with
+// a reason, so the engine builder skips it and every other inbound keeps
+// serving.
+func TestAStoredNoneShadowsocksInboundIsRefusedWithAReason(t *testing.T) {
+	n := &Node{Remark: "ss-none", Protocol: ProtoShadowsocks, Address: "1.1.1.1", Port: 8388, Method: SSNone}
+	if err := n.Validate(); !errors.Is(err, ErrSSNoneRemoved) {
+		t.Fatalf("Validate() = %v, want ErrSSNoneRemoved", err)
+	}
+	for _, m := range AllShadowsocksMethods() {
+		if m == SSNone {
+			t.Fatal(`"none" is still offered`)
+		}
 	}
 }
 
@@ -687,7 +703,6 @@ func validNodeMatrix() []*Node {
 		{Remark: "ss-chacha", Protocol: ProtoShadowsocks, Address: "1.1.1.1", Port: 8388, Method: SSChaCha20Poly, Password: "pw"},
 		{Remark: "ss-2022-128", Protocol: ProtoShadowsocks, Address: "1.1.1.1", Port: 8388, Method: SS2022AES128, Password: b64(16)},
 		{Remark: "ss-2022-256", Protocol: ProtoShadowsocks, Address: "1.1.1.1", Port: 8388, Method: SS2022AES256, Password: b64(32)},
-		{Remark: "ss-none", Protocol: ProtoShadowsocks, Address: "1.1.1.1", Port: 8388, Method: SSNone},
 		{Remark: "socks-open", Protocol: ProtoSOCKS, Address: "2.2.2.2", Port: 1080},
 		{Remark: "http-auth", Protocol: ProtoHTTP, Address: "3.3.3.3", Port: 8080, Username: "u", Password: "p"},
 		{Remark: "hy2", Protocol: ProtoHysteria2, Address: "4.4.4.4", Port: 443, Password: "pw",

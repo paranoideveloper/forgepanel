@@ -1490,7 +1490,7 @@ func TestSingboxInboundPerProtocol(t *testing.T) {
 			node: &model.Node{Protocol: model.ProtoHysteria2, Address: "0.0.0.0", Port: 443, Password: "pw",
 				Hysteria2: &model.Hysteria2Options{UpMbps: 100, DownMbps: 200, ObfsType: "salamander", ObfsPassword: "opw",
 					IgnoreClientBandwidth: true,
-					Masquerade: &model.Hy2Masquerade{Type: "proxy", URL: "https://example.com", RewriteHost: true}}},
+					Masquerade:            &model.Hy2Masquerade{Type: "proxy", URL: "https://example.com", RewriteHost: true}}},
 			check: func(t *testing.T, in jobj) {
 				if str(t, in, "type") != "hysteria2" || num(t, in, "up_mbps") != 100 || in["ignore_client_bandwidth"] != true {
 					t.Fatalf("hysteria2 inbound = %v", in)

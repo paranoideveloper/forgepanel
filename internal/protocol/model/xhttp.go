@@ -351,10 +351,14 @@ type xhttpExtra struct {
 	SCMaxEachPostBytes   string `json:"scMaxEachPostBytes,omitempty"`
 	SCMinPostsIntervalMs string `json:"scMinPostsIntervalMs,omitempty"`
 
-	SessionPlacement string `json:"sessionPlacement,omitempty"`
-	SessionKey       string `json:"sessionKey,omitempty"`
-	SeqPlacement     string `json:"seqPlacement,omitempty"`
-	SeqKey           string `json:"seqKey,omitempty"`
+	// Both spellings: Xray v26.6.22+ reads only sessionID*, older cores only
+	// session*. See render.xhttpSettings.
+	SessionIDPlacement string `json:"sessionIDPlacement,omitempty"`
+	SessionIDKey       string `json:"sessionIDKey,omitempty"`
+	SessionPlacement   string `json:"sessionPlacement,omitempty"`
+	SessionKey         string `json:"sessionKey,omitempty"`
+	SeqPlacement       string `json:"seqPlacement,omitempty"`
+	SeqKey             string `json:"seqKey,omitempty"`
 
 	UplinkDataPlacement string `json:"uplinkDataPlacement,omitempty"`
 	UplinkDataKey       string `json:"uplinkDataKey,omitempty"`
@@ -383,6 +387,8 @@ func (t Transport) xhttpExtraOf(withIdentity bool) xhttpExtra {
 		NoSSEHeader:          t.NoSSEHeader,
 		SCMaxEachPostBytes:   t.SCMaxEachPostBytes,
 		SCMinPostsIntervalMs: t.SCMinPostsIntervalMs,
+		SessionIDPlacement:   t.SessionPlacement,
+		SessionIDKey:         t.SessionKey,
 		SessionPlacement:     t.SessionPlacement,
 		SessionKey:           t.SessionKey,
 		SeqPlacement:         t.SeqPlacement,
@@ -434,8 +440,8 @@ func (e xhttpExtra) applyTo(t *Transport, withIdentity bool) error {
 	t.NoSSEHeader = e.NoSSEHeader
 	t.SCMaxEachPostBytes = e.SCMaxEachPostBytes
 	t.SCMinPostsIntervalMs = e.SCMinPostsIntervalMs
-	t.SessionPlacement = e.SessionPlacement
-	t.SessionKey = e.SessionKey
+	t.SessionPlacement = firstNonEmpty(e.SessionPlacement, e.SessionIDPlacement)
+	t.SessionKey = firstNonEmpty(e.SessionKey, e.SessionIDKey)
 	t.SeqPlacement = e.SeqPlacement
 	t.SeqKey = e.SeqKey
 	t.UplinkDataPlacement = e.UplinkDataPlacement
@@ -663,4 +669,13 @@ func downloadWire(d *XHTTPDownload) map[string]any {
 		m["realitySettings"] = rs
 	}
 	return m
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

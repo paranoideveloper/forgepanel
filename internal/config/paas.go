@@ -76,6 +76,9 @@ type PaaS struct {
 	// and refuses to rewrite the port; binding 0.0.0.0 there silently receives
 	// nothing. Empty means the ordinary wildcard bind.
 	UDPBindHost string
+	// Desync is the PingNG Desync setting stamped onto client links. Set on
+	// Railway only; the zero value emits nothing. See desync.go.
+	Desync Desync
 }
 
 // RoutesTCP reports whether the platform routes raw TCP to this port.
@@ -182,6 +185,9 @@ func DetectPaaS() PaaS {
 	// platform that has none — or takes one away.
 	if v := os.Getenv("FORGEPANEL_PAAS_CDN"); v != "" {
 		p.CDNFronted = envBool("FORGEPANEL_PAAS_CDN")
+	}
+	if p.Platform == "railway" {
+		p.Desync = railwayDesync()
 	}
 	return p
 }

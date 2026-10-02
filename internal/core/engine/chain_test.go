@@ -328,3 +328,30 @@ func writeSelfSigned(t *testing.T, dir string) (certPath, keyPath string) {
 	}
 	return certPath, keyPath
 }
+
+// Xray v26.7.11 refuses an unencrypted VLESS/Trojan outbound to a public address
+// at config load, which stops every inbound on the core. The chain must be
+// refused for the one inbound that uses it, while the others keep serving.
+func TestAnUnencryptedPublicHopSkipsOnlyItsOwnInbound(t *testing.T) {
+	plain := "vless://11111111-2222-4333-8444-555555555555@8.8.8.8:80?encryption=none&security=none&type=tcp#plain"
+	chained := &model.Node{Remark: "chained", Protocol: model.ProtoVLESS, Address: "127.0.0.1", Port: 31111,
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811", Egress: model.EgressChain{plain}}
+	other := &model.Node{Remark: "other", Protocol: model.ProtoVLESS, Address: "127.0.0.1", Port: 31112,
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30812"}
+	b, err := BuildMulti([]InboundSpec{{Node: chained}, {Node: other}}, 10085, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skippedChained bool
+	for _, sk := range b.Skipped {
+		if sk.Remark == "chained" && strings.Contains(sk.Reason, "Xray v26.7.11") {
+			skippedChained = true
+		}
+		if sk.Remark == "other" {
+			t.Fatalf("an unrelated inbound was skipped: %+v", sk)
+		}
+	}
+	if !skippedChained {
+		t.Fatalf("the cleartext hop was not refused: %+v", b.Skipped)
+	}
+}

@@ -1,3 +1,51 @@
+# ForgePanel v1.23.0 — Release Notes
+
+New engines: **Xray v26.7.28**, **sing-box 1.14.2**, **Brook v20270101**.
+
+## Railway, Render and Fly builds work again
+
+Every PaaS build failed at `curl: (22) The requested URL returned error: 404`.
+Brook's `v20260101.0` release on GitHub no longer has any downloadable files, so
+the image's Brook download had nothing to fetch. The image now uses Brook
+v20270101 and verifies every core against the SHA-256 the panel itself pins.
+
+The PaaS image also builds the metered sing-box now, so traffic on
+Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard is counted per user on Fly as well.
+
+## Why not the newest Xray
+
+Xray v26.9.9 and later refuse every sing-box based REALITY client (sing-box,
+Hiddify, NekoBox, Karing …) with no setting to turn it off. Xray clients keep
+working. v26.7.28 is the newest release that does not do this. Pin v26.9.30 from
+the Engines page only if every user is on a current Xray-based app.
+
+## What would have broken, and is fixed
+
+Each was reproduced against the real cores before it was fixed:
+
+- **REALITY:** since v26.7.11 servers refuse clients older than Xray v26.3.27 by
+  default, sing-box apps included. The panel writes `minClientVer: "0.0.0"`.
+  Measured: Xray clients 26.2.6 → 26.9.30 and sing-box 1.13.2 and 1.14.2 all
+  connect.
+- **XHTTP:** the session-placement fields were renamed and the old names are
+  ignored, so a custom placement stopped matching between server and client.
+  Both names are written now.
+- **Shadowsocks `none`** was removed; one such inbound used to make Xray refuse
+  the whole config. It is skipped on its own now, with the reason shown.
+- **Unencrypted VLESS/Trojan to a public address** is refused by Xray as an
+  outbound: relay hops are checked per inbound, and the Xray-format
+  subscription leaves such a server out instead of being rejected as a whole.
+- **Docker Compose** pulled an Xray image tag that never existed.
+
+Brook v20270101 was checked against Brook clients 20250808, 20260101 and
+20270101 in all four modes (server, wsserver, wssserver, quicserver).
+
+## Added: PingNG Desync on Railway
+
+Railway links carry PingNG's `png`/`pngargs`, so they import with Desync on.
+Set `FORGEPANEL_PINGNG_PROFILE` (`Light`, `Balanced`, `Severe`, `Adaptive`,
+`Custom`, or `off`) and `FORGEPANEL_PINGNG_ARGS` to change it.
+
 # ForgePanel v1.22.0 — Release Notes
 
 Nine commits since v1.21.0. Most of them are one story, and the *diagnosis* is

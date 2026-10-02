@@ -43,42 +43,106 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
       go build -trimpath -ldflags="${LD}" -o /out/forgenode ./cmd/forgenode
 
+# ---- metered sing-box -------------------------------------------------------
+# The sing-box ForgePanel ships: the official tag set plus with_v2ray_api, the
+# one tag that makes Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard traffic countable
+# per user. The official archive staged below lacks it, so on that binary those
+# protocols are unmetered and a user can exhaust a plan on them forever.
+#
+# build-singbox.sh pins the Go toolchain, so this produces the exact bytes
+# binmgr pins (pinnedSHA256 "sing-box-<ver>-linux-<arch>"). binmgr verifies it
+# before adopting it; a mismatch is refused and the official build is used, so a
+# toolchain surprise costs metering, never the deploy. The check below says so in
+# the build log, where an operator on a platform can actually see it.
+#
+# Debian, not Alpine, on purpose: with_purego makes the binary dynamically
+# linked, and Go writes the BUILD machine's C loader into it — musl's on Alpine,
+# glibc's everywhere else, upstream's release builder included. That one path
+# was the only byte that differed from the pinned build. The runtime image's
+# gcompat provides the glibc loader, which is how the official binary runs too.
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS singbox
+ARG TARGETARCH
+ARG SINGBOX_VERSION=1.14.2
+WORKDIR /src
+COPY scripts/build-singbox.sh scripts/build-singbox.sh
+COPY licenses/sing-box licenses/sing-box
+RUN SINGBOX_VERSION="${SINGBOX_VERSION}" TARGETS="${TARGETARCH:-amd64}" \
+      bash scripts/build-singbox.sh /out
+
 # ---- cores -------------------------------------------------------------------
 # Staged under /opt/forgepanel-cores in the exact layout binmgr expects, so the
 # entrypoint only has to copy them into the data directory. The version numbers
 # MUST match internal/core/binmgr/binmgr.go: binmgr looks for
 # <data>/bin/<engine>-<version>/<binary> and downloads when it is not there, so
 # a stale version here is not an error — it is a silent download at every boot.
+#
+# Every download is checked against the SHA-256 binmgr pins for the same file.
+# The panel refuses an unverified core at runtime; the image must not be the one
+# place that installs whatever the URL returned. TestThePaaSImagePinsWhatBinmgrPins
+# keeps the versions and digests here equal to binmgr's.
 FROM alpine:3.21 AS cores
-ARG XRAY_VERSION=v26.3.27
-ARG SINGBOX_VERSION=1.13.21
-ARG BROOK_VERSION=v20260101.0
+ARG TARGETARCH
+ARG XRAY_VERSION=v26.7.28
+ARG SINGBOX_VERSION=1.14.2
+ARG BROOK_VERSION=v20270101
 RUN apk add --no-cache curl unzip tar
 RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) XRAY_ASSET=Xray-linux-64.zip; \
+             XRAY_SHA=8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40; \
+             BROOK_ASSET=brook_linux_amd64; \
+             BROOK_SHA=1541081e05e1e0de3a55eb548e8c9b5a99bfdac360c2eb98702ec5c20c968b7e; \
+             SB_TAIL=linux-amd64; \
+             SB_SHA=a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6 ;; \
+      arm64) XRAY_ASSET=Xray-linux-arm64-v8a.zip; \
+             XRAY_SHA=f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501; \
+             BROOK_ASSET=brook_linux_arm64; \
+             BROOK_SHA=8f81c73a778a244a778eb27315808dd2b41e1532f797bbf1a0e8af66c3c02793; \
+             SB_TAIL=linux-arm64; \
+             SB_SHA=b43a1fb1bda131c6653576741ce527eb2bdeab7c9308ca90ee8b972abb7e4a7f ;; \
+      *) echo "no pinned cores for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    fetch() { curl -fsSL --retry 3 -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; }; \
+    \
     mkdir -p "/opt/forgepanel-cores/xray-${XRAY_VERSION}"; \
-    curl -fsSL -o /tmp/xray.zip \
-      "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"; \
+    fetch /tmp/xray.zip \
+      "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ASSET}" "$XRAY_SHA"; \
     unzip -o /tmp/xray.zip -d "/opt/forgepanel-cores/xray-${XRAY_VERSION}"; \
-    chmod +x "/opt/forgepanel-cores/xray-${XRAY_VERSION}/xray"
-# Brook, which used to be fetched at first use. That is the failure this whole
-# stage exists to prevent, and it was the worst case of it: a platform with no
-# volume re-downloads on every restart, so a Brook inbound on a host that sleeps
-# was configured, enabled, and dead — with the download failure nowhere an
-# operator would look. brook ships a bare binary, not an archive.
-RUN set -eux; \
+    chmod +x "/opt/forgepanel-cores/xray-${XRAY_VERSION}/xray"; \
+    \
     mkdir -p "/opt/forgepanel-cores/brook-${BROOK_VERSION}"; \
-    curl -fsSL -o "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook" \
-      "https://github.com/txthinking/brook/releases/download/${BROOK_VERSION}/brook_linux_amd64"; \
-    chmod +x "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook"
-
-RUN set -eux; \
+    fetch "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook" \
+      "https://github.com/txthinking/brook/releases/download/${BROOK_VERSION}/${BROOK_ASSET}" "$BROOK_SHA"; \
+    chmod +x "/opt/forgepanel-cores/brook-${BROOK_VERSION}/brook"; \
+    \
     mkdir -p "/opt/forgepanel-cores/sing-box-${SINGBOX_VERSION}"; \
-    curl -fsSL -o /tmp/sb.tar.gz \
-      "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"; \
+    fetch /tmp/sb.tar.gz \
+      "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-${SB_TAIL}.tar.gz" "$SB_SHA"; \
     tar -xzf /tmp/sb.tar.gz -C /tmp; \
-    cp /tmp/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box \
+    cp "/tmp/sing-box-${SINGBOX_VERSION}-${SB_TAIL}/sing-box" \
        "/opt/forgepanel-cores/sing-box-${SINGBOX_VERSION}/sing-box"; \
-    chmod +x "/opt/forgepanel-cores/sing-box-${SINGBOX_VERSION}/sing-box"
+    chmod +x "/opt/forgepanel-cores/sing-box-${SINGBOX_VERSION}/sing-box"; \
+    rm -f /tmp/xray.zip /tmp/sb.tar.gz
+
+# The metered build, beside forgepanel where binmgr looks first. Not fatal when
+# it does not match the pin: binmgr refuses it and falls back to the official
+# core staged above, and this line is the only place that says why.
+COPY --from=singbox /out/ /opt/forgepanel-singbox/
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) SBM_SHA=68b791b100c962f985d37480a005de412aea2f657604d21f3327ca5898217bda ;; \
+      arm64) SBM_SHA=819ba16bc02583d399e135cfbc5c757e3d6666ccfd5c2d6abeb57a6f447f25d6 ;; \
+    esac; \
+    f="/opt/forgepanel-singbox/sing-box-${SINGBOX_VERSION}-linux-${TARGETARCH:-amd64}"; \
+    mkdir -p /opt/forgepanel-singbox/bin /opt/forgepanel-singbox/licenses; \
+    if echo "${SBM_SHA}  ${f}" | sha256sum -c -; then \
+      echo "metered sing-box matches the pinned build"; \
+      mv "$f" /opt/forgepanel-singbox/bin/; \
+    else \
+      echo "WARNING: metered sing-box does not match the pin; the panel will use the official, unmetered build" >&2; \
+    fi; \
+    mv /opt/forgepanel-singbox/sing-box-LICENSE /opt/forgepanel-singbox/sing-box-NOTICE.md \
+       /opt/forgepanel-singbox/licenses/
 
 # ---- runtime -----------------------------------------------------------------
 FROM alpine:3.21
@@ -99,6 +163,10 @@ COPY --from=build /out/forgectl   /usr/local/bin/forgectl
 # deploy gets a 503 naming paths the operator cannot create.
 COPY --from=build /out/forgenode  /usr/local/bin/forgenode
 COPY --from=cores /opt/forgepanel-cores /opt/forgepanel-cores
+# Next to the panel binary: the first place binmgr looks for the shipped build.
+# sing-box is GPL-3.0: its licence and notice travel with the binary.
+COPY --from=cores /opt/forgepanel-singbox/bin/ /usr/local/bin/
+COPY --from=cores /opt/forgepanel-singbox/licenses/ /usr/share/licenses/sing-box/
 COPY deploy/paas/entrypoint.sh /usr/local/bin/forgepanel-paas-entrypoint
 RUN chmod +x /usr/local/bin/forgepanel-paas-entrypoint
 

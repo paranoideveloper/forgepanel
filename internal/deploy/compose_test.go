@@ -152,7 +152,7 @@ func TestComposeXrayAndPortHop(t *testing.T) {
 	}
 
 	// Images are pinned to the versions binmgr installs.
-	if got := doc.Services[ProfileXray].Image; !strings.HasSuffix(got, binmgr.XrayVersion) {
+	if got := doc.Services[ProfileXray].Image; !strings.HasSuffix(got, ":"+strings.TrimPrefix(binmgr.XrayVersion, "v")) {
 		t.Errorf("xray image %q is not pinned to %s", got, binmgr.XrayVersion)
 	}
 	if got := hop.Image; !strings.HasSuffix(got, binmgr.SingboxVersion) {

@@ -188,7 +188,7 @@ func (s *Server) handlePaaSQuickstart(c *gin.Context) {
 		}
 		r.ID = in.ID
 		if uri, err := export.URI(&n); err == nil {
-			r.URI = uri
+			r.URI = stampDesync(uri, s.paas().Desync)
 		}
 		created++
 		out = append(out, r)

@@ -60,7 +60,7 @@ func TestFullMatrixConnectivity(t *testing.T) {
 	}
 	xrayCfg := filepath.Join(dir, "srv-xray.json")
 	sbCfg := filepath.Join(dir, "srv-singbox.json")
-	os.WriteFile(xrayCfg, b.Xray, 0o600)
+	os.WriteFile(xrayCfg, allowLoopbackOrigin(t, b.Xray), 0o600)
 	os.WriteFile(sbCfg, b.Singbox, 0o600)
 	xraySrv := startProc(t, xrayBin, "run", "-c", xrayCfg)
 	defer xraySrv()
@@ -329,4 +329,43 @@ func waitForServerInbounds(t *testing.T, nodes []*model.Node, timeout time.Durat
 	for remark, port := range pending {
 		t.Logf("! %-26s inbound on :%d never started accepting within %s", remark, port, timeout)
 	}
+}
+
+// allowLoopbackOrigin lets the server's direct outbound reach the test origin.
+//
+// Xray's freedom outbound (measured on v26.7.28 and v26.9.30) refuses private destinations — loopback
+// included — for traffic arriving on a proxy inbound, unless a finalRules entry
+// allows them. That is the right default for a real server (a client must not
+// reach the box's own loopback services through the tunnel), and the panel
+// keeps it; the origin here simply has to live on 127.0.0.1. So the allow is
+// added to the test's copy of the config, never to what the panel renders.
+func allowLoopbackOrigin(t *testing.T, cfg []byte) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(cfg, &doc); err != nil {
+		t.Fatal(err)
+	}
+	outs, _ := doc["outbounds"].([]any)
+	patched := 0
+	for _, o := range outs {
+		ob, _ := o.(map[string]any)
+		if ob["protocol"] != "freedom" {
+			continue
+		}
+		st, _ := ob["settings"].(map[string]any)
+		if st == nil {
+			st = map[string]any{}
+			ob["settings"] = st
+		}
+		st["finalRules"] = []any{map[string]any{"action": "allow", "ip": []any{"127.0.0.0/8"}}}
+		patched++
+	}
+	if patched == 0 {
+		t.Fatal("the rendered config has no freedom outbound to allow the origin on")
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

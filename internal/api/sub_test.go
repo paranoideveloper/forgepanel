@@ -407,8 +407,8 @@ func TestXraySubscriptionWithRoutingAcceptedByCore(t *testing.T) {
 		t.Skip("xray binary not found; skipping semantic validation")
 	}
 	nodes := []*model.Node{
-		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
-		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xray-routed.json")
@@ -426,8 +426,8 @@ func TestXraySubscriptionWithRoutingAcceptedByCore(t *testing.T) {
 // core accepts, and that every proxy dials through the fragment outbound.
 func TestXraySubscriptionWithFragmentAcceptedByCore(t *testing.T) {
 	nodes := []*model.Node{
-		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
-		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
 	}
 	frag := routing.Fragment{Enabled: true, Packets: "tlshello", Length: "100-200", Interval: "10-20"}
 	raw := xraySubscription(nodes, routing.Options{}, frag)
@@ -540,9 +540,9 @@ func TestXraySubscriptionAcceptedByCore(t *testing.T) {
 		t.Skip("xray binary not found; skipping semantic validation")
 	}
 	nodes := []*model.Node{
-		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555"},
+		{Protocol: model.ProtoVLESS, Address: "a.example.com", Port: 443, UUID: "11111111-2222-3333-4444-555555555555", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
 		{Protocol: model.ProtoVMess, Address: "b.example.com", Port: 443, UUID: "66666666-7777-8888-9999-000000000000"},
-		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw"},
+		{Protocol: model.ProtoTrojan, Address: "c.example.com", Port: 443, Password: "pw", Security: model.Security{Type: model.SecTLS, ServerName: "sni.example.com"}},
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xray.json")
@@ -997,5 +997,35 @@ func TestFragmentSeverityAndCoresRoundTripThroughTheSettingsEndpoint(t *testing.
 	}
 	if cores := s.subFragmentCores(); len(cores) != 1 || cores[0] != "sing-box" {
 		t.Errorf("a refused save changed the stored core list to %v", cores)
+	}
+}
+
+// Xray v26.7.11+ refuses the whole xray-format document when any outbound is an
+// unencrypted VLESS/Trojan to a public address. Such a server is left out of
+// that format so the rest still load — and kept in the per-link formats.
+func TestXraySubscriptionLeavesOutWhatCurrentXrayRefuses(t *testing.T) {
+	plain := &model.Node{Protocol: model.ProtoVLESS, Address: "vpn.example.net", Port: 80,
+		UUID: "11111111-2222-3333-4444-555555555555", Remark: "plain"}
+	tlsNode := &model.Node{Protocol: model.ProtoVLESS, Address: "vpn.example.net", Port: 443,
+		UUID: "11111111-2222-3333-4444-555555555556", Remark: "tls",
+		Security: model.Security{Type: model.SecTLS, ServerName: "vpn.example.net"}}
+	doc := string(xraySubscription([]*model.Node{plain, tlsNode}, routing.Options{}, routing.Fragment{}))
+	if strings.Contains(doc, "11111111-2222-3333-4444-555555555555") {
+		t.Fatal("the unencrypted public VLESS server is still in the xray document")
+	}
+	if !strings.Contains(doc, "11111111-2222-3333-4444-555555555556") {
+		t.Fatal("the TLS server was dropped too")
+	}
+	if links := plainLinks([]*model.Node{plain}); !strings.Contains(links, "11111111-2222-3333-4444-555555555555") {
+		t.Fatal("the per-link format must keep the server")
+	}
+	if bin := findXray(); bin != "" {
+		cfg := filepath.Join(t.TempDir(), "x.json")
+		if err := os.WriteFile(cfg, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command(bin, "run", "-test", "-c", cfg).CombinedOutput(); err != nil {
+			t.Fatalf("xray rejected the document: %v\n%s", err, out)
+		}
 	}
 }

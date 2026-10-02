@@ -27,9 +27,9 @@ import (
 
 // Pinned versions (spec §6: pinned, checksum-verified).
 const (
-	XrayVersion    = "v26.3.27"
-	SingboxVersion = "1.13.21"
-	BrookVersion   = "v20260101.0"
+	XrayVersion    = "v26.7.28"
+	SingboxVersion = "1.14.2"
+	BrookVersion   = "v20270101"
 )
 
 // Engine identifies a supervised core.
@@ -239,50 +239,50 @@ func versionFor(e Engine) string {
 var pinnedSHA256 = map[string]string{
 	// Xray-core, one archive per published GOOS/GOARCH. Every value below was
 	// cross-checked against the .dgst file upstream publishes beside the asset.
-	"Xray-linux-32.zip":          "d1eeb0d9a9106eefd286fbb73595c2dfe1c48c56aa91ba1c9aefe04f188d0927",
-	"Xray-linux-64.zip":          "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
-	"Xray-linux-arm32-v5.zip":    "0da9a632e15e82504831f61bf6b46c21e3081bcc79ad46bdc16e7dc2f0dc9088",
-	"Xray-linux-arm32-v6.zip":    "0c6e751e2bba3f3ff09a793dd6a6bc45fd6fd89f49b49dfc0cf6d922dc123bec",
-	"Xray-linux-arm32-v7a.zip":   "c7265ae13c63ca0241a037df4ef960ad37938c8a67d984cc08834b2cfdf5654b",
-	"Xray-linux-arm64-v8a.zip":   "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
-	"Xray-linux-riscv64.zip":     "627ea5870b6fd05d95b7f4ceb5a54d7f2664dd075b30a7ac46ee9a6f9653d6f8",
-	"Xray-macos-64.zip":          "f5b0471d3459eff1b82e48af0aeac186abcc3298210070afbbbd8437a4e8b203",
-	"Xray-macos-arm64-v8a.zip":   "2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf",
-	"Xray-freebsd-32.zip":        "d2e5d9cf175f4449b5506e2de45de144b5e1160cada1f8c350087aba465b127f",
-	"Xray-freebsd-64.zip":        "c0fcd6962fc8a382e14441370ddbdb6a56e7108c73e817938c626770ac4a1358",
-	"Xray-freebsd-arm32-v7a.zip": "ffc017f8a25452996897f5aa04b7cde4a08d9b11a716c2e906afc93be36d7103",
-	"Xray-freebsd-arm64-v8a.zip": "0f0adda9c445696f7bdd7c3788358988359cc9c5218c7487851de7db7ec6dabd",
-	"Xray-windows-32.zip":        "956a5ec00bce747c7936dc4ff7ac570df1c8030b0a4a8640f843488365084db3",
-	"Xray-windows-64.zip":        "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad",
-	"Xray-windows-arm64-v8a.zip": "35d4ed6ec21224fb22b07c2c3f672e2350cd536f2c74d309150175a76365ea88",
+	"Xray-linux-32.zip":          "87ee3f90e48fe4b930c69ba4bcf7376a44e9b6caebbe8d4479b3b795c8ff3fa2",
+	"Xray-linux-64.zip":          "8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40",
+	"Xray-linux-arm32-v5.zip":    "f11efbba5174b0f676d332153a60f261e896415de072e0553440ba9cee7b0c06",
+	"Xray-linux-arm32-v6.zip":    "8a6e29f36d16a25ea4c80ddabf1cca79f9d06e73a7a2170dc1b5726d6b8afda5",
+	"Xray-linux-arm32-v7a.zip":   "a23cae6991ea1224e4e3381cae4ada8c3d5afc438a851ab0b2eda2f391dc4072",
+	"Xray-linux-arm64-v8a.zip":   "f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501",
+	"Xray-linux-riscv64.zip":     "aba048426d8a3381751e53c54af6f84c9f831d881dc28aed77bd7b40bc1814c0",
+	"Xray-macos-64.zip":          "812f7d9de6d3506795eabda2f6928ba301c632c3fe6fa39c52ea8e0ed9e4e244",
+	"Xray-macos-arm64-v8a.zip":   "9b99a351febe31b7e0c7f22deeb1577a1da0b98aaa51aec7fd17832e68cf63d6",
+	"Xray-freebsd-32.zip":        "995b07a84043bdbb65813be8fdd56466aaec827edb0c39c00617317743366c53",
+	"Xray-freebsd-64.zip":        "4ad50ef85c643685230f6fd65d0d55b0472dac343da4bda65940399c588a85ca",
+	"Xray-freebsd-arm32-v7a.zip": "aefa752c4e521dad774b483eff614f045d42ba1dec64d8ff3b19a73b8934309b",
+	"Xray-freebsd-arm64-v8a.zip": "12313ac8cff2f8c1de539668b3ba63e0c313f77c3048f25c9541c8800178ec07",
+	"Xray-windows-32.zip":        "e10308e5abcf375eee1bb044fcdfcd885dbefdac4212888b7e37e8bbea724d7b",
+	"Xray-windows-64.zip":        "c7172078fca4711bcd92a4774dcd1822544579c58816197575c47533317fd8d1",
+	"Xray-windows-arm64-v8a.zip": "2d61646f79fdc6724e68a41eb235f6a7253cfac2809caa736ad065f6c10e14a2",
 	// sing-box official release archives: .tar.gz everywhere, .zip on Windows.
 	// These are NOT the ForgePanel builds at the bottom of this map.
-	"sing-box-1.13.21-linux-386.tar.gz": "d5e01a4df1e63116a2ca71d2aff3963e4e328699f9b284df521e08697864c67d",
-	"sing-box-1.13.21-linux-amd64.tar.gz": "24f9ef8e7234e13e71e74c3598a4164c5fe07b7b67ccc6e96cf68b54789f72cd",
-	"sing-box-1.13.21-linux-armv5.tar.gz": "1a3f452a7e9b19e463a0bc3a6d3ca5023501ced9c5e75f077d24a6d45b4297fd",
-	"sing-box-1.13.21-linux-armv6.tar.gz": "d827da285e4678ba668b12406ce3c6cd18cef75f41bc343857f7cd099b3e0770",
-	"sing-box-1.13.21-linux-armv7.tar.gz": "a3edb2a40eeba461fa9c6e9e0fc97217e355154132a588abf89fc4f3f4d0240f",
-	"sing-box-1.13.21-linux-arm64.tar.gz": "3e30b876c9a93c19e503e2a2d6249cf05e6a26766553d4b61e1daf48223f304f",
-	"sing-box-1.13.21-linux-riscv64.tar.gz": "7fb119979491aba1deb05491aeaf0b110d36e5670833a865500648981b1bce8d",
-	"sing-box-1.13.21-darwin-amd64.tar.gz": "61093d79211a6ae7b707d30f07be35b1167ca8366bf0dbc06ee5fb35c90dc9e8",
-	"sing-box-1.13.21-darwin-arm64.tar.gz": "62bca85bf08b9145288729cf010c98ea9877b8086f7369cde9e127012d509424",
-	"sing-box-1.13.21-windows-386.zip": "e931f8b678deb7c46f51cba029191681a79427070e6bb79529463b439606d321",
-	"sing-box-1.13.21-windows-amd64.zip": "a03291793d3a3c6e266447a58140657ac099ff278abf3b8ff678932356a62ced",
-	"sing-box-1.13.21-windows-arm64.zip": "ef752d9bffd6d590dd6886b28819a7ae4efee70b8188f9198757d91570efd554",
+	"sing-box-1.14.2-linux-386.tar.gz":     "041389d19756e40709516ee22fe6dcc2a9d7043439dd062ca486231bde8417cf",
+	"sing-box-1.14.2-linux-amd64.tar.gz":   "a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6",
+	"sing-box-1.14.2-linux-armv5.tar.gz":   "508431ad7870d4d879a01374692a54a70e141a96ac99f51a96bae84c0808ed49",
+	"sing-box-1.14.2-linux-armv6.tar.gz":   "6df28ef1a6f86aea4f8f90086500590c504e5668ca298b572e0513b97d2e7348",
+	"sing-box-1.14.2-linux-armv7.tar.gz":   "1e2700de1cca1b58d410abc0ead40b595aa26ebe4812e0475311228d3e688db4",
+	"sing-box-1.14.2-linux-arm64.tar.gz":   "b43a1fb1bda131c6653576741ce527eb2bdeab7c9308ca90ee8b972abb7e4a7f",
+	"sing-box-1.14.2-linux-riscv64.tar.gz": "7ee2d238081085a4047569b5a9f296763ede3f59742786a30a2ebc8a9f611e4f",
+	"sing-box-1.14.2-darwin-amd64.tar.gz":  "b0bfb0dc70a5fc708710b9f5ea98b9ee76d40fa4169928d25d73edc4331df2fe",
+	"sing-box-1.14.2-darwin-arm64.tar.gz":  "925c5382eca8492b0150f868a6db20b18290a38700e621724b3703fd453e032d",
+	"sing-box-1.14.2-windows-386.zip":      "745b3ae034972244396414a54a1518aaa46fa55b6b9c4690dc7a4c2b71bac69b",
+	"sing-box-1.14.2-windows-amd64.zip":    "c2d8bfff918755808781dfdeeb8581b6c91eb3a243d9a7b55483cfc0c0684d32",
+	"sing-box-1.14.2-windows-arm64.zip":    "2bb467039310452380958b821983d5bb4f78fb70a2583914e4bea8b011582b64",
 	// brook ships one bare binary per platform, no archive.
-	"brook_linux_386":         "7311a61483c805954d0ca49aaf5db9480138cf4ea00d09e2b83d4fd88b1b874b",
-	"brook_linux_amd64":       "7853250042877716376fab14a3a99be44bf242cd69dec11cfa71fada915db372",
-	"brook_linux_arm5":        "075498ecd120f666dcc67f5a2967aaaee3bafe52853905efbb9ae43ec180c10c",
-	"brook_linux_arm6":        "4fa330d379943610a93017bcba6d1784771654a6dac8b0d0178052888e436eca",
-	"brook_linux_arm7":        "dcb748424868f2f8d9946856b409522d556a811d797b0b06d9803e0100863de6",
-	"brook_linux_arm64":       "5c720698f811ecc265311574140c20d912037ca36aecccd7e8536d03e581a2db",
-	"brook_darwin_amd64":      "ec43880e6beb3f6f98462b180cd6c8f8e9bd25df2633d3b13aa4b8ac8e20a1ae",
-	"brook_darwin_arm64":      "8b3e25b65d4a4f8a5715575a49282d95c04f6493d17fd7ae21c51444432c2e8b",
-	"brook_freebsd_amd64":     "9681e0c4067a300a718327ec14887585182c5694f7b0498e3ac61aaac89c1504",
-	"brook_freebsd_arm64":     "66963ad89b43bf4e72128c651571202bc91cef093bb400f83b44d6ecc46351ab",
-	"brook_windows_386.exe":   "a6d6a8af13e1db9d66f27b033cf08f8665b64204957261a3422a9f45b733fc60",
-	"brook_windows_amd64.exe": "ce8459f83dfd4384be00b980a3d0a8f753fd058b8bbe3775b97a1daaa27472d2",
-	"brook_windows_arm64.exe": "429a6aaa541670214d90bac63c604c85a63c5dc9244c05846a1510cef642038b",
+	"brook_linux_386":         "5001d16c9c8c6a4798294621567427ac28a7a56fd1e3cbc0d5cab732132086a6",
+	"brook_linux_amd64":       "1541081e05e1e0de3a55eb548e8c9b5a99bfdac360c2eb98702ec5c20c968b7e",
+	"brook_linux_arm5":        "e46aeacf717b9187f01116dfcc4634e311887c1b319f5a1a0bdddc540ee2cad5",
+	"brook_linux_arm6":        "ab87e62a0b5bf290247899c479300e4f05ebe9fb5a4fad0be0e40a6a17cea3e2",
+	"brook_linux_arm7":        "0a6917d0d67eeb9a39b9a19e51e7da9dcb66cec57adf466b5b8217bdd97212e2",
+	"brook_linux_arm64":       "8f81c73a778a244a778eb27315808dd2b41e1532f797bbf1a0e8af66c3c02793",
+	"brook_darwin_amd64":      "8cb5c7e7337c079fd5c32b881c042e8a68e7a315950f45462b800cb954038fb7",
+	"brook_darwin_arm64":      "1305c45fd5e9b490d93a5969003a575ddae782ea7e38bc456912f7209957515f",
+	"brook_freebsd_amd64":     "7ba9974006c57e1140f1b08760c8e32e71abf8d25db452c0c8516cd96554c862",
+	"brook_freebsd_arm64":     "612179e4a1cdd09e1a6c44250f97950ae790fb3d60f184747d254fe1bddf75d0",
+	"brook_windows_386.exe":   "5ca6932445967f9eb99b5cda74e9fb9cae048abfa26cb491ead27808fca2af13",
+	"brook_windows_amd64.exe": "4120e88660c0bcdfef792a4b407284509334fbec03c0ebbfff75a193c0488bc5",
+	"brook_windows_arm64.exe": "4e6e6fa9bb60017b8cc9ff980b0c480bfc88417d8f9d436e729dab46c1cb3808",
 	// The sing-box ForgePanel builds and ships (scripts/build-singbox.sh): the
 	// same upstream version, the official tag set plus with_v2ray_api, built
 	// reproducibly. These are NOT the upstream archives above and must never
@@ -291,8 +291,8 @@ var pinnedSHA256 = map[string]string{
 	//
 	// Reproduce with:  TARGETS="amd64 arm64" scripts/build-singbox.sh
 	// and compare; two independent builds are byte-identical.
-	"sing-box-1.13.21-linux-amd64": "3c7b3ecc4e72adcd8092404496abb31f5293169cd527b007c523172b35886c02",
-	"sing-box-1.13.21-linux-arm64": "6df7cea19a16a8d219332551d1f8f893c6cbf489cebd9551da87f7f5b4c7ac5a",
+	"sing-box-1.14.2-linux-amd64": "68b791b100c962f985d37480a005de412aea2f657604d21f3327ca5898217bda",
+	"sing-box-1.14.2-linux-arm64": "819ba16bc02583d399e135cfbc5c757e3d6666ccfd5c2d6abeb57a6f447f25d6",
 }
 
 // compiledDigest reads the table above: the digests this build was shipped with.

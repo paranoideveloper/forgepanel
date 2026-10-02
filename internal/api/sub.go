@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/protocol/export"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 	"github.com/forgepanel/forgepanel/internal/protocol/render"
@@ -420,7 +421,7 @@ func (s *Server) handleSub(c *gin.Context) {
 		}
 		c.Data(200, "text/yaml; charset=utf-8", []byte(clashWithRouting(y, route)))
 	case "links":
-		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinksMode(nodes, pmode)))
+		c.Data(200, "text/plain; charset=utf-8", []byte(plainLinksMode(nodes, pmode, s.paas().Desync)))
 	case "json":
 		c.JSON(200, nodes)
 	case "sing-box":
@@ -434,7 +435,7 @@ func (s *Server) handleSub(c *gin.Context) {
 	case "quantumultx":
 		c.Data(200, "text/plain; charset=utf-8", quantumultxSubscription(nodes))
 	default: // v2ray/base64 subscription (also Shadowrocket)
-		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinksMode(nodes, pmode)))
+		b64 := base64.StdEncoding.EncodeToString([]byte(plainLinksMode(nodes, pmode, s.paas().Desync)))
 		c.Data(200, "text/plain; charset=utf-8", []byte(b64))
 	}
 }
@@ -494,6 +495,15 @@ func xraySubscription(nodes []*model.Node, route routing.Options, frag routing.F
 	var proxyTags []string
 	var proxyOuts []map[string]any
 	for i, n := range nodes {
+		// This format is ONE config holding every server as an outbound, and
+		// Xray v26.7.11+ refuses the whole document when any one of them is an
+		// unencrypted VLESS/Trojan outbound to a public address. Leaving such a
+		// node out costs the client that one server; keeping it costs a
+		// current client all of them. The link formats are per-server and keep
+		// it — there a refusing client loses only that entry.
+		if model.XrayRefusesAsOutbound(n) {
+			continue
+		}
 		o, err := render.XrayOutbound(n)
 		if err != nil {
 			continue
@@ -745,11 +755,14 @@ func redactNodesForClient(nodes []*model.Node) []*model.Node {
 	return out
 }
 
-func plainLinks(nodes []*model.Node) string { return plainLinksMode(nodes, patternOff) }
+func plainLinks(nodes []*model.Node) string {
+	return plainLinksMode(nodes, patternOff, config.Desync{})
+}
 
 // plainLinksMode renders the newline-separated share links, optionally adding the
-// unsafe-uTLS "pattern" variant (patt-only, or both normal + patterned).
-func plainLinksMode(nodes []*model.Node, mode patternMode) string {
+// unsafe-uTLS "pattern" variant (patt-only, or both normal + patterned), and
+// stamps each one with the PingNG Desync fields d names (Railway only).
+func plainLinksMode(nodes []*model.Node, mode patternMode, d config.Desync) string {
 	var b strings.Builder
 	for _, n := range nodes {
 		uri, err := export.URI(n)
@@ -758,17 +771,17 @@ func plainLinksMode(nodes []*model.Node, mode patternMode) string {
 		}
 		switch mode {
 		case patternOnly:
-			b.WriteString(applyPattern(uri))
+			b.WriteString(stampDesync(applyPattern(uri), d))
 			b.WriteByte('\n')
 		case patternBoth:
-			b.WriteString(uri)
+			b.WriteString(stampDesync(uri, d))
 			b.WriteByte('\n')
 			if p := applyPattern(uri); p != uri {
-				b.WriteString(tagRemark(p))
+				b.WriteString(stampDesync(tagRemark(p), d))
 				b.WriteByte('\n')
 			}
 		default:
-			b.WriteString(uri)
+			b.WriteString(stampDesync(uri, d))
 			b.WriteByte('\n')
 		}
 	}

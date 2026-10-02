@@ -43,6 +43,9 @@ deploy/
 # Docs — README is kept out of the image; docs/ is published with releases.
 docs/
 *.md
+# …except sing-box's GPL notice: the PaaS image builds the metered sing-box,
+# and scripts/build-singbox.sh refuses to produce a GPL binary without it.
+!licenses/sing-box/NOTICE.md
 
 # Local state and secrets
 .env

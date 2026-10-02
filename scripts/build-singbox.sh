@@ -31,12 +31,25 @@ set -euo pipefail
 
 # Pinned to match internal/core/binmgr. Changing it here without changing it
 # there means the panel verifies a checksum for a version it did not ask for.
-SINGBOX_VERSION="${SINGBOX_VERSION:-1.13.21}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.2}"
 
 # The official tag set, plus the one the official build omits. Kept as a single
 # sorted string so a diff against `sing-box version` is exact.
-OFFICIAL_TAGS="badlinkname,tfogo_checklinkname0,with_acme,with_ccm,with_clash_api,with_dhcp,with_gvisor,with_naive_outbound,with_ocm,with_purego,with_quic,with_tailscale,with_utls,with_wireguard"
+# Copied from the official release's own `sing-box version` (Tags: line) for
+# this version; 1.14 added cloudflared, openvpn, openconnect and usbip.
+OFFICIAL_TAGS="badlinkname,tfogo_checklinkname0,with_acme,with_ccm,with_clash_api,with_cloudflared,with_dhcp,with_gvisor,with_naive_outbound,with_ocm,with_openconnect,with_openvpn,with_purego,with_quic,with_tailscale,with_usbip,with_utls,with_wireguard"
 BUILD_TAGS="${OFFICIAL_TAGS},with_v2ray_api"
+
+# The toolchain the official release of this version was built with (its
+# `sing-box version` Environment line). Pinned rather than "whatever go is on
+# PATH" because the checksum binmgr verifies is only reproducible with the same
+# compiler: the release machine and the PaaS image's Docker build both land on
+# this exact toolchain, so both produce the pinned bytes.
+export GOTOOLCHAIN="${GOTOOLCHAIN_PIN:-go1.26.8}"
+# The official release's link-time runtime defaults (release/LDFLAGS upstream).
+# Without them the build differs from the official one in behaviour, not only in
+# metering: SHA-1 TLS signatures and multipath TCP would follow Go's defaults.
+OFFICIAL_LDFLAGS="-X runtime.godebugDefault=multipathtcp=0,tlssha1=1"
 
 OUTDIR="${1:-dist/singbox}"
 TARGETS="${TARGETS:-$(go env GOARCH)}"
@@ -88,7 +101,7 @@ for arch in $TARGETS; do
     cd "$WORK"
     GOOS=linux GOARCH="$arch" CGO_ENABLED=0 GOFLAGS=-mod=mod \
       go build -trimpath -tags "$BUILD_TAGS" \
-        -ldflags "-s -w -buildid= -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION}" \
+        -ldflags "-s -w -buildid= -checklinkname=0 ${OFFICIAL_LDFLAGS} -X github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION}" \
         -o "$WORK/sing-box-$arch" \
         github.com/sagernet/sing-box/cmd/sing-box
   ) || die "build failed for ${arch}"

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/forgepanel/forgepanel/internal/config"
 	"github.com/forgepanel/forgepanel/internal/protocol/model"
 )
 
@@ -44,13 +45,13 @@ func TestPlainLinksMode(t *testing.T) {
 		Remark: "n1", Transport: model.Transport{Network: "ws", Path: "/x"},
 		Security: model.Security{Type: model.SecTLS, ServerName: "a.example"},
 	}}
-	if n := strings.Count(plainLinksMode(nodes, patternOff), "fp=unsafe"); n != 0 {
+	if n := strings.Count(plainLinksMode(nodes, patternOff, config.Desync{}), "fp=unsafe"); n != 0 {
 		t.Fatalf("off: unexpected pattern (%d)", n)
 	}
-	if n := strings.Count(plainLinksMode(nodes, patternOnly), "fp=unsafe"); n != 1 {
+	if n := strings.Count(plainLinksMode(nodes, patternOnly, config.Desync{}), "fp=unsafe"); n != 1 {
 		t.Fatalf("only: want 1 patterned link, got %d", n)
 	}
-	both := plainLinksMode(nodes, patternBoth)
+	both := plainLinksMode(nodes, patternBoth, config.Desync{})
 	if lines := strings.Count(strings.TrimSpace(both), "\n") + 1; lines != 2 {
 		t.Fatalf("both: want 2 links, got %d", lines)
 	}

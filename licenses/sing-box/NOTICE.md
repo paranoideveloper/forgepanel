@@ -29,8 +29,8 @@ added or removed; only build tags differ.
 | | |
 |---|---|
 | Upstream | https://github.com/SagerNet/sing-box |
-| Version | `v1.13.21` |
-| Source archive | https://github.com/SagerNet/sing-box/archive/refs/tags/v1.13.21.tar.gz |
+| Version | `v1.14.2` |
+| Source archive | https://github.com/SagerNet/sing-box/archive/refs/tags/v1.14.2.tar.gz |
 | Build recipe | `scripts/build-singbox.sh` in this repository |
 
 That script is the complete recipe: it pins the version, sets the tag list, and
@@ -40,7 +40,7 @@ distributes.
 
 ## Verifying the binary matches that source
 
-The build is reproducible. Two independent runs on a matching Go toolchain
+The build is reproducible. Two independent runs (the script pins the Go toolchain)
 produce **byte-identical** binaries, so the published checksum is checkable
 rather than something to take on trust:
 

@@ -1,5 +1,89 @@
 # Changelog
 
+## v1.23.0 — Current engines, and what each upgrade would have broken
+
+The pinned cores move forward: **Xray v26.7.28**, **sing-box 1.14.2**,
+**Brook v20270101**. Every new artifact is pinned by SHA-256: Xray against
+upstream's `.dgst` files, sing-box and Brook against GitHub's own asset digests
+(all 41 matched).
+
+### Fixed — Railway / Render / Fly builds failed
+
+- **Every PaaS build stopped at the Brook download** (`curl: (22) ... 404`).
+  Brook's `v20260101.0` release no longer has any assets, so the Dockerfile's
+  download had nothing to fetch. Brook is now `v20270101`, and the image checks
+  every core against the same SHA-256 the panel pins, so the image no longer
+  installs whatever a URL returns. `TestThePaaSImagePinsWhatBinmgrPins` fails
+  if the Dockerfile's versions or digests drift from `binmgr`'s.
+- **The PaaS image now builds the metered sing-box** (the official tag set plus
+  `with_v2ray_api`) instead of shipping only the official archive, so
+  Hysteria2/TUIC/AnyTLS/ShadowTLS/WireGuard traffic is counted per user on Fly
+  too. `scripts/build-singbox.sh` now pins the Go toolchain (go1.26.8, the one
+  upstream built 1.14.2 with), so the Docker build produces the exact bytes the
+  panel pins; two independent builds were byte-identical.
+
+### Why Xray is v26.7.28 and not the newest v26.9.30
+
+**Measured, not assumed:** an Xray v26.9.9+ REALITY server refuses every
+sing-box based client (sing-box 1.13 and 1.14, i.e. Hiddify, NekoBox, Karing
+and similar), while Xray clients still connect. Upstream's REALITY library now
+rejects any client hello that does not lead with an X25519MLKEM768 key share,
+which sing-box's REALITY client does not send, and no config option turns that
+off. v26.7.28 is the newest release without that change. An operator whose
+users are all on current Xray apps can pin v26.9.30 from the Engines page.
+
+### Fixed — Xray changes that would have broken existing installs
+
+- **REALITY minimum client version.** From v26.7.11 a REALITY server refuses,
+  by default, any client not reporting Xray v26.3.27+. That locks out every
+  sing-box app and every Xray app on an older core (26.2.6 was measured to
+  fail). The panel now writes `"minClientVer": "0.0.0"` on REALITY servers,
+  which keeps what every earlier core did. Verified against Xray clients 26.2.6,
+  26.3.27, 26.7.28 and 26.9.30 and sing-box clients 1.13.2 and 1.14.2.
+- **XHTTP session placement was silently ignored.** Xray v26.6.22 renamed
+  `sessionPlacement`/`sessionKey` to `sessionIDPlacement`/`sessionIDKey` and
+  ignores the old names; every older core ignores the new ones. An inbound with
+  a non-default placement had a server looking for the session ID in one place
+  and clients sending it in another. Both spellings are now written, in server
+  configs and in the share-link `extra`; with only the old names the same pair
+  of cores carried nothing.
+- **Shadowsocks `none` took down every Xray inbound.** Xray v26.7.11 removed
+  the method, and one inbound using it made Xray refuse the whole config. It is
+  no longer offered, and a stored one is skipped with that reason while the
+  rest keep serving.
+- **Unencrypted VLESS/Trojan relay hops.** Xray v26.7.11 refuses an outbound
+  VLESS or Trojan with no TLS, REALITY or VLESS encryption to a public address,
+  again as a whole-config failure. Such an upstream hop now skips only the
+  inbound chained through it.
+- **The Xray-format subscription** is one document holding every server, so a
+  single such server made a current Xray client reject all of them. It is left
+  out of that format only; the link formats keep it.
+
+### Fixed — Docker Compose deployment
+
+- The Xray image was pulled as `ghcr.io/xtls/xray-core:v<version>`, a tag that
+  never existed (XTLS tags images without the `v`). Brook publishes no versioned
+  image at all; it is now pinned by digest.
+
+### Added — PingNG Desync on Railway
+
+- On Railway, every VLESS and Trojan TLS link the panel hands out (subscription,
+  share link, quickstart, preview) carries PingNG's `png`/`pngargs` fields, so a
+  config imported into PingNG starts with its ByeDPI Desync on. Default `Custom`
+  with `--proto=tls --split 1+s --tlsrec 2+s --timeout 3 --cache-ttl 3600
+  --delay-range 1-5`; `FORGEPANEL_PINGNG_PROFILE` picks a built-in profile or
+  `off`, `FORGEPANEL_PINGNG_ARGS` replaces the arguments. No other deployment's
+  links change. The fields are encoded the way PingNG decodes them (`%20`,
+  `%2B`, `%3D`) and appended after the pattern variant, whose re-encoding would
+  turn every space into a `+` that PingNG keeps literally.
+
+### Changed — behaviour to know about
+
+- Xray v26.7+ blocks private destinations (loopback, RFC 1918, link-local …)
+  on the direct outbound for traffic arriving on a proxy inbound. A client can
+  no longer reach the server's own loopback services through the tunnel. Real
+  traffic is unaffected; this was not something the panel relied on.
+
 ## v1.22.0 — The tunnels that connected and carried nothing
 
 Nine commits. Most of them are one story: a WireGuard or AmneziaWG inbound

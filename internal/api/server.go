@@ -1276,7 +1276,7 @@ func (s *Server) handlePreview(c *gin.Context) {
 	resp.Errors = append(resp.Errors, doctor(&n)...)
 
 	if uri, err := export.URI(&n); err == nil {
-		resp.URI = uri
+		resp.URI = stampDesync(uri, s.paas().Desync)
 	} else if resp.OK {
 		resp.Errors = append(resp.Errors, PreviewFinding{Severity: "warn", Message: "no client link for this protocol: " + err.Error()})
 	}

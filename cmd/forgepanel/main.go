@@ -260,6 +260,19 @@ func banner(cfg *config.Config, srv *api.Server) {
 			pa.Platform, pa.Domain)
 		fmt.Println("          inbounds share this one port and are told apart by their transport path.")
 	}
+	if d := pa.Desync; d.Rejected != "" {
+		fmt.Printf("  PingNG: FORGEPANEL_PINGNG_PROFILE=%q is not a PingNG profile "+
+			"(Off, Light, Balanced, Severe, Adaptive, Custom); using %s instead.\n", d.Rejected, d.Profile)
+	}
+	if d := pa.Desync; d.Profile != "" {
+		// Railway only. A link that switches something on inside the user's app
+		// has to be visible in the one log the operator can read here.
+		fmt.Printf("  PingNG: VLESS/Trojan links carry Desync %s", d.Profile)
+		if d.Args != "" {
+			fmt.Printf(" (%s)", d.Args)
+		}
+		fmt.Println("; FORGEPANEL_PINGNG_PROFILE=off removes it.")
+	}
 	if srv.SetupToken != "" {
 		fmt.Println("  ── FIRST RUN — create your administrator account ──")
 		fmt.Println("  Open the panel URL above and complete setup with this one-time token:")

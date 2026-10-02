@@ -112,14 +112,22 @@ const (
 	SSAES128GCM     = "aes-128-gcm"
 	SSChaCha20Poly  = "chacha20-ietf-poly1305"
 	SSXChaCha20Poly = "xchacha20-ietf-poly1305"
-	SSNone          = "none"
+	// SSNone is no longer offered: Xray v26.7.11 removed it ("unknown cipher
+	// method: none"), and one such inbound made Xray refuse the WHOLE config,
+	// taking every other inbound down with it. Kept as a name so a stored
+	// inbound that still says "none" is refused with a reason rather than with
+	// "bad method".
+	SSNone = "none"
 )
 
-// AllShadowsocksMethods lists every method required by spec §3.1.
+// ErrSSNoneRemoved is why a stored "none" Shadowsocks inbound stops serving.
+var ErrSSNoneRemoved = errors.New(`shadowsocks method "none" was removed in Xray v26.7.11 — choose a cipher such as 2022-blake3-aes-128-gcm`)
+
+// AllShadowsocksMethods lists every method the pinned Xray accepts.
 func AllShadowsocksMethods() []string {
 	return []string{
 		SS2022AES128, SS2022AES256, SS2022ChaCha20,
-		SSAES256GCM, SSAES128GCM, SSChaCha20Poly, SSXChaCha20Poly, SSNone,
+		SSAES256GCM, SSAES128GCM, SSChaCha20Poly, SSXChaCha20Poly,
 	}
 }
 
@@ -615,7 +623,7 @@ type Node struct {
 	// registry refuses anything else rather than handing an inbound to a core
 	// with no implementation for it, which would make that core reject its
 	// whole config and stop every OTHER inbound on it.
-	Engine string `json:"engine,omitempty"`
+	Engine   string   `json:"engine,omitempty"`
 	Protocol Protocol `json:"protocol"`
 	Address  string   `json:"address"`
 	Port     int      `json:"port"`
@@ -811,6 +819,9 @@ func (n *Node) Validate() error {
 		size, is2022 := KeySizeForMethod(n.Method)
 		if n.Method == "" {
 			return ErrBadMethod
+		}
+		if n.Method == SSNone {
+			return ErrSSNoneRemoved
 		}
 		if !containsStr(AllShadowsocksMethods(), n.Method) {
 			return fmt.Errorf("%w: %q", ErrBadMethod, n.Method)
@@ -1452,7 +1463,6 @@ func isHex(s string) bool {
 	return len(s) > 0
 }
 
-
 // normalizeGeneration fills the defaults each AmneziaWG generation needs.
 //
 // The values are the ones measured working against real 3.0 and 3.1 servers,
@@ -1518,7 +1528,6 @@ func randomB64Key32() (string, error) {
 	}
 	return base64.StdEncoding.EncodeToString(b[:]), nil
 }
-
 
 // validateGeneration enforces the constraints AmneziaWG actually imposes, each
 // one measured against a live server rather than read off a docs page.

@@ -98,7 +98,7 @@ func protocolSchemas(transports, securities []string) []ProtoSchema {
 
 func protocolSchemaList(transports, securities []string) []ProtoSchema {
 	ss := []string{model.SS2022AES256, model.SS2022AES128, model.SS2022ChaCha20,
-		model.SSAES256GCM, model.SSAES128GCM, model.SSChaCha20Poly, model.SSXChaCha20Poly, model.SSNone}
+		model.SSAES256GCM, model.SSAES128GCM, model.SSChaCha20Poly, model.SSXChaCha20Poly}
 	return []ProtoSchema{
 		{Proto: "vless", Label: "VLESS", Engine: "xray", Transports: transports, Securities: securities, Fields: []Field{
 			{Key: "uuid", Label: "UUID", Type: "text", Keygen: "uuid", Help: "auto-generated if empty"},

@@ -48,6 +48,14 @@ func xrayChainOutbounds(chain model.EgressChain, chainIndex int) ([]jobj, error)
 		if err != nil {
 			return nil, fmt.Errorf("hop %d of %d: %w", i+1, len(chain), err)
 		}
+		// Refused here, per inbound, rather than handed to Xray: v26.7.11 rejects
+		// such an outbound at config load, and that rejection takes down every
+		// inbound on the core, not only the one chained through this hop.
+		// sing-box has no such rule, so only the Xray path checks it.
+		if model.XrayRefusesAsOutbound(hop) {
+			return nil, fmt.Errorf("hop %d of %d: %s to %s has no TLS or REALITY, and Xray v26.7.11 refuses an unencrypted %s outbound to a public address",
+				i+1, len(chain), hop.Protocol, hop.Address, hop.Protocol)
+		}
 		hop.Tag = chainTag(chainIndex, i)
 		o, err := render.XrayOutbound(hop)
 		if err != nil {

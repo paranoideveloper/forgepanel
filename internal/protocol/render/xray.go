@@ -348,6 +348,16 @@ func xrayStream(t model.Transport, sec model.Security, sni string, inbound bool)
 				if r.Xver > 0 {
 					rs["xver"] = r.Xver
 				}
+				// Xray v26.7.11 started refusing, by default, every REALITY
+				// client that does not report itself as Xray v26.3.27 or newer.
+				// That shuts out every sing-box based app (sing-box, Hiddify,
+				// NekoBox, Karing — they report 1.8.1) and every Xray app still on
+				// an older core, all at once, with nothing in the config saying
+				// why. Measured: v26.7.28 with no minClientVer refused sing-box
+				// 1.13 and 1.14 and Xray 26.2.6; with "0.0.0" all of them
+				// connected. "0.0.0" keeps the behaviour every earlier pinned
+				// core had: no client version gate.
+				rs["minClientVer"] = "0.0.0"
 			}
 
 			if r.SpiderX != "" {
@@ -407,6 +417,13 @@ func xrayXHTTPSettings(t model.Transport, inbound bool) jobj {
 	setStr("scMinPostsIntervalMs", t.SCMinPostsIntervalMs)
 	setInt("scMaxBufferedPosts", t.SCMaxBufferedPosts)
 	setStr("scStreamUpServerSecs", t.SCStreamUpServerSecs)
+	// Xray v26.6.22 renamed these to sessionID* and ignores the old names, while
+	// every core before it ignores the new ones. Writing both is the only way
+	// one config means the same thing to a current server and to the older core
+	// inside a user's client app; a placement only one side reads is a session
+	// ID the other side looks for in the wrong place, and the tunnel never opens.
+	setStr("sessionIDPlacement", t.SessionPlacement)
+	setStr("sessionIDKey", t.SessionKey)
 	setStr("sessionPlacement", t.SessionPlacement)
 	setStr("sessionKey", t.SessionKey)
 	setStr("seqPlacement", t.SeqPlacement)

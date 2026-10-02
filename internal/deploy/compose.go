@@ -143,11 +143,16 @@ type engineSpec struct {
 // now pin a different core version: compose generation deploys upstream
 // container images and never goes through binmgr at all, so a panel-local pin
 // has no bearing on which image tag is correct here.
+// brookImageRef is the only Brook image upstream publishes, pinned by digest.
+const brookImageRef = "latest@sha256:839386dd066081a354aed960a4655c7d5c5f7462a95df889f4e17c95b6fffcff"
+
 func specs() map[string]engineSpec {
 	return map[string]engineSpec{
 		ProfileXray: {
 			Profile: ProfileXray,
-			Image:   "ghcr.io/xtls/xray-core", Tag: binmgr.XrayVersion,
+			// XTLS tags its images without the "v" its GitHub releases carry:
+			// ghcr.io/xtls/xray-core:26.7.28 exists, :v26.7.28 is a 404.
+			Image: "ghcr.io/xtls/xray-core", Tag: strings.TrimPrefix(binmgr.XrayVersion, "v"),
 			Command: []string{"run", "-c", "/etc/forgepanel/xray/config.json"},
 			Ports: []portSpec{
 				{"443", "8443", "tcp"},
@@ -169,7 +174,11 @@ func specs() map[string]engineSpec {
 		},
 		ProfileBrook: {
 			Profile: ProfileBrook,
-			Image:   "txthinking/brook", Tag: binmgr.BrookVersion,
+			// txthinking publishes no versioned image — Docker Hub has only
+			// "latest" (Brook 20250808, amd64) — so a tag named after
+			// binmgr.BrookVersion is a pull that cannot succeed. Pinned by
+			// digest instead, so the image cannot change under a deploy.
+			Image: "txthinking/brook", Tag: brookImageRef,
 			// Brook takes its password on the command line; it is read from the
 			// environment so no secret is ever written into the compose file.
 			Command: []string{"server", "-l", ":9700", "-p", "${BROOK_PASSWORD:?set BROOK_PASSWORD}"},

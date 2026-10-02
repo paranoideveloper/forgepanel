@@ -450,7 +450,7 @@ func (s *Server) handleInboundConfig(c *gin.Context) {
 		failErr(c, 400, err)
 		return
 	}
-	c.JSON(200, gin.H{"kind": "uri", "uri": uri})
+	c.JSON(200, gin.H{"kind": "uri", "uri": stampDesync(uri, s.paas().Desync)})
 }
 
 // safeName builds a filename-safe label from a remark + port.

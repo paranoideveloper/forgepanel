@@ -46,6 +46,7 @@ cat > "$EXCLUDES" <<'EOF'
 /cmd/forgeedge-bot/
 /cmd/forgectl/install_script_test.go
 /cmd/forgectl/install_timesync_test.go
+/internal/api/docsversion_test.go
 /deploy/cloudflare/
 /deploy/install.sh
 /docs/DNS_WIZARD.md
@@ -57,7 +58,7 @@ cat > "$EXCLUDES" <<'EOF'
 /docs/UI_AUDIT.md
 /e2e/
 /packaging/
-/scripts/
+/scripts/sync-3rdp.sh
 /test/
 /tools/
 /internal/edgebot/
