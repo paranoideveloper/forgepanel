@@ -175,3 +175,39 @@ func TestMaterializePathIsContained(t *testing.T) {
 		}
 	}
 }
+
+// Covers must see the panel's own ACME certificate, not only imported ones:
+// client links are built from it, and on a domain with an automatic
+// certificate every TLS link used to pin the self-signed certificate the
+// server was not presenting.
+func TestCoversSeesImportedAndACMECertificatesAlike(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "acme")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(dir, true, nil)
+
+	certPEM, keyPEM := realPair(t, "auto.example.com", time.Now().Add(80*24*time.Hour))
+	// autocert's cache layout: key and chain in one file named after the domain.
+	if err := os.WriteFile(filepath.Join(dir, "auto.example.com"), append(keyPEM, certPEM...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Covers("auto.example.com") {
+		t.Fatal("an ACME-issued certificate in the cache is not seen")
+	}
+
+	impCert, impKey := realPair(t, "imp.example.com", time.Now().Add(80*24*time.Hour))
+	if _, err := s.Import(impCert, impKey); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Covers("imp.example.com") {
+		t.Fatal("an imported certificate is not seen")
+	}
+	if s.Covers("other.example.com") || s.Covers("") {
+		t.Fatal("Covers claimed a certificate that does not exist")
+	}
+	// Covers answers exactly what Materialize serves.
+	if _, _, ok := s.Materialize("auto.example.com"); !ok {
+		t.Fatal("Covers and Materialize disagree")
+	}
+}

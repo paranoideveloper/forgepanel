@@ -79,6 +79,20 @@ func (s *Store) Materialize(sni string) (certPath, keyPath string, ok bool) {
 	return base + ".crt", base + ".key", true
 }
 
+// Covers reports whether Materialize would return a real certificate for sni,
+// without writing anything. Client links are built from it: a link that pins
+// the self-signed certificate, or turns verification off, for an inbound that
+// actually serves a public one fails or is needlessly weakened. Both answer
+// from pairPEM, so the link and the engine cannot disagree.
+func (s *Store) Covers(sni string) bool {
+	name := normalizeSNI(sni)
+	if name == "" {
+		return false
+	}
+	certPEM, keyPEM, err := s.pairPEM(name)
+	return err == nil && len(certPEM) > 0 && len(keyPEM) > 0
+}
+
 // pairPEM returns the PEM-encoded chain and key currently serving name.
 func (s *Store) pairPEM(name string) (certPEM, keyPEM []byte, err error) {
 	s.mu.RLock()

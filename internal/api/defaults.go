@@ -354,18 +354,16 @@ func (s *Server) selfSignedPinHex() string {
 
 // hasRealCert reports whether the panel holds a real (imported/ACME) certificate
 // covering host, so its TLS links can keep strict verification.
+// hasRealCert reports whether the engine serves a public certificate for host:
+// an imported one or the panel's own ACME one. It used to consult only the
+// imported list, so on the commonest install — a domain with an automatic
+// certificate — every TLS link pinned the self-signed certificate the server
+// was not presenting, and xray-format clients refused all of them.
 func (s *Server) hasRealCert(host string) bool {
 	if s.certs == nil || host == "" {
 		return false
 	}
-	for _, imp := range s.certs.List() {
-		for _, d := range imp.Domains {
-			if d == host || (len(d) > 1 && d[0] == '*' && hasSuffix(host, d[1:])) {
-				return true
-			}
-		}
-	}
-	return false
+	return s.certs.Covers(host)
 }
 
 func hostOf(hostport string) string {
@@ -375,10 +373,6 @@ func hostOf(hostport string) string {
 		}
 	}
 	return hostport
-}
-
-func hasSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }
 
 // hostOnly strips a :port from a host[:port].
