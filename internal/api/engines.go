@@ -76,6 +76,11 @@ func (s *Server) enabledInboundSpecs() []engine.InboundSpec {
 		if u.IPLimitedUntil != nil && u.IPLimitedUntil.After(time.Now()) {
 			continue
 		}
+		// Disconnected by an administrator: kept out for the hold, so the
+		// connections that were just cut cannot be re-established at once.
+		if u.DisconnectedUntil != nil && u.DisconnectedUntil.After(time.Now()) {
+			continue
+		}
 		seen := map[uint]bool{}
 		for _, inID := range groupInbounds[u.GroupID] {
 			if !seen[inID] {

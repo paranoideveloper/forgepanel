@@ -2,6 +2,7 @@
 	import { tr } from '$lib/i18n';
   import { onMount, onDestroy } from 'svelte';
   import { apiFetch } from '$lib/api';
+  import { showToast } from '$lib/components/Toast.svelte';
   import { DEFAULT_PRESENCE_TTL_SECONDS, setPresenceTtlSeconds } from '$lib/presence';
 
   // Who is connected, right now.
@@ -34,6 +35,27 @@
   let loadError = $state('');
   let expanded = $state<Record<string, boolean>>({});
   let timer: ReturnType<typeof setInterval> | undefined;
+  let holdMinutes = $state(5);
+  let busy = $state<Record<number, boolean>>({});
+
+  // Cuts the user's open connections and keeps them out for the chosen hold,
+  // so the client cannot simply reconnect straight away.
+  async function disconnectUser(u: OnlineUser) {
+    if (!confirm(tr('online.disconnect_confirm').replace('{user}', u.username).replace('{min}', String(holdMinutes)))) return;
+    busy[u.user_id] = true;
+    try {
+      const r = await apiFetch<{ closed: number; shared?: string[]; note?: string }>(
+        `/admin/users/${u.user_id}/disconnect`,
+        { method: 'POST', body: JSON.stringify({ hold_seconds: holdMinutes * 60 }) });
+      const msg = tr('online.disconnected').replace('{user}', u.username).replace('{n}', String(r.closed));
+      showToast(r.note ? `${msg} — ${r.note}` : msg, r.note ? 'info' : 'success');
+      await load();
+    } catch (err: any) {
+      showToast(err.message || tr('online.disconnect_failed'), 'error');
+    } finally {
+      busy[u.user_id] = false;
+    }
+  }
 
   // Presence is only interesting while it is current, so this refreshes on its
   // own. Ten seconds is fast enough that a reconnect shows up while the operator
@@ -97,6 +119,13 @@
 <div class="view-header">
   <h2>{tr('online.online')}</h2>
   <div class="hdr-right">
+    <label class="muted hold" title={tr('online.disconnect_hint')}>
+      {tr('online.hold_for')}
+      <select bind:value={holdMinutes} data-testid="hold">
+        <option value={1}>1 min</option><option value={5}>5 min</option>
+        <option value={30}>30 min</option><option value={60}>1 h</option><option value={1440}>24 h</option>
+      </select>
+    </label>
     <span class="muted" data-testid="summary">
       {users.length} {users.length === 1 ? 'user' : 'users'} · {totalSessions}
       {totalSessions === 1 ? 'address' : 'addresses'}
@@ -143,6 +172,12 @@
               <button class="btn-sm" data-testid="toggle" onclick={() => toggle(u.username)}>
                 {expanded[u.username] ? tr('online.hide') : tr('online.where_from')}
               </button>
+              {#if u.user_id}
+                <button class="btn-sm danger" data-testid="disconnect" disabled={busy[u.user_id]}
+                        title={tr('online.disconnect_hint')} onclick={() => disconnectUser(u)}>
+                  {tr('online.disconnect')}
+                </button>
+              {/if}
             </td>
           </tr>
           {#if expanded[u.username]}
@@ -196,5 +231,7 @@
   .foot { margin: 14px 0 0; font-size: 12px; }
   .err-text { color: var(--bad-2); font-size: 13px; }
   .btn-primary { background: var(--acc); color: var(--card-deep); padding: 9px 16px; font-weight: 600; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+  .btn-sm.danger { background: var(--err, #dc2626); color: #fff; margin-left: 6px; }
+  .hold select { margin-left: 6px; }
   .btn-sm { background: var(--ln-3); color: var(--fg); padding: 4px 10px; font-size: 12px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
 </style>

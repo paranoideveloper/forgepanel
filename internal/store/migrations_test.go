@@ -470,7 +470,7 @@ func TestAlignSchemaOnlyAddsWhatIsMissing(t *testing.T) {
 // platform asset, and it has to carry the digest at all because binmgr refuses
 // to install an artifact it cannot verify — a version with no checksum is not a
 // smaller feature, it is an unverified proxy core.
-const modelSchemaFingerprintPinned = "c0f25b830e74df4159fb1fbaa3d9d3c8286b024f2346e78a75f4811ebf168077"
+const modelSchemaFingerprintPinned = "132bb8c7095406cf79d5693ac7714b5f397304d76c35c1616bac8a3e8a76faff"
 
 // TestModelSchemaFingerprintPinned guards the registry against a model change
 // that ships without a migration.

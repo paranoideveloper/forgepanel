@@ -70,6 +70,8 @@ const (
 	// 25, not 23: 23 and 24 were assigned to other steps in the same batch. A
 	// shipped version is never renumbered, so the gap stays.
 	migVCorePins uint64 = 25
+	// Adds users.disconnected_until.
+	migVUserDisconnect uint64 = 27
 )
 
 // LatestSchemaVersion is the highest migration this build knows how to apply.
@@ -440,6 +442,16 @@ func migrations() []migrate.Migration {
 			// this column existed nothing had ever bound the credential.
 			Up: func(tx *gorm.DB) error {
 				_, err := alignSchema(tx, []any{&EdgeDeployment{}})
+				return err
+			},
+		},
+		{
+			Version: migVUserDisconnect,
+			Name:    "user_disconnect_hold",
+			Rollback: "safe to drop. The column holds a short hold that expires on its own; " +
+				"losing it lets a user who was just disconnected reconnect immediately.",
+			Up: func(tx *gorm.DB) error {
+				_, err := alignSchema(tx, []any{&User{}})
 				return err
 			},
 		},

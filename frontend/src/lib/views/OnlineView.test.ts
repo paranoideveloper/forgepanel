@@ -137,3 +137,25 @@ describe('OnlineView', () => {
     expect(isPresent(new Date(now - 400_000).toISOString(), now)).toBe(false);
   });
 });
+
+describe('OnlineView disconnect', () => {
+  it('posts the chosen hold to the user\'s disconnect endpoint', async () => {
+    const calls: { url: string; body?: string }[] = [];
+    vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
+    vi.stubGlobal('confirm', () => true);
+    (globalThis as any).fetch = async (url: string, opts?: any) => {
+      calls.push({ url, body: opts?.body });
+      if (url.includes('/disconnect')) {
+        return { ok: true, json: async () => ({ closed: 2, held_until: now }) } as Response;
+      }
+      return { ok: true, json: async () => payload } as Response;
+    };
+    render(OnlineView);
+    const buttons = await screen.findAllByTestId('disconnect');
+    await fireEvent.change(screen.getByTestId('hold'), { target: { value: '30' } });
+    await fireEvent.click(buttons[0]);
+    await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/admin/users/1/disconnect'))).toBe(true));
+    const post = calls.find((c) => c.url.includes('/disconnect'))!;
+    expect(JSON.parse(post.body!)).toEqual({ hold_seconds: 1800 });
+  });
+});

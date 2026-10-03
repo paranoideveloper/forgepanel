@@ -833,6 +833,9 @@ func (s *Scheduler) sweepAt(now time.Time) error {
 	if s.enforceIPLimits() {
 		changed = true
 	}
+	if s.releaseDisconnects(users, now) {
+		changed = true
+	}
 	if changed && s.reloadHook != nil {
 		s.reloadHook()
 	}

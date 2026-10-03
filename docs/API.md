@@ -29,6 +29,8 @@ Base: `https://<panel>`. Admin endpoints require `Authorization: Bearer <access>
 | PATCH | `/api/admin/users/:id` | partial update; never rotates credentials |
 | PUT | `/api/admin/users/:id/inbounds` | replace the user's DIRECT inbound assignments |
 | POST | `/api/admin/users/:id/reset-credentials` | explicitly rotate uuid / password / sub token |
+| POST | `/api/admin/users/:id/disconnect` | close the user's open TCP connections on this server and hold them out of the cores; body `{"hold_seconds": N}` (default 300, max 86400). Addresses shared with another online user are left open and listed in `shared` |
+| POST | `/api/admin/users/:id/reconnect` | lift a disconnect hold early |
 | GET | `/api/admin/health/detail` | per-subsystem health for the status indicator |
 | GET | `/api/admin/stats` | dashboard counts |
 | GET | `/api/admin/engines[/config]` | supervised core status + generated config |

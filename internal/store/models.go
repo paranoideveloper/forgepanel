@@ -158,9 +158,15 @@ type User struct {
 	// IP cooldown into it would overwrite the real reason and leave the account
 	// wrong once the cooldown lifted.
 	IPLimitedUntil *time.Time `json:"ip_limited_until"`
-	TelegramID     int64      `json:"telegram_id"`
-	Note           string     `json:"note"`
-	SubRevoked     *time.Time `json:"sub_revoked_at"`
+	// DisconnectedUntil is set when an administrator disconnects the user from
+	// the panel: their open connections are cut and their credential is kept out
+	// of the cores until this time, so the client cannot simply reconnect. A
+	// separate field from IPLimitedUntil, because the two have different causes
+	// and different audit trails.
+	DisconnectedUntil *time.Time `json:"disconnected_until"`
+	TelegramID        int64      `json:"telegram_id"`
+	Note              string     `json:"note"`
+	SubRevoked        *time.Time `json:"sub_revoked_at"`
 
 	// SubUpdatedAt / SubLastUA are the denormalised newest row of sub_requests,
 	// so the users LIST can show last-fetch for 500 users without 500 queries.
