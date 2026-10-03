@@ -356,3 +356,27 @@ func TestProvisionableCoresAreOnesBinmgrCanFetch(t *testing.T) {
 		}
 	}
 }
+
+// An AmneziaWG inbound on a host that cannot run AmneziaWG must be reported as
+// not serving. Its failure is deliberately non-fatal to the reload, and that is
+// how it used to vanish: the inbound read as healthy, went out in every
+// subscription, and nothing listened on its port.
+func TestAnEngineThatCannotRunReportsItsInboundsAsNotServing(t *testing.T) {
+	if awgModuleReady() == nil {
+		t.Skip("this host can run AmneziaWG")
+	}
+	dir := t.TempDir()
+	ctrl := NewController(dir, 10094)
+	t.Cleanup(func() { ctrl.StopAll() })
+
+	bundle, _ := ctrl.ReloadSpecs([]engine.InboundSpec{{Node: awgTestNode(51877)}})
+	if bundle == nil {
+		t.Fatal("no bundle")
+	}
+	for _, sk := range bundle.Skipped {
+		if sk.Remark == awgTestNode(51877).Remark && sk.Reason != engine.ReasonNoSupervisedEngine {
+			return
+		}
+	}
+	t.Fatalf("the AmneziaWG inbound is not reported as skipped: %+v", bundle.Skipped)
+}

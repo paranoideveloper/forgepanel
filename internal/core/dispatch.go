@@ -53,6 +53,7 @@ import (
 // reported as one.
 var bestEffortEngines = map[string]bool{
 	model.EngineAmneziaWG: true,
+	model.EngineKernelWG:  true, // same host-level condition: tools and a kernel module
 }
 
 // buildRegistry constructs the adapter registry this controller dispatches
@@ -165,6 +166,8 @@ func (c *Controller) dispatch(specs []engine.InboundSpec, certPath, keyPath stri
 		if applyErr := ap.Adapter.Apply(ctx, ap.Plan); applyErr != nil {
 			if bestEffortEngines[ap.Engine] {
 				bestEffortErrs = append(bestEffortErrs, ap.Engine+": "+applyErr.Error())
+				unroutable = append(unroutable, notServed(ap, applyErr.Error())...)
+				delete(active, ap.Engine)
 				continue
 			}
 			// Keep reconciling the remaining cores. Returning here would leave
@@ -172,6 +175,17 @@ func (c *Controller) dispatch(specs []engine.InboundSpec, certPath, keyPath stri
 			// which is a worse state than the one failure being reported.
 			if firstErr == nil {
 				firstErr = fmt.Errorf("%s: %w", ap.Engine, applyErr)
+			}
+			continue
+		}
+		// A best-effort core applies "successfully" on a host that cannot run
+		// it — its configs are written so it starts once the host can — and
+		// its inbounds then read as healthy and go out in every subscription
+		// while nothing listens on their port. Its health says otherwise.
+		if bestEffortEngines[ap.Engine] && !ap.Plan.Empty() {
+			if h, herr := ap.Adapter.HealthCheck(ctx); herr == nil && h.State == adapter.StateUnavailable {
+				unroutable = append(unroutable, notServed(ap, h.LastError)...)
+				delete(active, ap.Engine)
 			}
 		}
 	}
@@ -269,6 +283,19 @@ func (c *Controller) adapterStatuses(active map[string]bool) []supervisor.Status
 			Responsive:     h.Responsive,
 			LastProbeError: h.LastProbeError,
 		})
+	}
+	return out
+}
+
+// notServed reports every inbound of a core that cannot run on this host.
+func notServed(ap adapter.AdapterPlan, why string) []adapter.Unroutable {
+	if why == "" {
+		why = "unavailable"
+	}
+	var out []adapter.Unroutable
+	for _, n := range ap.Plan.Nodes() {
+		out = append(out, adapter.Unroutable{Node: n, Remark: n.Remark, Engine: ap.Engine,
+			Reason: ap.Engine + " cannot run on this host: " + why})
 	}
 	return out
 }
