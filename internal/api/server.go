@@ -778,6 +778,7 @@ func (s *Server) routes() {
 			admin.POST("/users/:id/reset-credentials", s.handleResetUserCredentials)
 			admin.POST("/users/:id/disconnect", s.handleDisconnectUser)
 			admin.POST("/users/:id/reconnect", s.handleReconnectUser)
+			admin.GET("/users/:id/telegram-invite", s.handleTelegramInvite)
 			admin.POST("/users/:id/sub-revoked", s.handleSetSubRevoked)
 			admin.GET("/users/:id/sub-requests", s.handleUserSubRequests)
 			// Saved plans. handleCreateUser reads one when the request carries

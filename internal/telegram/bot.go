@@ -185,9 +185,10 @@ func (b *Bot) Handle(chatID int64, text string) {
 	cmd := strings.ToLower(fields[0])
 	args := fields[1:]
 	admin := b.adminIDs[chatID]
+	if b.handleCustomer(chatID, cmd, args, admin) {
+		return
+	}
 	switch cmd {
-	case "/start", "/help":
-		b.sender.Send(chatID, helpText(admin))
 	case "/stats":
 		if !admin {
 			b.sender.Send(chatID, "⛔ admin only")
@@ -320,6 +321,39 @@ func (b *Bot) Handle(chatID int64, text string) {
 		}
 		b.sender.Send(chatID, "🗑 deleted *"+escapeMarkdown(args[0])+"*")
 
+	// --- admin: customers -------------------------------------------------
+	case "/invite":
+		if !b.requireAdmin(chatID, admin) || !b.requireArg(chatID, args, "usage: /invite <username>") {
+			return
+		}
+		cd, ok := b.customers()
+		if !ok {
+			b.sender.Send(chatID, "customer links are not available on this panel")
+			return
+		}
+		tok, err := cd.SubTokenForUser(args[0])
+		if err != nil {
+			b.sender.Send(chatID, "❌ "+err.Error())
+			return
+		}
+		link := b.InviteLink(tok)
+		if link == "" {
+			b.sender.Send(chatID, "could not read this bot's username from Telegram; try again")
+			return
+		}
+		b.sender.Send(chatID, "Invite for *"+escapeMarkdown(args[0])+"* — send it to them; the first Telegram account to open it is linked:\n`"+link+"`")
+	case "/broadcast":
+		if !b.requireAdmin(chatID, admin) {
+			return
+		}
+		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0]))
+		if text == "" {
+			b.sender.Send(chatID, "usage: /broadcast <message>")
+			return
+		}
+		sent, failed := b.Broadcast(text)
+		b.sender.Send(chatID, fmt.Sprintf("📣 sent to %d linked customer(s), %d failed", sent, failed))
+
 	default:
 		b.sender.Send(chatID, "unknown command — /help")
 	}
@@ -343,8 +377,11 @@ func (b *Bot) requireArg(chatID int64, args []string, usage string) bool {
 	return true
 }
 
-func helpText(admin bool) string {
-	base := "*ForgePanel bot*\n/sub <token> — get your subscription link\n/help — this message"
+func helpText(admin, linked bool) string {
+	base := "*ForgePanel bot*\n/sub <token> — get your subscription link\n/id — your chat id\n/help — this message"
+	if linked {
+		base = "*ForgePanel bot*\n/me — your account: traffic, expiry\n/sub — your subscription link\n/help — this message"
+	}
 	if admin {
 		base += "\n\n*admin*" +
 			"\n/stats — panel counts" +
@@ -355,6 +392,8 @@ func helpText(admin bool) string {
 			"\n/reset <name> — zero traffic" +
 			"\n/limit <name> <GB> — set data cap (0=∞)" +
 			"\n/extend <name> <days> — extend expiry" +
+			"\n/invite <name> — link that links a customer's Telegram" +
+			"\n/broadcast <text> — message every linked customer" +
 			"\n/backup — send the encrypted panel backup here"
 	}
 	return base

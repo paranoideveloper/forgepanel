@@ -61,6 +61,15 @@ above) additionally get:
 | `/reset <name>` | zero traffic (lifts an over-quota cap) |
 | `/limit <name> <GB>` | set the data cap (0 = unlimited) |
 | `/extend <name> <days>` | extend expiry |
+| `/invite <name>` | the link that links that customer's Telegram account |
+| `/broadcast <text>` | message every linked customer |
+
+**Customers.** Send a customer their invite (`/invite <name>`, or *Copy invite*
+in the user's dialog). Opening it links their Telegram account to the user; from
+then on `/me` shows their status, traffic and expiry and `/sub` returns their
+subscription link. The first Telegram account to open an invite is the one
+linked — a forwarded link is refused after that. Clear the user's Telegram ID in
+the panel to unlink them.
 
 Every mutation reloads the running cores immediately, so a disabled or deleted
 user stops being served at once — the same behaviour as an edit from the web panel.

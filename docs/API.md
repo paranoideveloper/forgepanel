@@ -31,6 +31,7 @@ Base: `https://<panel>`. Admin endpoints require `Authorization: Bearer <access>
 | POST | `/api/admin/users/:id/reset-credentials` | explicitly rotate uuid / password / sub token |
 | POST | `/api/admin/users/:id/disconnect` | close the user's open TCP connections on this server and hold them out of the cores; body `{"hold_seconds": N}` (default 300, max 86400). Addresses shared with another online user are left open and listed in `shared` |
 | POST | `/api/admin/users/:id/reconnect` | lift a disconnect hold early |
+| GET | `/api/admin/users/:id/telegram-invite` | `{link, linked}`: the `t.me/<bot>?start=<sub token>` link that links a customer's Telegram to this user (409 with no bot) |
 | GET | `/api/admin/health/detail` | per-subsystem health for the status indicator |
 | GET | `/api/admin/stats` | dashboard counts |
 | GET | `/api/admin/engines[/config]` | supervised core status + generated config |
@@ -60,8 +61,8 @@ Base: `https://<panel>`. Admin endpoints require `Authorization: Bearer <access>
 
 The Telegram bot (enable with `FORGEPANEL_TELEGRAM_TOKEN` + `FORGEPANEL_TELEGRAM_ADMINS`)
 offers the same user management from chat: `/adduser`, `/deluser`, `/enable`,
-`/disable`, `/reset`, `/limit <GB>`, `/extend <days>` (admin), and `/sub <token>`
-for any user. See [CONFIGURATION.md](CONFIGURATION.md#telegram-bot).
+`/disable`, `/reset`, `/limit <GB>`, `/extend <days>`, `/invite`, `/broadcast` (admin),
+`/sub <token>` for any user, and `/me` + `/sub` for a customer linked by invite. See [CONFIGURATION.md](CONFIGURATION.md#telegram-bot).
 
 ## Node agent (token-auth)
 | Method | Path | Purpose |

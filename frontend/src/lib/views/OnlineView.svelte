@@ -41,13 +41,13 @@
   // Cuts the user's open connections and keeps them out for the chosen hold,
   // so the client cannot simply reconnect straight away.
   async function disconnectUser(u: OnlineUser) {
-    if (!confirm(tr('online.disconnect_confirm').replace('{user}', u.username).replace('{min}', String(holdMinutes)))) return;
+    if (!confirm(tr('online.disconnect_confirm', { user: u.username, min: holdMinutes }))) return;
     busy[u.user_id] = true;
     try {
       const r = await apiFetch<{ closed: number; shared?: string[]; note?: string }>(
         `/admin/users/${u.user_id}/disconnect`,
         { method: 'POST', body: JSON.stringify({ hold_seconds: holdMinutes * 60 }) });
-      const msg = tr('online.disconnected').replace('{user}', u.username).replace('{n}', String(r.closed));
+      const msg = tr('online.disconnected', { user: u.username, n: r.closed });
       showToast(r.note ? `${msg} — ${r.note}` : msg, r.note ? 'info' : 'success');
       await load();
     } catch (err: any) {
@@ -122,8 +122,8 @@
     <label class="muted hold" title={tr('online.disconnect_hint')}>
       {tr('online.hold_for')}
       <select bind:value={holdMinutes} data-testid="hold">
-        <option value={1}>1 min</option><option value={5}>5 min</option>
-        <option value={30}>30 min</option><option value={60}>1 h</option><option value={1440}>24 h</option>
+        {#each [1, 5, 30] as m}<option value={m}>{tr('online.hold_minutes', { n: m })}</option>{/each}
+        {#each [1, 24] as h}<option value={h * 60}>{tr('online.hold_hours', { n: h })}</option>{/each}
       </select>
     </label>
     <span class="muted" data-testid="summary">

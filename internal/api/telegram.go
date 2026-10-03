@@ -5,9 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/forgepanel/forgepanel/internal/backup"
 	"github.com/forgepanel/forgepanel/internal/protocol/keygen"
 	"github.com/forgepanel/forgepanel/internal/store"
+	"github.com/forgepanel/forgepanel/internal/telegram"
 )
 
 const gbBytes = 1024 * 1024 * 1024
@@ -36,7 +39,84 @@ func (d tgPanelData) SubURLForToken(token string) (string, bool) {
 	if _, err := d.s.db.UserBySubToken(token); err != nil {
 		return "", false
 	}
-	return "/sub/" + token, true
+	return d.s.publicSubURL(token), true
+}
+
+// publicSubURL is the subscription URL a customer can open from a chat. The bot
+// used to answer with the bare path, which no phone can import.
+func (s *Server) publicSubURL(token string) string {
+	path := "/sub/" + token
+	if s.cfg == nil || s.cfg.Panel() == nil {
+		return path
+	}
+	if pa := s.cfg.PaaS(); pa.Enabled && pa.Domain == "" {
+		return path // no public address exists yet; the path is all there is
+	}
+	base := strings.TrimSuffix(s.PublicURL(), s.cfg.Panel().AdminPath)
+	return strings.TrimSuffix(base, "/") + path
+}
+
+// --- customers (telegram.CustomerData) ------------------------------------
+
+func (d tgPanelData) LinkChat(token string, chatID int64) (string, error) {
+	u, err := d.s.db.UserBySubToken(token)
+	if err != nil {
+		return "", fmt.Errorf("this invite link does not belong to any account")
+	}
+	if u.SubRevoked != nil {
+		return "", fmt.Errorf("this subscription has been revoked")
+	}
+	if u.TelegramID == chatID {
+		return u.Username, nil
+	}
+	if u.TelegramID != 0 {
+		return "", fmt.Errorf("this account is already linked to another Telegram account; ask your provider to unlink it")
+	}
+	// One chat, one account: a customer who opens a new invite moves over to it.
+	if prev, err := d.s.db.UserByTelegramID(chatID); err == nil && prev.ID != u.ID {
+		if err := d.s.db.UpdateUserFields(prev.ID, map[string]any{"telegram_id": 0}, time.Time{}); err != nil {
+			return "", err
+		}
+	}
+	if err := d.s.db.UpdateUserFields(u.ID, map[string]any{"telegram_id": chatID}, time.Time{}); err != nil {
+		return "", err
+	}
+	d.s.db.Audit(&store.AuditLog{Actor: "telegram", Action: "user.telegram_link", Target: u.Username})
+	return u.Username, nil
+}
+
+func (d tgPanelData) CustomerByChat(chatID int64) (telegram.Customer, bool) {
+	if chatID == 0 {
+		return telegram.Customer{}, false
+	}
+	u, err := d.s.db.UserByTelegramID(chatID)
+	if err != nil {
+		return telegram.Customer{}, false
+	}
+	c := telegram.Customer{
+		Username: u.Username,
+		Status:   string(u.Status),
+		UsedGB:   float64(u.UsedTraffic) / gbBytes,
+		LimitGB:  float64(u.DataLimit) / gbBytes,
+		SubURL:   d.s.publicSubURL(u.SubToken),
+	}
+	if u.ExpireAt != nil {
+		c.Expiry = u.ExpireAt.UTC().Format("2006-01-02")
+	}
+	return c, true
+}
+
+func (d tgPanelData) LinkedChats() []int64 {
+	ids, _ := d.s.db.LinkedTelegramIDs()
+	return ids
+}
+
+func (d tgPanelData) SubTokenForUser(name string) (string, error) {
+	u, err := d.findUser(name)
+	if err != nil {
+		return "", err
+	}
+	return u.SubToken, nil
 }
 
 // findUser resolves a username to its record through the unique index.
@@ -179,4 +259,24 @@ func (d tgPanelData) MakeBackup() (string, []byte, error) {
 	}
 	name := fmt.Sprintf("forgepanel-%s.fpbk", time.Now().UTC().Format("20060102-150405"))
 	return name, blob, nil
+}
+
+// handleTelegramInvite returns the deep link that links a customer's Telegram
+// account to this user. 409 when no bot is configured.
+func (s *Server) handleTelegramInvite(c *gin.Context) {
+	u, _, ok := s.userOr404(c)
+	if !ok {
+		return
+	}
+	cfg := s.resolveTelegram()
+	if cfg.Token == "" {
+		fail(c, 409, "no Telegram bot is configured")
+		return
+	}
+	link := telegram.New(cfg.Token, nil, nil).InviteLink(u.SubToken)
+	if link == "" {
+		fail(c, 502, "could not read the bot's username from Telegram")
+		return
+	}
+	c.JSON(200, gin.H{"link": link, "linked": u.TelegramID != 0})
 }

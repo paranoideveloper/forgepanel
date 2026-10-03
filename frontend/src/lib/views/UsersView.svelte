@@ -419,6 +419,18 @@
     }
   }
 
+  // The deep link a customer opens to link their Telegram to this account.
+  async function copyTelegramInvite() {
+    if (!mUser) return;
+    try {
+      const r = await apiFetch<{ link: string }>(`/admin/users/${mUser.id}/telegram-invite`);
+      await navigator.clipboard.writeText(r.link);
+      showToast(tr('users.telegram_invite_copied'), 'success');
+    } catch (err: any) {
+      showToast(err.message || tr('users.telegram_invite_failed'), 'error');
+    }
+  }
+
   // --- manage (edit + assign inbounds) ---
   async function openManage(user: User) {
     mUser = user;
@@ -1011,7 +1023,13 @@
       <small>{tr('users.expiry_blank_clears')}</small>
     </label>
     <label>{tr('users.extend_expiry_days_from_now_0')}<input type="number" bind:value={mExpireDays} /></label>
-    <label>{tr('users.telegram_id')}<input bind:value={mTelegramID} data-testid="manage-telegram" /></label>
+    <label>{tr('users.telegram_id')}
+      <span class="tg-row">
+        <input bind:value={mTelegramID} data-testid="manage-telegram" />
+        <button type="button" class="sm" data-testid="telegram-invite" onclick={copyTelegramInvite}
+                title={tr('users.telegram_invite_hint')}>{tr('users.telegram_invite')}</button>
+      </span>
+    </label>
     <label>{tr('users.note')}<input bind:value={mNote} data-testid="manage-note" /></label>
     <label>
       {tr('users.devices_max_addresses_at_once_0')}
@@ -1211,4 +1229,6 @@
   .theme-sample { font-size: 14px; color: var(--fg); word-break: break-word; }
   .theme-meta { font-size: 11px; color: var(--t-6); }
   .theme-meta b { color: var(--ok); font-weight: 600; }
+  .tg-row { display: flex; gap: 6px; align-items: center; }
+  .tg-row input { flex: 1; }
 </style>

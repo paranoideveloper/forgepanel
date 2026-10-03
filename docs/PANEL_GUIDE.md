@@ -258,9 +258,11 @@ immediately**, exactly like an edit from the UI.
 **Commands** — everyone: `/sub <token>`, `/help`. Admins also get: `/stats`,
 `/user <name>`, `/adduser <name>` (returns the new sub token), `/deluser <name>`,
 `/enable <name>` · `/disable <name>`, `/reset <name>` (zero traffic, lifts an
-over-quota cap), `/limit <name> <GB>` (0 = unlimited), `/extend <name> <days>`.
+over-quota cap), `/limit <name> <GB>` (0 = unlimited), `/extend <name> <days>`,
+`/invite <name>` (link a customer's Telegram), `/broadcast <text>`. A customer who
+has opened their invite gets `/me` (status, traffic, expiry) and `/sub`.
 Only the chat IDs in `FORGEPANEL_TELEGRAM_ADMINS` can run the admin commands;
-everyone else is limited to `/sub` and `/help`.
+everyone else is limited to the customer commands.
 
 ## 7.6 Bridges (reverse tunnel into Iran)
 

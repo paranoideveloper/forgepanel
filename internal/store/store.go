@@ -323,6 +323,23 @@ func (s *Store) Counts() (inbounds, users, groups int64, err error) {
 	return inbounds, users, groups, nil
 }
 
+// UserByTelegramID returns the user linked to a Telegram chat. Should an
+// administrator have typed the same id onto several accounts, the oldest wins,
+// so the answer is at least stable.
+func (s *Store) UserByTelegramID(chatID int64) (*User, error) {
+	var u User
+	if err := s.db.Where("telegram_id = ?", chatID).Order("id").First(&u).Error; err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// LinkedTelegramIDs lists every distinct Telegram chat linked to a user.
+func (s *Store) LinkedTelegramIDs() ([]int64, error) {
+	var out []int64
+	return out, s.db.Model(&User{}).Where("telegram_id <> 0").Distinct().Order("telegram_id").Pluck("telegram_id", &out).Error
+}
+
 // UserByID fetches one user.
 func (s *Store) UserByID(id uint) (*User, error) {
 	var u User
