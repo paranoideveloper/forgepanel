@@ -278,7 +278,7 @@ func vmessURI(n *model.Node) (string, error) {
 		"port": strconv.Itoa(n.Port),
 		"id":   n.UUID,
 		"aid":  "0",
-		"scy":  n.Encryption,
+		"scy":  n.VMessClientCipher(),
 		"net":  netForVMess(n.Transport.Network),
 		"type": "none",
 		"host": "",

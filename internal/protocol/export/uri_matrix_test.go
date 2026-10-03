@@ -293,7 +293,7 @@ func TestVMessURIPerTransport(t *testing.T) {
 	t.Run("envelope", func(t *testing.T) {
 		m := decode(t, mustExport(t, base(model.Transport{Network: model.NetTCP}, model.Security{})))
 		for k, want := range map[string]any{"v": "2", "ps": "VM", "add": "1.2.3.4", "port": "443",
-			"id": testUUID, "aid": "0", "scy": "auto", "net": "tcp", "type": "none", "tls": ""} {
+			"id": testUUID, "aid": "0", "scy": "aes-128-gcm", "net": "tcp", "type": "none", "tls": ""} {
 			if m[k] != want {
 				t.Errorf("%q = %v, want %v", k, m[k], want)
 			}

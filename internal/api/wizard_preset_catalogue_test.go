@@ -248,8 +248,9 @@ var _ = time.Second
 // client cannot connect without.
 func assertVMessDialable(t *testing.T, remark, uri string) {
 	t.Helper()
+	// Clients accept the payload with or without "=" padding; so must this.
 	raw, err := base64.StdEncoding.WithPadding(base64.NoPadding).
-		DecodeString(strings.TrimPrefix(uri, "vmess://"))
+		DecodeString(strings.TrimRight(strings.TrimPrefix(uri, "vmess://"), "="))
 	if err != nil {
 		t.Errorf("preset %q: vmess payload is not base64: %v", remark, err)
 		return

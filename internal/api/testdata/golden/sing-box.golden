@@ -13,7 +13,7 @@
   "outbounds": [
     {
       "alter_id": 0,
-      "security": "auto",
+      "security": "aes-128-gcm",
       "server": "a.example.com",
       "server_port": 443,
       "tag": "proxy-2",

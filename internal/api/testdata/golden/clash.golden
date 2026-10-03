@@ -4,7 +4,7 @@ proxies:
     server: a.example.com
     port: 443
     alterId: 0
-    cipher: auto
+    cipher: aes-128-gcm
     network: ws
     tls: true
     udp: true

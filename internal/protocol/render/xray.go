@@ -116,7 +116,7 @@ func xraySettings(n *model.Node, inbound bool) (jobj, error) {
 			return jobj{"clients": []any{jobj{"id": n.UUID, "alterId": 0}}}, nil
 		}
 		return jobj{"vnext": []any{jobj{"address": n.Address, "port": n.Port,
-			"users": []any{jobj{"id": n.UUID, "alterId": 0, "security": firstNonEmpty(n.Encryption, "auto")}}}}}, nil
+			"users": []any{jobj{"id": n.UUID, "alterId": 0, "security": n.VMessClientCipher()}}}}}, nil
 
 	case model.ProtoTrojan:
 		if inbound {
@@ -161,15 +161,16 @@ func xraySettings(n *model.Node, inbound bool) (jobj, error) {
 
 	case model.ProtoWireGuard:
 		w := n.WireGuard
-		s := jobj{
-			"secretKey": w.PrivateKey,
-			"peers": []any{jobj{
-				"publicKey": w.PublicKey, "endpoint": fmt.Sprintf("%s:%d", n.Address, n.Port),
-				"allowedIPs": defaultStrs(w.AllowedIPs, []string{"0.0.0.0/0", "::/0"}),
-			}},
+		peer := jobj{
+			"publicKey": w.PublicKey, "endpoint": fmt.Sprintf("%s:%d", n.Address, n.Port),
+			"allowedIPs": defaultStrs(w.AllowedIPs, []string{"0.0.0.0/0", "::/0"}),
 		}
-		if len(w.LocalAddress) > 0 {
-			s["address"] = w.LocalAddress
+		if w.PreSharedKey != "" {
+			peer["preSharedKey"] = w.PreSharedKey
+		}
+		s := jobj{"secretKey": w.DialerKey(), "peers": []any{peer}}
+		if addr := w.DialerAddress(); len(addr) > 0 {
+			s["address"] = addr
 		}
 		if w.MTU > 0 {
 			s["mtu"] = w.MTU

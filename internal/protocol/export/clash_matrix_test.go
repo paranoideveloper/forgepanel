@@ -74,7 +74,7 @@ func TestClashProxyPerProtocol(t *testing.T) {
 				Encryption: "auto", Transport: model.Transport{Network: model.NetWS, Path: "/vm", Host: "cdn.example.com"},
 				Security: model.Security{Type: model.SecTLS, ServerName: "cdn.example.com", Fingerprint: "chrome"}},
 			check: func(t *testing.T, p map[string]any) {
-				wantKeys(t, p, map[string]any{"type": "vmess", "alterId": 0, "cipher": "auto",
+				wantKeys(t, p, map[string]any{"type": "vmess", "alterId": 0, "cipher": "aes-128-gcm",
 					"network": "ws", "tls": true, "servername": "cdn.example.com", "client-fingerprint": "chrome"})
 				ws := p["ws-opts"].(map[string]any)
 				if ws["path"] != "/vm" {
@@ -90,7 +90,9 @@ func TestClashProxyPerProtocol(t *testing.T) {
 			name: "vmess without an explicit cipher",
 			node: &model.Node{Protocol: model.ProtoVMess, Address: "1.2.3.4", Port: 443, UUID: testUUID},
 			check: func(t *testing.T, p map[string]any) {
-				wantKeys(t, p, map[string]any{"cipher": "auto"})
+				// Never "auto": sing-box-based clients resolve it to no encryption
+				// over TLS, which current servers refuse.
+				wantKeys(t, p, map[string]any{"cipher": "aes-128-gcm"})
 			},
 		},
 		{

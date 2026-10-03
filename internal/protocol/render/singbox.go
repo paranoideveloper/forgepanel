@@ -204,7 +204,7 @@ func singboxProtocol(n *model.Node) (jobj, error) {
 	case model.ProtoVMess:
 		o := jobj{
 			"type": "vmess", "server": n.Address, "server_port": n.Port,
-			"uuid": n.UUID, "security": firstNonEmpty(n.Encryption, "auto"),
+			"uuid": n.UUID, "security": n.VMessClientCipher(),
 			// VMessAEAD only: a non-zero alterId is the legacy MD5 handshake,
 			// which sing-box does not implement at all.
 			"alter_id": 0,
@@ -353,13 +353,13 @@ func singboxProtocol(n *model.Node) (jobj, error) {
 			// A client outbound uses the CLIENT's key (PeerPrivateKey); w.PrivateKey
 			// is the server's and must never be shipped to a client.
 			"type": "wireguard", "server": n.Address, "server_port": n.Port,
-			"private_key": w.PeerPrivateKey, "peer_public_key": w.PublicKey,
+			"private_key": w.DialerKey(), "peer_public_key": w.PublicKey,
 		}
 		if w.PreSharedKey != "" {
 			o["pre_shared_key"] = w.PreSharedKey
 		}
-		if len(w.LocalAddress) > 0 {
-			o["local_address"] = w.LocalAddress
+		if addr := w.DialerAddress(); len(addr) > 0 {
+			o["local_address"] = addr
 		}
 		if w.MTU > 0 {
 			o["mtu"] = w.MTU

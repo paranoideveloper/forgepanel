@@ -1032,7 +1032,7 @@ func (n *Node) Normalize() {
 	case ProtoVMess:
 		n.AlterID = 0 // VMessAEAD only
 		if n.Encryption == "" {
-			n.Encryption = "auto"
+			n.Encryption = "aes-128-gcm" // never "auto": see VMessClientCipher
 		}
 	case ProtoVLESS:
 		if n.Encryption == "" {
@@ -1604,3 +1604,40 @@ func (a *AmneziaWGOptions) validateGeneration() error {
 	}
 	return nil
 }
+
+// VMessClientCipher is the VMess body cipher to put in a CLIENT config.
+//
+// "auto" is not safe to hand out. sing-box resolves it to "zero" — no body
+// encryption — whenever the transport already has TLS, and Xray servers since
+// v26.7.11 refuse unencrypted VMess, so every sing-box-based app that imported
+// a VMess+TLS link failed with the server closing the connection at once.
+// Xray's own "auto" picks AES-128-GCM on hardware with AES instructions, so
+// naming that cipher changes nothing for it and fixes the rest.
+func (n *Node) VMessClientCipher() string {
+	// An explicit choice, "zero" included, is the operator's and is kept.
+	if n.Encryption == "" || n.Encryption == "auto" {
+		return "aes-128-gcm"
+	}
+	return n.Encryption
+}
+
+// DialerKey is the private key a CLIENT dials with. On an inbound the panel
+// serves that is the provisioned client's (PeerPrivateKey); on a node imported
+// from a wireguard:// link it is the link's own key, which the parser puts in
+// PrivateKey. Rendering PrivateKey alone shipped an empty key in every xray
+// subscription — the server's key is blanked before export, as it must be.
+func (w *WireGuardOptions) DialerKey() string {
+	if w.PeerPrivateKey != "" {
+		return w.PeerPrivateKey
+	}
+	return w.PrivateKey
+}
+
+// DialerAddress is the tunnel address a client uses, by the same rule.
+func (w *WireGuardOptions) DialerAddress() []string {
+	if len(w.PeerAddress) > 0 {
+		return w.PeerAddress
+	}
+	return w.LocalAddress
+}
+

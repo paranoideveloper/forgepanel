@@ -36,7 +36,7 @@ func sampleNodes() []*model.Node {
 			Transport: model.Transport{Network: model.NetXHTTP, Path: "/xh", Host: "h.example.com", XHTTPMode: "stream-up"}, Security: tls("example.com"), Remark: "vless-xhttp"},
 		// VMess
 		{Protocol: model.ProtoVMess, Address: "5.6.7.8", Port: 80, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
-			Encryption: "auto", Transport: model.Transport{Network: model.NetWS, Path: "/vm", Host: "vm.example.com"}, Remark: "vmess-ws"},
+			Encryption: "aes-128-gcm", Transport: model.Transport{Network: model.NetWS, Path: "/vm", Host: "vm.example.com"}, Remark: "vmess-ws"},
 		{Protocol: model.ProtoVMess, Address: "5.6.7.8", Port: 443, UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
 			Encryption: "aes-128-gcm", Transport: model.Transport{Network: model.NetTCP}, Security: tls("vm.example.com"), Remark: "vmess-tcp-tls"},
 		// Trojan

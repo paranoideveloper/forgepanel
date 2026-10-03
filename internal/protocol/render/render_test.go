@@ -2086,3 +2086,37 @@ func TestSingboxEndpointRendersEveryPeer(t *testing.T) {
 		t.Errorf("per-peer preshared key was dropped: %v", peers[1])
 	}
 }
+
+// A WireGuard client in the xray format must dial with the CLIENT's key and
+// tunnel address. The subscription blanks the server's PrivateKey before
+// export, so rendering that field shipped an empty secretKey and xray refused
+// the whole config ("key must not be empty").
+func TestXrayWireGuardClientUsesTheProvisionedPeer(t *testing.T) {
+	n := &model.Node{Protocol: model.ProtoWireGuard, Address: "vpn.example.com", Port: 51820,
+		WireGuard: &model.WireGuardOptions{
+			PublicKey: "SERVERPUB", PeerPrivateKey: "CLIENTPRIV", PeerAddress: []string{"10.66.66.2/32"},
+			PreSharedKey: "PSK", ServerAddress: []string{"10.66.66.1/24"},
+		}}
+	s, err := xraySettings(n, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s["secretKey"] != "CLIENTPRIV" {
+		t.Fatalf("secretKey = %v, want the client's key", s["secretKey"])
+	}
+	if a, _ := s["address"].([]string); len(a) != 1 || a[0] != "10.66.66.2/32" {
+		t.Fatalf("address = %v, want the client's tunnel address", s["address"])
+	}
+	peer := s["peers"].([]any)[0].(jobj)
+	if peer["preSharedKey"] != "PSK" || peer["publicKey"] != "SERVERPUB" {
+		t.Fatalf("peer = %v", peer)
+	}
+
+	// An imported wireguard:// node keeps working: its own key is PrivateKey.
+	imp := &model.Node{Protocol: model.ProtoWireGuard, Address: "203.0.113.9", Port: 51820,
+		WireGuard: &model.WireGuardOptions{PrivateKey: "LINKPRIV", PublicKey: "P", LocalAddress: []string{"10.0.0.2/32"}}}
+	s, _ = xraySettings(imp, false)
+	if s["secretKey"] != "LINKPRIV" {
+		t.Fatalf("imported node secretKey = %v", s["secretKey"])
+	}
+}

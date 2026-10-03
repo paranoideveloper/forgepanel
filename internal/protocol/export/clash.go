@@ -67,7 +67,7 @@ func ClashProxy(n *model.Node) (map[string]any, error) {
 		p["type"] = "vmess"
 		p["uuid"] = c.UUID
 		p["alterId"] = c.AlterID
-		p["cipher"] = firstNonEmptyStr(c.Encryption, "auto")
+		p["cipher"] = c.VMessClientCipher()
 		p["udp"] = true
 		if err := clashTransport(c, p); err != nil {
 			return nil, err

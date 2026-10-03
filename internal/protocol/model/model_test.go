@@ -408,8 +408,17 @@ func TestNormalizeProtocolDefaults(t *testing.T) {
 		if n.AlterID != 0 {
 			t.Errorf("alterId = %d, want 0 (VMessAEAD only)", n.AlterID)
 		}
-		if n.Encryption != "auto" {
-			t.Errorf("encryption = %q, want auto", n.Encryption)
+		if n.Encryption != "aes-128-gcm" {
+			t.Errorf("encryption = %q, want aes-128-gcm (never auto, see VMessClientCipher)", n.Encryption)
+		}
+		for _, enc := range []string{"", "auto"} {
+			v := &Node{Protocol: ProtoVMess, Encryption: enc}
+			if got := v.VMessClientCipher(); got != "aes-128-gcm" {
+				t.Errorf("client cipher for stored %q = %q, want aes-128-gcm", enc, got)
+			}
+		}
+		if got := (&Node{Protocol: ProtoVMess, Encryption: "chacha20-poly1305"}).VMessClientCipher(); got != "chacha20-poly1305" {
+			t.Errorf("an explicit cipher was overridden: %q", got)
 		}
 	})
 	t.Run("hysteria2", func(t *testing.T) {
