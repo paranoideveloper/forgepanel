@@ -295,6 +295,9 @@
                    config so one bad inbound cannot take the rest down. Without
                    this badge the operator sees "Enabled", the inbound carries no
                    traffic, and nothing anywhere says why. -->
+              {#if r.node?.sub_hidden}
+                <span class="badge neutral" data-testid="sub-hidden" title={tr('inbound.sub_hidden_hint')}>{tr('inbounds.sub_hidden')}</span>
+              {/if}
               {#if r.enabled && r.not_serving_reason}
                 <span class="badge err" data-testid="not-serving"
                       title="This inbound is enabled but is NOT in the running configuration: {r.not_serving_reason}{r.not_serving_since ? tr('inbounds.since') + new Date(r.not_serving_since).toLocaleString() + ')' : ''}">

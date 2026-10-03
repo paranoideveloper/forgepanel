@@ -812,7 +812,7 @@ func (s *Server) subscriptionNodes(token, hostFromCtx string) []*model.Node {
 			continue
 		}
 		n, err := in.Node()
-		if err != nil {
+		if err != nil || n.SubHidden {
 			continue
 		}
 		stampIdentity(n, u)

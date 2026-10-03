@@ -124,6 +124,7 @@
     values['port'] = node.port ?? 443;
     values['address'] = node.address ?? '';
     values['country'] = node.country ?? '';
+    values['sub_hidden'] = !!node.sub_hidden;
     for (const sec of fieldsFor(schema, proto, transport, security)) {
       for (const f of sec.fields) {
         const v = getPath(node, f.key);
@@ -497,6 +498,11 @@
           </div>
         </div>
       </div>
+
+      <label class="chk sub-hidden" title={tr('inbound.sub_hidden_hint')}>
+        <input type="checkbox" data-testid="field-sub-hidden" bind:checked={values['sub_hidden']} onchange={schedulePreview} />
+        {tr('inbound.sub_hidden')}
+      </label>
 
       {#each sections as sec}
         <div class="section">

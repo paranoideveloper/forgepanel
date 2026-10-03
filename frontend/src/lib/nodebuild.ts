@@ -207,6 +207,9 @@ export function buildNode(
   if (values['country'] !== undefined && String(values['country']).trim() !== '')
     node.country = String(values['country']).trim().toUpperCase();
   else delete node.country;
+  // Kept serving, left out of every subscription and export.
+  if (values['sub_hidden']) node.sub_hidden = true;
+  else delete node.sub_hidden;
   const port = coerce('number', values['port']);
   if (port !== undefined) node.port = port;
 

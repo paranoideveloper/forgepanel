@@ -654,6 +654,11 @@ type Node struct {
 	// link.
 	Egress EgressChain `json:"egress,omitempty"`
 
+	// SubHidden keeps this inbound out of every subscription and client export
+	// while it goes on serving and counting traffic. For an inbound kept for
+	// existing users, a test inbound, or one reached only through a relay.
+	SubHidden bool `json:"sub_hidden,omitempty"`
+
 	// Domain is the single source of truth an operator sets once; it CASCADES to
 	// the SNI, the transport Host / gRPC authority, the exported client address
 	// and certificate selection (see ApplyDomainCascade). Every derived field is

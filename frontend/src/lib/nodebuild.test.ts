@@ -203,3 +203,15 @@ describe('lines fields carry a chain', () => {
     expect(out.egress).toBeUndefined();
   });
 });
+
+describe('buildNode sub_hidden', () => {
+  it('sets the flag when ticked and removes it when cleared', () => {
+    const on = buildNode(schema, 'vless', 'tcp', 'none', { ...values, sub_hidden: true }, null);
+    expect(on.sub_hidden).toBe(true);
+    // Clearing it on an edit must actually clear it: the stored node carries
+    // the flag, and preserving unknown fields must not resurrect it.
+    const off = buildNode(schema, 'vless', 'tcp', 'none', { ...values, sub_hidden: false },
+      { ...storedNode(), sub_hidden: true });
+    expect(off.sub_hidden).toBeUndefined();
+  });
+});
