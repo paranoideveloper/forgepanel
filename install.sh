@@ -400,7 +400,6 @@ require_tools() {
     die "systemd (systemctl) was not found. This installer targets systemd hosts."
   fi
   command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required to verify release assets."
-  command -v file >/dev/null 2>&1 || die "file is required to validate release architecture."
 }
 
 detect_os() {
@@ -1364,14 +1363,21 @@ verify_release_asset() {
   printf '%s  %s\n' "$expected" "$file" | sha256sum -c - >/dev/null
 }
 
+# validate_binary reads the ELF header itself rather than asking `file`, which
+# minimal cloud images do not ship: requiring it stopped every install on a
+# fresh Ubuntu server before anything was downloaded. od is in coreutils.
+#   bytes 0-3  magic 7f 45 4c 46      byte 4   class, 02 = 64-bit
+#   bytes 16-17 e_type (LE), 2 = executable, 3 = position-independent executable
+#   bytes 18-19 e_machine (LE), 3e 00 = x86-64, b7 00 = aarch64
 validate_binary() {
-  local file="$1" desc
+  local file="$1" h
   [[ -s "$file" ]] || return 1
-  desc=$(file -Lb "$file" 2>/dev/null) || return 1
-  [[ "$desc" == *ELF* && "$desc" == *executable* ]] || return 1
+  h=$(od -An -tx1 -N20 -- "$file" 2>/dev/null | tr -d ' \n') || return 1
+  [[ ${#h} -eq 40 && "${h:0:8}" == "7f454c46" && "${h:8:2}" == "02" ]] || return 1
+  [[ "${h:32:4}" == "0200" || "${h:32:4}" == "0300" ]] || return 1
   case "$ARCH" in
-    amd64) [[ "$desc" == *x86-64* ]] ;;
-    arm64) [[ "$desc" == *aarch64* || "$desc" == *ARM\ aarch64* ]] ;;
+    amd64) [[ "${h:36:4}" == "3e00" ]] ;;
+    arm64) [[ "${h:36:4}" == "b700" ]] ;;
     *) return 1 ;;
   esac
 }
