@@ -15,7 +15,7 @@ vi.mock('$lib/components/Toast.svelte', async () => {
 
 function api(settings: any, onPost?: (url: string, body: any) => any) {
   const posts: Array<{ url: string; body: any }> = [];
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string, opts?: any) => {
     const path = String(url);
     if (opts?.method === 'POST') {

@@ -26,7 +26,7 @@ function api(opts: { events?: string[]; rows?: any[]; testFails?: boolean } = {}
   let rows = opts.rows ?? [];
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   let nextID = 100;
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string, init?: any) => {
     const path = String(url);
     const method = init?.method ?? 'GET';

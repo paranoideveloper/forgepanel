@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security — toolchain and dependencies
+
+- **Go 1.25.12 → 1.27.1.** `govulncheck` found six standard-library
+  vulnerabilities the panel's code actually reaches (the HTTPS server, the
+  HTTP client, `encoding/xml` in S3 backup errors, `encoding/asn1` when signing
+  a node's certificate request). After the move: zero reachable. go.mod,
+  every Dockerfile and CI now use Go 1.27.
+- **Every Go dependency at its latest release**, including gin 1.10 → 1.12,
+  golang.org/x/crypto, x/net and x/sys, miekg/dns, and the pure-Go SQLite
+  engine (modernc.org/sqlite 1.23 → 1.60).
+- **Every frontend package at its latest release**: SvelteKit 3,
+  adapter-static 4, Vite 8.3, Vitest 5, Svelte 5.57. SvelteKit 3 reads its
+  configuration from `vite.config.js` (svelte.config.js is gone) and no
+  longer provides `$lib` by itself, so the alias is declared explicitly.
+  TypeScript stays on 6.x: TypeScript 7 is the native compiler and has no
+  JavaScript API, which SvelteKit and svelte-check both still require.
+
 ### Added
 
 - **Traffic used** on the Overview: the total users have consumed (download

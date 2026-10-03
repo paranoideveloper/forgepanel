@@ -32,7 +32,7 @@ const summary = {
 let posted: any[] = [];
 function api(opts: { valid?: boolean; error?: string; fail?: boolean } = {}) {
   posted = [];
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string, o: any = {}) => {
     const path = String(url);
     if (path.includes('/protocols/schema')) return { ok: true, json: async () => schema } as Response;

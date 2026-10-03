@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import NodesView from './NodesView.svelte';
 
 describe('NodesView Component', () => {
   beforeEach(() => {
     (globalThis as any).confirm = () => true;
-    (globalThis as any).navigator = {
+    vi.stubGlobal('navigator', {
       clipboard: {
         writeText: async () => {}
       }
-    };
+    });
   });
 
   it('loads node list (online and offline nodes) and registers node', async () => {

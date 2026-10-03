@@ -31,7 +31,7 @@ const combinations = [
 ];
 
 function api(caps: any = { combinations }) {
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string) => {
     const p = String(url);
     if (p.includes('/protocols/schema')) return { ok: true, json: async () => schema } as Response;

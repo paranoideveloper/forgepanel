@@ -8,7 +8,7 @@
 #
 # ---- build ------------------------------------------------------------------
 # go.mod requires go 1.25; keep this image at or above that.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /src
 

@@ -16,7 +16,7 @@
 # Build from the repository ROOT:
 #   docker build -f deploy/paas/Dockerfile -t forgepanel-paas .
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -60,7 +60,7 @@ RUN VP=github.com/forgepanel/forgepanel/internal/version && \
 # glibc's everywhere else, upstream's release builder included. That one path
 # was the only byte that differed from the pinned build. The runtime image's
 # gcompat provides the glibc loader, which is how the official binary runs too.
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS singbox
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS singbox
 ARG TARGETARCH
 ARG SINGBOX_VERSION=1.14.2
 WORKDIR /src

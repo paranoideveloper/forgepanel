@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import ForgeDNSView from './ForgeDNSView.svelte';
 
@@ -16,7 +16,7 @@ const BUNDLE = {
 describe('ForgeDNSView Component', () => {
   beforeEach(() => {
     (globalThis as any).confirm = () => true;
-    (globalThis as any).navigator = { clipboard: { writeText: async () => {} } };
+    vi.stubGlobal('navigator', { clipboard: { writeText: async () => {} } });
   });
 
   it('loads DNS adapters and zone list using the real fields (zone/enabled)', async () => {

@@ -1,5 +1,5 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": "$app/tsconfig",
 	"compilerOptions": {
 		"allowJs": true,
 		"checkJs": true,
@@ -10,7 +10,18 @@
 		"sourceMap": true,
 		"strict": true,
 		"moduleResolution": "bundler",
-		"types": ["vitest/globals"]
+		"types": [
+			"vitest/globals"
+		]
 	},
-	"exclude": ["src/bun-svelte-plugin.ts", "src/bun-preload.ts"]
+	"exclude": [
+		"src/bun-preload.ts",
+		"src/bun-svelte-plugin.ts",
+		"src/service-worker"
+	],
+	"include": [
+		"src",
+		"test",
+		"*"
+	]
 }

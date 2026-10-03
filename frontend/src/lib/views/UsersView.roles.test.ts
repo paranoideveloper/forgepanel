@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import UsersView from './UsersView.svelte';
 
@@ -24,7 +24,7 @@ function world(opts: {
   deleteGroupConflict?: boolean;
 }) {
   const calls: Call[] = [];
-  (globalThis as any).localStorage = { getItem: () => 'tok', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 'tok', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).confirm = () => true;
   (globalThis as any).fetch = async (url: string, o: any = {}) => {
     const method = o.method ?? 'GET';

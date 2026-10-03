@@ -10,7 +10,7 @@
 #
 # Build from the repository root:
 #   docker build -f test/harness/Dockerfile.tools -t forgepanel-harness-tools .
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 ENV GOTOOLCHAIN=auto
 WORKDIR /src
 

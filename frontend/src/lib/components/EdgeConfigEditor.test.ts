@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import EdgeConfigEditor from './EdgeConfigEditor.svelte';
 
@@ -39,7 +39,7 @@ function mockFetch(putResponse: any = { config: LIVE.config, changed: ['fingerpr
 describe('EdgeConfigEditor', () => {
   beforeEach(() => {
     puts = [];
-    (globalThis as any).localStorage = { getItem: () => 'tok', setItem: () => {}, removeItem: () => {} };
+    vi.stubGlobal('localStorage', { getItem: () => 'tok', setItem: () => {}, removeItem: () => {} });
   });
 
   it('renders every field the Worker reports, not just the ones it knows', async () => {

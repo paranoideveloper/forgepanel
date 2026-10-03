@@ -15,7 +15,7 @@ const schema = {
 };
 
 function api(preview: any, opts: { hang?: boolean } = {}) {
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string, o: any = {}) => {
     const u = String(url);
     if (u.includes('/schema')) return { ok: true, json: async () => schema } as Response;
@@ -61,7 +61,7 @@ describe('InboundForm refuses a save the server will reject', () => {
   });
 
   it('an unreachable preview does not block: it says nothing about the config', async () => {
-    (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+    vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
     (globalThis as any).fetch = async (url: string) => {
       const u = String(url);
       if (u.includes('/schema')) return { ok: true, json: async () => schema } as Response;

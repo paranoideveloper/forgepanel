@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import InboundForm from './InboundForm.svelte';
 
@@ -22,7 +22,7 @@ let bodies: any[] = [];
 
 function api(opts: { breakOnPut?: boolean } = {}) {
   let putCount = 0;
-  (globalThis as any).localStorage = { getItem: () => 't', setItem: () => {}, removeItem: () => {} };
+  vi.stubGlobal('localStorage', { getItem: () => 't', setItem: () => {}, removeItem: () => {} });
   (globalThis as any).fetch = async (url: string, o: any = {}) => {
     const method = o.method ?? 'GET';
     calls.push({ url: String(url), method });
