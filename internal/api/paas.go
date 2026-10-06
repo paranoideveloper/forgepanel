@@ -461,6 +461,15 @@ func (s *Server) applyPaaSAddressing(n *model.Node) {
 	// client really does speak TLS — to the edge — so the link must say so or
 	// the client sends plaintext into an HTTPS listener and is rejected.
 	n.Security = model.Security{Type: model.SecTLS, ServerName: pa.Domain}
+	// WebSocket and HTTPUpgrade are HTTP/1.1 protocols. When the platform edge
+	// offers HTTP/2 (Zerops' *.zerops.app does, and a chrome-fingerprinted
+	// client then negotiates h2), the upgrade handshake dies with an EOF that
+	// looks like a block but is not. Pinning ALPN to http/1.1 on these two
+	// transports makes the client negotiate http/1.1 at the edge, where the
+	// upgrade succeeds. XHTTP is left alone: it runs over h2/h3 by design.
+	if n.Transport.Network == model.NetWS || n.Transport.Network == model.NetHTTPUpgrade {
+		n.Security.ALPN = []string{"http/1.1"}
+	}
 	if n.Transport.Host == "" {
 		n.Transport.Host = pa.Domain
 	}

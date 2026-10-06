@@ -892,3 +892,26 @@ func TestThePanelLearnsItsEdgeFromTheRequestsItReceives(t *testing.T) {
 		})
 	}
 }
+
+// WebSocket and HTTPUpgrade must pin ALPN http/1.1 behind a platform edge, or a
+// chrome-fingerprinted client negotiates h2 with an HTTP/2 edge (Zerops) and
+// the upgrade EOFs. XHTTP keeps the default (it runs over h2/h3).
+func TestPaaSPinsHTTP11ForWebSocketAndHTTPUpgrade(t *testing.T) {
+	s := paasServer(t)
+	for _, net := range []model.Network{model.NetWS, model.NetHTTPUpgrade} {
+		n := &model.Node{Remark: string(net), Protocol: model.ProtoVLESS, Address: "1.2.3.4", Port: 12345,
+			UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
+			Transport: model.Transport{Network: net, Path: "/p"}, Security: model.Security{Type: model.SecNone}}
+		s.applyPaaSAddressing(n)
+		if len(n.Security.ALPN) != 1 || n.Security.ALPN[0] != "http/1.1" {
+			t.Fatalf("%s: ALPN = %v, want [http/1.1]", net, n.Security.ALPN)
+		}
+	}
+	x := &model.Node{Remark: "xhttp", Protocol: model.ProtoVLESS, Address: "1.2.3.4", Port: 12345,
+		UUID: "b831381d-6324-4d53-ad4f-8cda48b30811",
+		Transport: model.Transport{Network: model.NetXHTTP, Path: "/x"}, Security: model.Security{Type: model.SecNone}}
+	s.applyPaaSAddressing(x)
+	if len(x.Security.ALPN) != 0 {
+		t.Fatalf("xhttp ALPN = %v, want none (h2/h3)", x.Security.ALPN)
+	}
+}
